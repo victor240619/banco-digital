@@ -1,0 +1,16 @@
+# Build
+/target/
+*.jar
+*.class
+
+# IDE
+*.iml
+.idea/
+
+# OS
+.DS_Store
+
+# Env files (keep .env.example)
+.env
+.env.local
+.envrc
