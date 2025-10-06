@@ -1,6 +1,8 @@
 package com.bravus.bank.webhook;
 
 import com.bravus.bank.config.BankProperties;
+import com.bravus.bank.db.entity.PaymentEntity;
+import com.bravus.bank.db.repo.PaymentRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.model.Event;
@@ -24,10 +26,12 @@ public class StripeWebhookController {
 
     private final BankProperties properties;
     private final ObjectMapper objectMapper;
+    private final PaymentRepository paymentRepository;
 
-    public StripeWebhookController(BankProperties properties, ObjectMapper objectMapper) {
+    public StripeWebhookController(BankProperties properties, ObjectMapper objectMapper, PaymentRepository paymentRepository) {
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.paymentRepository = paymentRepository;
     }
 
     @PostMapping
@@ -54,6 +58,10 @@ public class StripeWebhookController {
                 PaymentIntent intent = (PaymentIntent) event.getDataObjectDeserializer().getObject().orElse(null);
                 if (intent != null) {
                     log.info("Payment succeeded: {}", intent.getId());
+                    paymentRepository.findByStripePaymentIntentId(intent.getId()).ifPresent(pe -> {
+                        pe.setStatus(intent.getStatus());
+                        paymentRepository.save(pe);
+                    });
                 }
             }
             default -> log.info("Unhandled event type: {}", event.getType());

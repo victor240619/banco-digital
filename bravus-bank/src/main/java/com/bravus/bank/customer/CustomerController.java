@@ -1,5 +1,7 @@
 package com.bravus.bank.customer;
 
+import com.bravus.bank.db.entity.CustomerEntity;
+import com.bravus.bank.db.repo.CustomerRepository;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.stripe.exception.StripeException;
 import com.stripe.model.Customer;
@@ -17,6 +19,12 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/customers")
 public class CustomerController {
+
+    private final CustomerRepository customerRepository;
+
+    public CustomerController(CustomerRepository customerRepository) {
+        this.customerRepository = customerRepository;
+    }
 
     public record CreateCustomerRequest(
             @NotBlank String name,
@@ -42,6 +50,16 @@ public class CustomerController {
                 .build();
 
         Customer customer = Customer.create(params.toMap());
+
+        CustomerEntity entity = new CustomerEntity();
+        entity.setStripeCustomerId(customer.getId());
+        entity.setName(customer.getName());
+        entity.setEmail(customer.getEmail());
+        entity.setType(request.type());
+        entity.setDocument(request.document());
+        entity.setPhone(request.phone());
+        customerRepository.save(entity);
+
         return ResponseEntity.ok(new CreateCustomerResponse(
                 customer.getId(), customer.getName(), customer.getEmail(), request.type()
         ));

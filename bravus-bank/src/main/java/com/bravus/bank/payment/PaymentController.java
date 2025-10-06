@@ -1,6 +1,10 @@
 package com.bravus.bank.payment;
 
 import com.bravus.bank.config.BankProperties;
+import com.bravus.bank.db.entity.CustomerEntity;
+import com.bravus.bank.db.entity.PaymentEntity;
+import com.bravus.bank.db.repo.CustomerRepository;
+import com.bravus.bank.db.repo.PaymentRepository;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.stripe.exception.StripeException;
 import com.stripe.model.PaymentIntent;
@@ -17,9 +21,15 @@ import org.springframework.web.bind.annotation.*;
 public class PaymentController {
 
     private final BankProperties properties;
+    private final PaymentRepository paymentRepository;
+    private final CustomerRepository customerRepository;
 
-    public PaymentController(BankProperties properties) {
+    public PaymentController(BankProperties properties,
+                             PaymentRepository paymentRepository,
+                             CustomerRepository customerRepository) {
         this.properties = properties;
+        this.paymentRepository = paymentRepository;
+        this.customerRepository = customerRepository;
     }
 
     public record CreatePaymentRequest(
@@ -58,6 +68,16 @@ public class PaymentController {
         PaymentIntentCreateParams params = builder.build();
 
         PaymentIntent intent = PaymentIntent.create(params);
+
+        PaymentEntity entity = new PaymentEntity();
+        entity.setStripePaymentIntentId(intent.getId());
+        entity.setGrossAmount(gross);
+        entity.setFeeAmount(fee);
+        entity.setCurrency(properties.getDefaultCurrency());
+        entity.setDescription(request.description());
+        entity.setStatus(intent.getStatus());
+        customerRepository.findByStripeCustomerId(request.customerId()).ifPresent(entity::setCustomer);
+        paymentRepository.save(entity);
 
         return ResponseEntity.ok(new CreatePaymentResponse(
                 intent.getId(), intent.getClientSecret(), gross, fee

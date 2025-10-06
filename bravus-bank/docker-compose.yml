@@ -1,10 +1,28 @@
 version: "3.9"
 services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${DB_NAME:-bravus}
+      POSTGRES_USER: ${DB_USER:-bravus}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-bravus}
+    ports:
+      - "5432:5432"
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   bravus-bank:
     build: .
     ports:
       - "8080:8080"
     environment:
+      - DB_URL=jdbc:postgresql://db:5432/${DB_NAME:-bravus}
+      - DB_USER=${DB_USER:-bravus}
+      - DB_PASSWORD=${DB_PASSWORD:-bravus}
       - STRIPE_API_KEY=${STRIPE_API_KEY}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
       - STRIPE_FEE_PERCENT=${STRIPE_FEE_PERCENT:-10}
@@ -12,3 +30,8 @@ services:
       - STRIPE_CANCEL_URL=${STRIPE_CANCEL_URL:-http://localhost:8080/cancel}
       - STRIPE_CURRENCY=${STRIPE_CURRENCY:-brl}
       - STRIPE_CONNECT=${STRIPE_CONNECT:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  dbdata:

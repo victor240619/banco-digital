@@ -1,6 +1,8 @@
 package com.bravus.bank.transfer;
 
 import com.bravus.bank.config.BankProperties;
+import com.bravus.bank.db.entity.TransferEntity;
+import com.bravus.bank.db.repo.TransferRepository;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.stripe.exception.StripeException;
 import com.stripe.model.Transfer;
@@ -17,9 +19,11 @@ import org.springframework.web.bind.annotation.*;
 public class TransferController {
 
     private final BankProperties properties;
+    private final TransferRepository transferRepository;
 
-    public TransferController(BankProperties properties) {
+    public TransferController(BankProperties properties, TransferRepository transferRepository) {
         this.properties = properties;
+        this.transferRepository = transferRepository;
     }
 
     public record CreateTransferRequest(
@@ -49,6 +53,16 @@ public class TransferController {
                 .build();
 
         Transfer transfer = Transfer.create(params);
+
+        TransferEntity entity = new TransferEntity();
+        entity.setStripeTransferId(transfer.getId());
+        entity.setDestinationAccountId(request.destinationAccountId());
+        entity.setGrossAmount(gross);
+        entity.setFeeAmount(fee);
+        entity.setNetAmount(net);
+        entity.setCurrency(properties.getDefaultCurrency());
+        entity.setDescription(request.description());
+        transferRepository.save(entity);
 
         return ResponseEntity.ok(new CreateTransferResponse(
                 transfer.getId(), gross, fee, net
