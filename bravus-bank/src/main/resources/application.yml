@@ -1,0 +1,15 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: bravus-bank
+
+stripe:
+  apiKey: ${STRIPE_API_KEY:}
+  webhookSecret: ${STRIPE_WEBHOOK_SECRET:}
+  feePercent: ${STRIPE_FEE_PERCENT:10}
+  successUrl: ${STRIPE_SUCCESS_URL:http://localhost:8080/success}
+  cancelUrl: ${STRIPE_CANCEL_URL:http://localhost:8080/cancel}
+  connect: ${STRIPE_CONNECT:false}
+  defaultCurrency: ${STRIPE_CURRENCY:brl}
