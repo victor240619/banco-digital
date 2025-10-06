@@ -2,6 +2,8 @@ package com.bravus.bank.webhook;
 
 import com.bravus.bank.config.BankProperties;
 import com.bravus.bank.db.entity.PaymentEntity;
+import com.bravus.bank.db.entity.AccountEntity;
+import com.bravus.bank.ledger.LedgerService;
 import com.bravus.bank.db.repo.PaymentRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stripe.exception.SignatureVerificationException;
@@ -27,11 +29,13 @@ public class StripeWebhookController {
     private final BankProperties properties;
     private final ObjectMapper objectMapper;
     private final PaymentRepository paymentRepository;
+    private final LedgerService ledgerService;
 
-    public StripeWebhookController(BankProperties properties, ObjectMapper objectMapper, PaymentRepository paymentRepository) {
+    public StripeWebhookController(BankProperties properties, ObjectMapper objectMapper, PaymentRepository paymentRepository, LedgerService ledgerService) {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.paymentRepository = paymentRepository;
+        this.ledgerService = ledgerService;
     }
 
     @PostMapping
@@ -61,6 +65,13 @@ public class StripeWebhookController {
                     paymentRepository.findByStripePaymentIntentId(intent.getId()).ifPresent(pe -> {
                         pe.setStatus(intent.getStatus());
                         paymentRepository.save(pe);
+                        // Credit ledger for the associated customer
+                        String stripeCustomerId = intent.getCustomer();
+                        if (stripeCustomerId != null) {
+                            AccountEntity account = ledgerService.ensureAccountForStripeCustomer(stripeCustomerId, properties.getDefaultCurrency());
+                            long amount = intent.getAmount() == null ? 0L : intent.getAmount();
+                            ledgerService.credit(account, amount, properties.getDefaultCurrency(), "Stripe PaymentIntent succeeded", "PAYMENT_INTENT", intent.getId());
+                        }
                     });
                 }
             }

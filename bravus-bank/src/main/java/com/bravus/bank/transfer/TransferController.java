@@ -2,6 +2,8 @@ package com.bravus.bank.transfer;
 
 import com.bravus.bank.config.BankProperties;
 import com.bravus.bank.db.entity.TransferEntity;
+import com.bravus.bank.db.entity.AccountEntity;
+import com.bravus.bank.ledger.LedgerService;
 import com.bravus.bank.db.repo.TransferRepository;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.stripe.exception.StripeException;
@@ -20,16 +22,19 @@ public class TransferController {
 
     private final BankProperties properties;
     private final TransferRepository transferRepository;
+    private final LedgerService ledgerService;
 
-    public TransferController(BankProperties properties, TransferRepository transferRepository) {
+    public TransferController(BankProperties properties, TransferRepository transferRepository, LedgerService ledgerService) {
         this.properties = properties;
         this.transferRepository = transferRepository;
+        this.ledgerService = ledgerService;
     }
 
     public record CreateTransferRequest(
             @NotBlank String destinationAccountId,
             @NotNull @Min(1) Long amountInCents,
-            String description
+            String description,
+            String fromStripeCustomerId
     ) {}
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -63,6 +68,13 @@ public class TransferController {
         entity.setCurrency(properties.getDefaultCurrency());
         entity.setDescription(request.description());
         transferRepository.save(entity);
+
+        // ledger: debit from customer's account if provided
+        if (request.fromStripeCustomerId() != null && !request.fromStripeCustomerId().isBlank()) {
+            AccountEntity from = ledgerService.ensureAccountForStripeCustomer(request.fromStripeCustomerId(), properties.getDefaultCurrency());
+            // debit gross (including fee). Fee retained by platform implicitly
+            ledgerService.debit(from, gross, properties.getDefaultCurrency(), request.description(), "EXTERNAL_TRANSFER", transfer.getId());
+        }
 
         return ResponseEntity.ok(new CreateTransferResponse(
                 transfer.getId(), gross, fee, net

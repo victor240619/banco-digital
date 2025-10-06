@@ -2,6 +2,8 @@ package com.bravus.bank.customer;
 
 import com.bravus.bank.db.entity.CustomerEntity;
 import com.bravus.bank.db.repo.CustomerRepository;
+import com.bravus.bank.ledger.LedgerService;
+import com.bravus.bank.config.BankProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.stripe.exception.StripeException;
 import com.stripe.model.Customer;
@@ -21,9 +23,13 @@ import java.util.Map;
 public class CustomerController {
 
     private final CustomerRepository customerRepository;
+    private final LedgerService ledgerService;
+    private final BankProperties properties;
 
-    public CustomerController(CustomerRepository customerRepository) {
+    public CustomerController(CustomerRepository customerRepository, LedgerService ledgerService, BankProperties properties) {
         this.customerRepository = customerRepository;
+        this.ledgerService = ledgerService;
+        this.properties = properties;
     }
 
     public record CreateCustomerRequest(
@@ -59,6 +65,8 @@ public class CustomerController {
         entity.setDocument(request.document());
         entity.setPhone(request.phone());
         customerRepository.save(entity);
+        // create default account
+        ledgerService.ensureAccountForStripeCustomer(customer.getId(), properties.getDefaultCurrency());
 
         return ResponseEntity.ok(new CreateCustomerResponse(
                 customer.getId(), customer.getName(), customer.getEmail(), request.type()
