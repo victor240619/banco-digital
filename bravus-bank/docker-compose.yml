@@ -2,6 +2,7 @@ version: "3.9"
 services:
   db:
     image: postgres:15
+    container_name: bravus-postgres
     environment:
       POSTGRES_DB: ${DB_NAME:-bravus}
       POSTGRES_USER: ${DB_USER:-bravus}
@@ -15,10 +16,15 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - bravus-network
+
   bravus-bank:
     build: .
+    container_name: bravus-bank-app
     ports:
       - "8080:8080"
+      - "9000:8080"
     environment:
       - DB_URL=jdbc:postgresql://db:5432/${DB_NAME:-bravus}
       - DB_USER=${DB_USER:-bravus}
@@ -26,12 +32,19 @@ services:
       - STRIPE_API_KEY=${STRIPE_API_KEY}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
       - STRIPE_FEE_PERCENT=${STRIPE_FEE_PERCENT:-10}
-      - STRIPE_SUCCESS_URL=${STRIPE_SUCCESS_URL:-http://localhost:8080/success}
-      - STRIPE_CANCEL_URL=${STRIPE_CANCEL_URL:-http://localhost:8080/cancel}
+      - STRIPE_SUCCESS_URL=${STRIPE_SUCCESS_URL:-http://localhost:3000/success}
+      - STRIPE_CANCEL_URL=${STRIPE_CANCEL_URL:-http://localhost:3000/cancel}
       - STRIPE_CURRENCY=${STRIPE_CURRENCY:-brl}
       - STRIPE_CONNECT=${STRIPE_CONNECT:-false}
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - bravus-network
+
 volumes:
   dbdata:
+
+networks:
+  bravus-network:
+    driver: bridge
