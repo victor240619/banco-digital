@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bravus Bank</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: { base: '#141414', elevated: '#1b2226', card: '#20272b' },
+            neon: { green: '#00d47e', blue: '#2aa8ff', amber: '#ffb400', red: '#ff4d4f' },
+            text: { primary: '#f2f2f2', secondary: '#a3a3a3', muted: '#737373' }
+          },
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui'],
+            mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular']
+          },
+          boxShadow: {
+            neon: '0 0 25px rgba(0,212,126,0.35)'
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body class="min-h-screen bg-[radial-gradient(1200px_600px_at_10%_10%,rgba(42,168,255,0.15),transparent),radial-gradient(900px_500px_at_90%_10%,rgba(0,212,126,0.12),transparent)] bg-bg-base text-text-primary font-sans">
+  <header class="fixed top-0 inset-x-0 h-16 backdrop-blur-xl bg-white/5 border-b border-white/10 flex items-center">
+    <div class="max-w-6xl mx-auto w-full px-6 flex items-center justify-between">
+      <div class="text-xl font-extrabold tracking-wider uppercase">
+        <span class="text-text-secondary">Bravus</span> <span class="text-neon-green drop-shadow-[0_0_12px_rgba(0,212,126,0.8)]">Bank</span>
+      </div>
+      <nav class="hidden md:flex items-center gap-6 text-sm text-text-secondary">
+        <a href="#features" class="hover:text-text-primary">Recursos</a>
+        <a href="#security" class="hover:text-text-primary">Segurança</a>
+        <a href="#plans" class="hover:text-text-primary">Planos</a>
+      </nav>
+      <div class="flex items-center gap-3">
+        <a href="/login.html" class="px-4 py-2 rounded-lg border border-neon-green/40 text-neon-green hover:bg-neon-green hover:text-black transition">Entrar</a>
+        <a href="/register.html" class="px-4 py-2 rounded-lg bg-gradient-to-r from-neon-green to-neon-blue text-black font-bold shadow-neon hover:translate-y-[-2px] transition">Abrir conta</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="pt-24">
+    <section class="max-w-6xl mx-auto px-6 min-h-[70vh] flex items-center">
+      <div class="grid md:grid-cols-2 gap-10 items-center">
+        <div>
+          <h1 class="text-5xl md:text-6xl font-extrabold uppercase leading-tight">
+            Banco digital com <span class="text-neon-green">clareza</span> e <span class="text-neon-blue">velocidade</span>
+          </h1>
+          <p class="mt-6 text-text-secondary max-w-xl">Faça depósitos, saques, transferências e pagamentos com feedback preciso e design cyber aliado à credibilidade bancária.</p>
+          <div class="mt-8 flex gap-4">
+            <a href="/register.html" class="px-6 py-3 rounded-xl bg-gradient-to-r from-neon-green to-neon-blue text-black font-bold shadow-neon">Começar agora</a>
+            <a href="#features" class="px-6 py-3 rounded-xl border border-white/15 text-text-secondary hover:text-text-primary">Ver recursos</a>
+          </div>
+        </div>
+        <div class="relative">
+          <div class="absolute -inset-6 rounded-2xl bg-gradient-to-r from-neon-green/10 to-neon-blue/10 blur-2xl"></div>
+          <div class="relative rounded-2xl border border-white/10 bg-bg-card/60 backdrop-blur-xl p-8 shadow-2xl">
+            <div class="text-sm text-text-secondary uppercase mb-2">Saldo</div>
+            <div class="text-4xl font-extrabold tracking-tight">R$ 12.450,00</div>
+            <div class="mt-6 grid grid-cols-3 gap-4">
+              <a href="/login.html" class="rounded-xl bg-white/5 hover:bg-white/10 p-4 text-center">Depositar</a>
+              <a href="/login.html" class="rounded-xl bg-white/5 hover:bg-white/10 p-4 text-center">Sacar</a>
+              <a href="/login.html" class="rounded-xl bg-white/5 hover:bg-white/10 p-4 text-center">Transferir</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="py-16">
+      <div class="max-w-6xl mx-auto px-6 grid md:grid-cols-3 gap-6">
+        <div class="rounded-xl border border-white/10 bg-bg-card/60 backdrop-blur-xl p-6">
+          <h3 class="text-xl font-bold mb-2">Transações com precisão</h3>
+          <p class="text-text-secondary">Dados financeiros com hierarquia clara e feedback em tempo real.</p>
+        </div>
+        <div class="rounded-xl border border-white/10 bg-bg-card/60 backdrop-blur-xl p-6">
+          <h3 class="text-xl font-bold mb-2">Visual cyber</h3>
+          <p class="text-text-secondary">Neons e glassmorphism sem comprometer a usabilidade.</p>
+        </div>
+        <div class="rounded-xl border border-white/10 bg-bg-card/60 backdrop-blur-xl p-6">
+          <h3 class="text-xl font-bold mb-2">Segurança</h3>
+          <p class="text-text-secondary">Autenticação JWT e conformidade com boas práticas.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
