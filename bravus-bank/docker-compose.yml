@@ -18,7 +18,7 @@ services:
   bravus-bank:
     build: .
     ports:
-      - "8080:8080"
+      - "9000:9000"
     environment:
       - DB_URL=jdbc:postgresql://db:5432/${DB_NAME:-bravus}
       - DB_USER=${DB_USER:-bravus}
