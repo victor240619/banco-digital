@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Registrar - Bravus Bank</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: { bg: { base: '#141414', elevated: '#1b2226', card: '#20272b' }, neon: { green: '#00d47e', blue: '#2aa8ff', amber: '#ffb400', red: '#ff4d4f' }, text: { primary: '#f2f2f2', secondary: '#a3a3a3', muted: '#737373' } }, fontFamily: { sans: ['Inter'], mono: ['JetBrains Mono'] } } } }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body class="min-h-screen bg-bg-base text-text-primary font-sans flex items-center justify-center p-6">
+  <div class="w-full max-w-md rounded-2xl border border-white/10 bg-bg-card/70 backdrop-blur-xl p-8 shadow-2xl">
+    <h1 class="text-2xl font-extrabold uppercase mb-6">Abrir conta</h1>
+    <form id="registerForm" class="space-y-4">
+      <div>
+        <label class="block text-xs uppercase text-text-secondary mb-2">Usuário</label>
+        <input id="username" class="w-full px-4 py-3 rounded-lg bg-[#1a1f23] border border-white/10 focus:outline-none focus:ring-2 focus:ring-neon-green" />
+      </div>
+      <div>
+        <label class="block text-xs uppercase text-text-secondary mb-2">E-mail</label>
+        <input id="email" type="email" class="w-full px-4 py-3 rounded-lg bg-[#1a1f23] border border-white/10 focus:outline-none focus:ring-2 focus:ring-neon-green" />
+      </div>
+      <div>
+        <label class="block text-xs uppercase text-text-secondary mb-2">Nome completo</label>
+        <input id="fullName" class="w-full px-4 py-3 rounded-lg bg-[#1a1f23] border border-white/10 focus:outline-none focus:ring-2 focus:ring-neon-green" />
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs uppercase text-text-secondary mb-2">CPF</label>
+          <input id="cpf" class="w-full px-4 py-3 rounded-lg bg-[#1a1f23] border border-white/10 focus:outline-none focus:ring-2 focus:ring-neon-green" />
+        </div>
+        <div>
+          <label class="block text-xs uppercase text-text-secondary mb-2">Telefone</label>
+          <input id="phone" class="w-full px-4 py-3 rounded-lg bg-[#1a1f23] border border-white/10 focus:outline-none focus:ring-2 focus:ring-neon-green" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs uppercase text-text-secondary mb-2">Senha</label>
+        <input id="password" type="password" class="w-full px-4 py-3 rounded-lg bg-[#1a1f23] border border-white/10 focus:outline-none focus:ring-2 focus:ring-neon-green" />
+      </div>
+      <button class="w-full px-4 py-3 rounded-lg bg-gradient-to-r from-neon-green to-neon-blue text-black font-bold">Criar conta</button>
+    </form>
+    <p class="mt-4 text-sm text-text-secondary">Já tem conta? <a class="text-neon-blue" href="/login.html">Entrar</a></p>
+  </div>
+  <script src="/js/app.js"></script>
+  <script>
+    const form = document.getElementById('registerForm');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const payload = {
+        username: document.getElementById('username').value,
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value,
+        fullName: document.getElementById('fullName').value,
+        cpf: document.getElementById('cpf').value,
+        phone: document.getElementById('phone').value
+      };
+      try {
+        const res = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        BB.setToken(data.token);
+        BB.neonToast('Conta criada!','success');
+        location.href = '/dashboard.html';
+      } catch (err) {
+        BB.neonToast(err.message || 'Erro ao registrar', 'error');
+      }
+    });
+  </script>
+</body>
+</html>

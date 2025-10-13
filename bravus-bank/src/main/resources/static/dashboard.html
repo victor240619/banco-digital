@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard - Bravus Bank</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: { bg: { base: '#141414', elevated: '#1b2226', card: '#20272b' }, neon: { green: '#00d47e', blue: '#2aa8ff', amber: '#ffb400', red: '#ff4d4f' }, text: { primary: '#f2f2f2', secondary: '#a3a3a3', muted: '#737373' } }, fontFamily: { sans: ['Inter'], mono: ['JetBrains Mono'] } } } }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body class="min-h-screen bg-bg-base text-text-primary font-sans">
+  <header class="sticky top-0 inset-x-0 h-16 backdrop-blur-xl bg-white/5 border-b border-white/10 flex items-center">
+    <div class="max-w-6xl mx-auto w-full px-6 flex items-center justify-between">
+      <div class="text-xl font-extrabold tracking-wider uppercase">
+        <span class="text-text-secondary">Bravus</span> <span class="text-neon-green drop-shadow-[0_0_12px_rgba(0,212,126,0.8)]">Bank</span>
+      </div>
+      <nav class="hidden md:flex items-center gap-6 text-sm text-text-secondary">
+        <a href="/dashboard.html" class="hover:text-text-primary">Início</a>
+        <a href="/dashboard.html#transactions" class="hover:text-text-primary">Transações</a>
+        <a href="/dashboard.html#profile" class="hover:text-text-primary">Perfil</a>
+      </nav>
+      <div class="flex items-center gap-3">
+        <button id="logoutBtn" class="px-4 py-2 rounded-lg border border-white/10 text-text-secondary hover:text-text-primary">Sair</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8">
+    <section class="grid md:grid-cols-3 gap-6">
+      <div class="md:col-span-2 rounded-2xl border border-white/10 bg-bg-card/70 backdrop-blur-xl p-8 shadow-2xl">
+        <div class="text-sm text-text-secondary uppercase mb-2">Saldo</div>
+        <div id="balance" class="text-4xl font-extrabold tracking-tight font-mono">R$ --</div>
+        <div class="mt-6 grid grid-cols-3 gap-4">
+          <button id="depositBtn" class="rounded-xl bg-gradient-to-r from-neon-green to-neon-blue text-black font-bold p-4">Depositar</button>
+          <button id="withdrawBtn" class="rounded-xl bg-white/5 hover:bg-white/10 p-4">Sacar</button>
+          <button id="transferBtn" class="rounded-xl bg-white/5 hover:bg-white/10 p-4">Transferir</button>
+        </div>
+      </div>
+      <div class="rounded-2xl border border-white/10 bg-bg-card/70 backdrop-blur-xl p-8 shadow-2xl">
+        <div class="text-sm text-text-secondary uppercase mb-2">Perfil</div>
+        <div id="profile" class="text-text-secondary text-sm">Carregando...</div>
+      </div>
+    </section>
+
+    <section id="transactions" class="mt-10 rounded-2xl border border-white/10 bg-bg-card/70 backdrop-blur-xl p-8 shadow-2xl">
+      <div class="flex items-center justify-between">
+        <h3 class="text-xl font-bold">Transações recentes</h3>
+      </div>
+      <div id="txlist" class="mt-4 divide-y divide-white/5"></div>
+    </section>
+  </main>
+
+  <script src="/js/app.js"></script>
+  <script>
+    async function load() {
+      try {
+        const [balanceRes, profileRes, txRes] = await Promise.all([
+          BB.authFetch('/api/user/balance'),
+          BB.authFetch('/api/user/profile'),
+          BB.authFetch('/api/user/transactions')
+        ]);
+        const balance = await balanceRes.json();
+        const profile = await profileRes.json();
+        const txs = await txRes.json();
+
+        document.getElementById('balance').textContent = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(balance / 100);
+
+        document.getElementById('profile').innerHTML = `
+          <div class="space-y-1">
+            <div><span class="text-text-muted">Conta:</span> <span class="font-mono">${profile.accountNumber}</span></div>
+            <div><span class="text-text-muted">Nome:</span> ${profile.fullName}</div>
+            <div><span class="text-text-muted">Email:</span> ${profile.email}</div>
+          </div>`;
+
+        const list = document.getElementById('txlist');
+        list.innerHTML = txs.map(t => `
+          <div class="py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <span class="w-2 h-2 rounded-full ${t.type.includes('DEPOSIT') ? 'bg-neon-green' : t.type.includes('WITHDRAWAL') ? 'bg-red-500' : 'bg-neon-blue'}"></span>
+              <div>
+                <div class="font-medium">${t.type.replace('_',' ')}</div>
+                <div class="text-text-secondary text-sm">${t.description || ''}</div>
+              </div>
+            </div>
+            <div class="font-mono">${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(t.amount / 100)}</div>
+          </div>
+        `).join('');
+      } catch (e) {
+        BB.neonToast('Sessão expirada, entre novamente', 'error');
+        location.href = '/login.html';
+      }
+    }
+
+    document.getElementById('logoutBtn').addEventListener('click', () => { localStorage.removeItem('bb_token'); location.href='/'; });
+
+    document.getElementById('depositBtn').addEventListener('click', async () => {
+      const amount = prompt('Valor em centavos (ex: 1000 = R$10,00)');
+      if (!amount) return;
+      const res = await BB.authFetch('/api/user/deposit', { method: 'POST', body: JSON.stringify({ type: 'DEPOSIT', amount: parseInt(amount) }) });
+      if (res.ok) { BB.neonToast('Depósito realizado', 'success'); load(); } else { BB.neonToast(await res.text(), 'error'); }
+    });
+    document.getElementById('withdrawBtn').addEventListener('click', async () => {
+      const amount = prompt('Valor em centavos');
+      if (!amount) return;
+      const res = await BB.authFetch('/api/user/withdraw', { method: 'POST', body: JSON.stringify({ type: 'WITHDRAWAL', amount: parseInt(amount) }) });
+      if (res.ok) { BB.neonToast('Saque realizado', 'success'); load(); } else { BB.neonToast(await res.text(), 'error'); }
+    });
+    document.getElementById('transferBtn').addEventListener('click', async () => {
+      const destination = prompt('Conta destino');
+      const amount = prompt('Valor em centavos');
+      if (!destination || !amount) return;
+      const res = await BB.authFetch('/api/user/transfer', { method: 'POST', body: JSON.stringify({ type: 'TRANSFER_OUT', amount: parseInt(amount), destinationAccount: destination }) });
+      if (res.ok) { BB.neonToast('Transferência enviada', 'success'); load(); } else { BB.neonToast(await res.text(), 'error'); }
+    });
+
+    load();
+  </script>
+</body>
+</html>
