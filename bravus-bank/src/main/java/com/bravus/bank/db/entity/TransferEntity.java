@@ -6,6 +6,9 @@ import java.time.OffsetDateTime;
 @Entity
 @Table(name = "transfers")
 public class TransferEntity {
+    
+    @Version
+    private Long version;
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -53,4 +56,7 @@ public class TransferEntity {
     public void setCurrency(String currency) { this.currency = currency; }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
+    
+    public Long getVersion() { return version; }
+    public void setVersion(Long version) { this.version = version; }
 }

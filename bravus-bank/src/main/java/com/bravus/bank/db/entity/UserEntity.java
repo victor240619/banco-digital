@@ -9,6 +9,9 @@ import java.util.Set;
 @Table(name = "users")
 public class UserEntity {
     
+    @Version
+    private Long version;
+    
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -109,4 +112,7 @@ public class UserEntity {
     
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
+    
+    public Long getVersion() { return version; }
+    public void setVersion(Long version) { this.version = version; }
 }
