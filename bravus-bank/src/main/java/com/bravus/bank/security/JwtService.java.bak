@@ -16,7 +16,7 @@ import java.util.function.Function;
 @Service
 public class JwtService {
     
-    private static final String SECRET_KEY = System.getenv().getOrDefault("JWT_SECRET", "bravus-bank-super-secret-key-for-jwt-token-generation-2024-please-change-in-production");
+    private static final String SECRET_KEY = "bravus-bank-super-secret-key-for-jwt-token-generation-2024-please-change-in-production";
     private static final long EXPIRATION_TIME = 86400000; // 24 hours
     
     public String extractUsername(String token) {
