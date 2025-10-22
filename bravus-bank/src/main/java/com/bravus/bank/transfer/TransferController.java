@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.stripe.exception.StripeException;
 import com.stripe.model.Transfer;
 import com.stripe.param.TransferCreateParams;
+import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -36,6 +37,7 @@ public class TransferController {
     public record CreateTransferResponse(String transferId, Long grossAmount, Long feeAmount, Long netAmount) {}
 
     @PostMapping
+    @Transactional
     public ResponseEntity<?> create(@RequestBody @Valid CreateTransferRequest request) throws StripeException {
         long gross = request.amountInCents();
         long fee = Math.round(gross * (properties.getFeePercent() / 100.0));

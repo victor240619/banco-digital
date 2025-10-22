@@ -19,6 +19,18 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+jwt:
+  secret: ${JWT_SECRET}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
 stripe:
   apiKey: ${STRIPE_API_KEY:}
   webhookSecret: ${STRIPE_WEBHOOK_SECRET:}

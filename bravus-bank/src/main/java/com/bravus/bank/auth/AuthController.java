@@ -5,6 +5,7 @@ import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.RoleRepository;
 import com.bravus.bank.db.repo.UserRepository;
 import com.bravus.bank.security.JwtService;
+import com.bravus.bank.validator.PasswordValidator;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -17,13 +18,13 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.SecureRandom;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "*")
 public class AuthController {
     
     private final UserRepository userRepository;
@@ -32,6 +33,7 @@ public class AuthController {
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
     private final UserDetailsService userDetailsService;
+    private final SecureRandom secureRandom = new SecureRandom();
     
     public AuthController(
             UserRepository userRepository,
@@ -105,6 +107,11 @@ public class AuthController {
     
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody @Valid RegisterRequest request) {
+        // Validate password strength
+        if (!PasswordValidator.isValid(request.password())) {
+            return ResponseEntity.badRequest().body(PasswordValidator.getRequirements());
+        }
+        
         // Validate unique fields
         if (userRepository.existsByUsername(request.username())) {
             return ResponseEntity.badRequest().body("Username already exists");
@@ -162,7 +169,9 @@ public class AuthController {
     private String generateAccountNumber() {
         String accountNumber;
         do {
-            accountNumber = String.format("%010d", (long) (Math.random() * 10000000000L));
+            // Generate cryptographically secure random account number
+            long randomNumber = Math.abs(secureRandom.nextLong()) % 10000000000L;
+            accountNumber = String.format("%010d", randomNumber);
         } while (userRepository.existsByAccountNumber(accountNumber));
         return accountNumber;
     }

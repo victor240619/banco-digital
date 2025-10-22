@@ -7,6 +7,9 @@ import java.time.OffsetDateTime;
 @Table(name = "transactions")
 public class TransactionEntity {
     
+    @Version
+    private Long version;
+    
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -61,4 +64,7 @@ public class TransactionEntity {
     
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
+    
+    public Long getVersion() { return version; }
+    public void setVersion(Long version) { this.version = version; }
 }

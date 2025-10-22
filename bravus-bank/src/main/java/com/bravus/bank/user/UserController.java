@@ -4,6 +4,7 @@ import com.bravus.bank.db.entity.TransactionEntity;
 import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.TransactionRepository;
 import com.bravus.bank.db.repo.UserRepository;
+import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -17,7 +18,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/user")
-@CrossOrigin(origins = "*")
 public class UserController {
     
     private final UserRepository userRepository;
@@ -109,6 +109,7 @@ public class UserController {
     }
     
     @PostMapping("/deposit")
+    @Transactional
     public ResponseEntity<?> deposit(@RequestBody @Valid TransactionRequest request) {
         if (!"DEPOSIT".equals(request.type())) {
             return ResponseEntity.badRequest().body("Invalid transaction type");
@@ -135,6 +136,7 @@ public class UserController {
     }
     
     @PostMapping("/withdraw")
+    @Transactional
     public ResponseEntity<?> withdraw(@RequestBody @Valid TransactionRequest request) {
         if (!"WITHDRAWAL".equals(request.type())) {
             return ResponseEntity.badRequest().body("Invalid transaction type");
@@ -165,6 +167,7 @@ public class UserController {
     }
     
     @PostMapping("/transfer")
+    @Transactional
     public ResponseEntity<?> transfer(@RequestBody @Valid TransactionRequest request) {
         if (!"TRANSFER_OUT".equals(request.type())) {
             return ResponseEntity.badRequest().body("Invalid transaction type");

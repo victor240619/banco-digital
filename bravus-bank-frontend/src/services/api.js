@@ -9,29 +9,55 @@ const api = axios.create({
   },
 });
 
-// Add auth token to requests
+// Add auth token to requests and loading state
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    // Add loading state
+    if (window.setGlobalLoading) {
+      window.setGlobalLoading(true);
+    }
     return config;
   },
   (error) => {
+    if (window.setGlobalLoading) {
+      window.setGlobalLoading(false);
+    }
     return Promise.reject(error);
   }
 );
 
-// Handle 401 errors
+// Handle 401 errors and loading state
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (window.setGlobalLoading) {
+      window.setGlobalLoading(false);
+    }
+    return response;
+  },
   (error) => {
+    if (window.setGlobalLoading) {
+      window.setGlobalLoading(false);
+    }
+    
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
     }
+    
+    // Set global error message
+    if (window.setGlobalError) {
+      const errorMessage = error.response?.data?.message || 
+                          error.response?.data || 
+                          error.message || 
+                          'An error occurred';
+      window.setGlobalError(errorMessage);
+    }
+    
     return Promise.reject(error);
   }
 );
