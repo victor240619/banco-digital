@@ -27,6 +27,3 @@ stripe:
   cancelUrl: ${STRIPE_CANCEL_URL:http://localhost:8080/cancel}
   connect: ${STRIPE_CONNECT:false}
   defaultCurrency: ${STRIPE_CURRENCY:brl}
-
-jwt:
-  secret: ${JWT_SECRET:}
