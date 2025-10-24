@@ -17,6 +17,6 @@ WORKDIR /usr/share/nginx/html
 RUN rm -rf ./*
 COPY --from=build /app/dist .
 # Use a default nginx config suitable for single-page apps
-COPY --from=build /app/nginx.conf /etc/nginx/conf.d/default.conf 2>/dev/null || true
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
