@@ -20,7 +20,7 @@ spring:
     locations: classpath:db/migration
 
 stripe:
-  apiKey: ${STRIPE_API_KEY:}
+  apiKey: ${STRIPE_API_KEY:${STRIPE_SECRET_KEY:}}
   webhookSecret: ${STRIPE_WEBHOOK_SECRET:}
   feePercent: ${STRIPE_FEE_PERCENT:10}
   successUrl: ${STRIPE_SUCCESS_URL:http://localhost:8080/success}

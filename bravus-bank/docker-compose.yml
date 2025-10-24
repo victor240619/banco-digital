@@ -19,9 +19,10 @@ services:
     build: .
     ports:
       - "9000:9000"
+    env_file:
+      - ./.env
     environment:
       - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:5173}
-      - JWT_SECRET=${JWT_SECRET}
       - DB_URL=jdbc:postgresql://db:5432/${DB_NAME:-bravus}
       - DB_USER=${DB_USER:-bravus}
       - DB_PASSWORD=${DB_PASSWORD:-bravus}
@@ -40,6 +41,7 @@ services:
       context: ../bravus-bank-frontend
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:9000/api}
+        VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY:-}
     ports:
       - "5173:80"
     depends_on:

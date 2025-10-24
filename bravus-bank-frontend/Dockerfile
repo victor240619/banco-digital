@@ -5,7 +5,9 @@ COPY package*.json ./
 RUN npm ci --no-audit --no-fund
 # Vite reads env vars prefixed with VITE_ at build time
 ARG VITE_API_URL
+ARG VITE_STRIPE_PUBLISHABLE_KEY
 ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_STRIPE_PUBLISHABLE_KEY=${VITE_STRIPE_PUBLISHABLE_KEY}
 COPY . .
 RUN npm run build
 
