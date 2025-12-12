@@ -16,12 +16,14 @@ public class PlanController {
     @GetMapping
     public ResponseEntity<List<Map<String, Object>>> list() {
         List<Map<String, Object>> plans = Arrays.stream(PricingPlan.values())
-                .map(p -> Map.of(
-                        "code", p.getCode(),
-                        "amount", p.getAmountInCents(),
-                        "currency", "BRL",
-                        "description", p.getDescription()
-                )).toList();
+                .map(p -> {
+                    Map<String, Object> planMap = new java.util.HashMap<>();
+                    planMap.put("code", p.getCode());
+                    planMap.put("amount", p.getAmountInCents());
+                    planMap.put("currency", "BRL");
+                    planMap.put("description", p.getDescription());
+                    return planMap;
+                }).toList();
         return ResponseEntity.ok(plans);
     }
 }
