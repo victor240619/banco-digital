@@ -8,11 +8,21 @@ const api = axios.create({
   timeout: 20000,
 });
 
+// Endpoints públicos — não devem receber Authorization (token velho gera 403)
+const PUBLIC_PATHS = ['/auth/login', '/auth/register'];
+
 // ====== Interceptors ======
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+    const url = (config.url || '').replace(/^\/+/, '/');
+    const isPublic = PUBLIC_PATHS.some((p) => url.startsWith(p));
+    if (isPublic) {
+      // garante que NUNCA enviamos token em endpoints públicos
+      if (config.headers && config.headers.Authorization) delete config.headers.Authorization;
+    } else {
+      const token = localStorage.getItem('token');
+      if (token) config.headers.Authorization = `Bearer ${token}`;
+    }
     if (window.setGlobalLoading) window.setGlobalLoading(true);
     return config;
   },
@@ -30,7 +40,12 @@ api.interceptors.response.use(
   (error) => {
     if (window.setGlobalLoading) window.setGlobalLoading(false);
 
-    if (error.response && error.response.status === 401) {
+    const status = error?.response?.status;
+    const url = (error?.config?.url || '');
+    const isPublic = PUBLIC_PATHS.some((p) => url.includes(p));
+
+    // Token inválido em endpoint protegido: limpa e redireciona
+    if ((status === 401 || status === 403) && !isPublic) {
       const onAuthPage = ['/login', '/register'].some((p) => window.location.pathname.startsWith(p));
       localStorage.removeItem('token');
       localStorage.removeItem('user');
@@ -43,6 +58,9 @@ api.interceptors.response.use(
 // ====== Auth ======
 export const authService = {
   login: async (username, password) => {
+    // garante que login parte sem token sujo no storage
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
     const { data } = await api.post('/auth/login', { username, password });
     if (data.token) {
       localStorage.setItem('token', data.token);
@@ -51,6 +69,8 @@ export const authService = {
     return data;
   },
   register: async (userData) => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
     const { data } = await api.post('/auth/register', userData);
     if (data.token) {
       localStorage.setItem('token', data.token);

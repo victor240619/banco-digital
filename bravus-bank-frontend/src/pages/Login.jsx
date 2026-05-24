@@ -1,105 +1,99 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Lock, User, ArrowRight, ShieldCheck } from 'lucide-react';
 import { authService } from '../services/api';
+import { IconShield, IconArrow } from '../components/Icon';
 
 export default function Login() {
-  const navigate = useNavigate();
-  const [formData, setFormData] = useState({ username: '', password: '' });
-  const [error, setError] = useState('');
+  const nav = useNavigate();
+  const [form, setForm] = useState({ username: '', password: '' });
+  const [err, setErr] = useState('');
+  const [debug, setDebug] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
-
-  const handleSubmit = async (e) => {
+  const onSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setLoading(true);
+    setErr(''); setDebug(''); setLoading(true);
     try {
-      const response = await authService.login(formData.username, formData.password);
-      const roles = Array.isArray(response?.roles) ? response.roles : [];
-      const isAdmin = roles.includes('ROLE_ADMIN');
-      navigate(isAdmin ? '/admin' : '/dashboard', { replace: true });
-    } catch (err) {
-      const msg = err?.response?.data?.message || err?.response?.data || 'Credenciais inválidas. Tente novamente.';
-      setError(typeof msg === 'string' ? msg : 'Erro ao fazer login.');
-    } finally {
-      setLoading(false);
-    }
+      const r = await authService.login(form.username.trim(), form.password);
+      setDebug(`OK token=${(r?.token||'').slice(0,18)}... roles=${JSON.stringify(r?.roles)}`);
+      const admin = (r?.roles || []).includes('ROLE_ADMIN');
+      // pequena espera pra garantir que o localStorage está consistente antes de navegar
+      setTimeout(() => nav(admin ? '/admin' : '/dashboard', { replace: true }), 200);
+    } catch (e2) {
+      const status = e2?.response?.status;
+      const m = e2?.response?.data;
+      const msg = typeof m === 'string' ? m : (m?.message || e2?.message || 'Credenciais inválidas.');
+      setErr(`[${status||'NET'}] ${msg}`);
+      setDebug(`URL=${e2?.config?.url||'?'} code=${e2?.code||'?'} msg=${e2?.message||'?'}`);
+    } finally { setLoading(false); }
   };
 
   return (
-    <main className="container-app py-16 sm:py-20">
-      <motion.div
-        initial={{ opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45 }}
-        className="mx-auto max-w-md"
-      >
-        <div className="card-premium p-8 sm:p-10">
-          <div className="mb-7">
-            <div className="pill-gold mb-3"><ShieldCheck className="h-3.5 w-3.5" /> Acesso seguro</div>
-            <h1 className="title-md">Bem-vindo de volta</h1>
-            <p className="mt-1.5 text-sm text-ink-300">Acesse sua conta Bravus Bank.</p>
-          </div>
+    <div className="min-h-screen flex flex-col items-center justify-center bg-bg px-4 py-8">
+      <div className="text-center mb-7">
+        <div className="logo-tx text-[42px]" style={{ letterSpacing: '7px' }}>BRAVUS</div>
+        <div className="text-[10px] tracking-[3px] uppercase text-text2 mt-1">Premium Bank · Cód. 999</div>
+      </div>
 
-          {error && <div className="alert-error mb-5">{error}</div>}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="form-label">Usuário</label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
-                <input
-                  type="text"
-                  name="username"
-                  className="form-input pl-10"
-                  value={formData.username}
-                  onChange={handleChange}
-                  required
-                  autoComplete="username"
-                  placeholder="seu.usuario"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="form-label">Senha</label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
-                <input
-                  type="password"
-                  name="password"
-                  className="form-input pl-10"
-                  value={formData.password}
-                  onChange={handleChange}
-                  required
-                  autoComplete="current-password"
-                  placeholder="••••••••"
-                />
-              </div>
-            </div>
-
-            <button type="submit" disabled={loading} className="btn-primary w-full mt-2">
-              {loading ? 'Entrando...' : (<>Entrar <ArrowRight className="h-4 w-4" /></>)}
-            </button>
-          </form>
-
-          <p className="mt-6 text-center text-sm text-ink-300">
-            Ainda não tem conta?{' '}
-            <Link to="/register" className="font-medium text-gold-300 hover:text-gold-200">Abrir conta</Link>
-          </p>
-
-          <div className="mt-6 rounded-xl bg-white/[0.03] border border-white/10 p-4">
-            <div className="text-xs uppercase tracking-widest text-ink-400 mb-2">Credenciais de teste</div>
-            <div className="text-sm space-y-1 font-mono">
-              <div><span className="text-gold-300">admin</span> / admin123</div>
-              <div><span className="text-gold-300">user</span> / user123</div>
-            </div>
-          </div>
+      <div className="w-full max-w-[420px] card-gold p-7">
+        <div className="inline-flex items-center gap-1.5 bg-gold/10 border border-border2 text-gold text-[8px] tracking-[2px] uppercase px-2.5 py-1 rounded-sm mb-4">
+          <IconShield size={10} /> Acesso seguro
         </div>
-      </motion.div>
-    </main>
+        <h1 className="font-display text-[24px] tracking-[2px]">Bem-vindo de volta</h1>
+        <p className="text-[12px] text-text2 mt-1">Acesse sua conta Bravus Premium Bank</p>
+
+        {err && (
+          <div className="mt-4 px-3 py-2 rounded text-[11px] bg-red/10 border border-red/30 text-red-l">
+            {err}
+          </div>
+        )}
+        {debug && (
+          <div className="mt-2 px-3 py-2 rounded text-[10px] font-mono bg-card2 border border-border2 text-text2 break-all">
+            {debug}
+          </div>
+        )}
+
+        <form onSubmit={onSubmit} className="mt-5" autoComplete="off">
+          <div className="fg">
+            <label className="fl">Usuário</label>
+            <input
+              className="fi"
+              type="text"
+              name="bravus_user"
+              value={form.username}
+              onChange={(e) => setForm({ ...form, username: e.target.value })}
+              placeholder="seu.usuario"
+              required
+              autoFocus
+              autoComplete="off"
+            />
+          </div>
+          <div className="fg">
+            <label className="fl">Senha</label>
+            <input
+              className="fi"
+              type="password"
+              name="bravus_pass"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              placeholder="••••••••"
+              required
+              autoComplete="new-password"
+            />
+          </div>
+          <button type="submit" disabled={loading} className="btn-full-gold disabled:opacity-60 flex items-center justify-center gap-2">
+            {loading ? 'Entrando…' : <>Entrar <IconArrow size={14} strokeWidth={2.2} /></>}
+          </button>
+        </form>
+
+        <div className="text-center text-[11px] text-text2 mt-5">
+          Ainda não tem conta? <Link to="/register" className="text-gold font-semibold">Abrir conta</Link>
+        </div>
+      </div>
+
+      <div className="text-[9px] text-text3 tracking-[2px] uppercase mt-6">
+        Criptografia TLS 1.3 · JWT + 2FA · © 2026 Bravus Bank
+      </div>
+    </div>
   );
 }
