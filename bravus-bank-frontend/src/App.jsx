@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import Navbar from './components/Navbar';
+import Footer from './components/Footer';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -8,51 +10,29 @@ import UserDashboard from './pages/UserDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import { authService } from './services/api';
 
-// Protected Route Component
 function ProtectedRoute({ children, requireAdmin = false }) {
   const isAuthenticated = authService.isAuthenticated();
   const isAdmin = authService.hasRole('ROLE_ADMIN');
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (requireAdmin && !isAdmin) {
-    return <Navigate to="/dashboard" replace />;
-  }
-
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (requireAdmin && !isAdmin) return <Navigate to="/dashboard" replace />;
   return children;
 }
 
-// Public Route Component (redirects authenticated users)
 function PublicRoute({ children }) {
   const isAuthenticated = authService.isAuthenticated();
   const isAdmin = authService.hasRole('ROLE_ADMIN');
-
-  if (isAuthenticated) {
-    return <Navigate to={isAdmin ? "/admin" : "/dashboard"} replace />;
-  }
-
+  if (isAuthenticated) return <Navigate to={isAdmin ? '/admin' : '/dashboard'} replace />;
   return children;
 }
 
-function App() {
+export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Make loading and error setters available globally
   useEffect(() => {
     window.setGlobalLoading = setIsLoading;
     window.setGlobalError = setError;
-    
-    const handleGlobalError = (event) => {
-      console.error('Global error:', event.error);
-      setError('An unexpected error occurred. Please try again.');
-    };
-
-    window.addEventListener('error', handleGlobalError);
     return () => {
-      window.removeEventListener('error', handleGlobalError);
       delete window.setGlobalLoading;
       delete window.setGlobalError;
     };
@@ -60,79 +40,40 @@ function App() {
 
   return (
     <Router>
-      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%)' }}>
+      <div className="min-h-screen flex flex-col">
         <Navbar />
+
         {error && (
-          <div style={{ 
-            background: '#ff4444', 
-            color: 'white', 
-            padding: '10px', 
-            textAlign: 'center',
-            cursor: 'pointer'
-          }} onClick={() => setError(null)}>
-            {error} (Click to dismiss)
+          <div
+            onClick={() => setError(null)}
+            className="cursor-pointer bg-red-500/15 border-y border-red-500/30 text-red-200 text-sm py-2 px-4 flex items-center justify-center gap-2"
+          >
+            <AlertCircle className="h-4 w-4" />
+            <span>{typeof error === 'string' ? error : 'Ocorreu um erro inesperado.'}</span>
+            <span className="text-red-300/80 text-xs">(clique para fechar)</span>
           </div>
         )}
+
         {isLoading && (
-          <div style={{ 
-            position: 'fixed', 
-            top: 0, 
-            left: 0, 
-            right: 0, 
-            bottom: 0, 
-            background: 'rgba(0,0,0,0.5)', 
-            display: 'flex', 
-            justifyContent: 'center', 
-            alignItems: 'center',
-            zIndex: 9999
-          }}>
-            <div style={{ color: 'white', fontSize: '18px' }}>Loading...</div>
+          <div className="fixed top-16 right-4 z-50 bg-white/[0.06] backdrop-blur-xl border border-white/10 rounded-full px-3 py-1.5 text-xs text-ink-200 flex items-center gap-2 shadow-card">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-gold-300" />
+            Carregando...
           </div>
         )}
-        <Routes>
-          <Route path="/" element={<Home />} />
-          
-          <Route 
-            path="/login" 
-            element={
-              <PublicRoute>
-                <Login />
-              </PublicRoute>
-            } 
-          />
-          
-          <Route 
-            path="/register" 
-            element={
-              <PublicRoute>
-                <Register />
-              </PublicRoute>
-            } 
-          />
-          
-          <Route 
-            path="/dashboard" 
-            element={
-              <ProtectedRoute>
-                <UserDashboard />
-              </ProtectedRoute>
-            } 
-          />
-          
-          <Route 
-            path="/admin" 
-            element={
-              <ProtectedRoute requireAdmin={true}>
-                <AdminDashboard />
-              </ProtectedRoute>
-            } 
-          />
-          
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+
+        <div className="flex-1">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+            <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
+            <Route path="/dashboard" element={<ProtectedRoute><UserDashboard /></ProtectedRoute>} />
+            <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
+
+        <Footer />
       </div>
     </Router>
   );
 }
-
-export default App;

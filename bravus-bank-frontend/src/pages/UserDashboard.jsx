@@ -1,340 +1,376 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  ArrowDownToLine, ArrowUpFromLine, ArrowRightLeft, Wallet, Eye, EyeOff,
+  TrendingUp, TrendingDown, Activity, Receipt, CheckCircle2, AlertCircle,
+} from 'lucide-react';
+import {
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
+} from 'recharts';
 import { userService, authService } from '../services/api';
-import { formatCurrency, formatDate, getTransactionTypeLabel, getTransactionColor } from '../utils/helpers';
+import {
+  formatCurrency, formatDate, getTransactionTypeLabel,
+} from '../utils/helpers';
+import { cn } from '../lib/cn';
 
-function UserDashboard() {
+// ============ Helpers ============
+const txIcon = (type) => {
+  switch (type) {
+    case 'DEPOSIT':
+    case 'TRANSFER_IN':
+      return { Icon: ArrowDownToLine, color: 'text-emerald-300', bg: 'bg-emerald-400/10' };
+    case 'WITHDRAWAL':
+    case 'TRANSFER_OUT':
+      return { Icon: ArrowUpFromLine, color: 'text-red-300', bg: 'bg-red-400/10' };
+    case 'PAYMENT':
+      return { Icon: Receipt, color: 'text-amber-300', bg: 'bg-amber-400/10' };
+    default:
+      return { Icon: Activity, color: 'text-ink-300', bg: 'bg-white/5' };
+  }
+};
+
+const txSignClass = (type) =>
+  ['DEPOSIT', 'TRANSFER_IN'].includes(type) ? 'text-emerald-300' : 'text-red-300';
+const txSign = (type) =>
+  ['DEPOSIT', 'TRANSFER_IN'].includes(type) ? '+' : '-';
+
+// ============ Component ============
+export default function UserDashboard() {
   const [profile, setProfile] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  
-  const [activeTab, setActiveTab] = useState('overview');
-  const [transactionForm, setTransactionForm] = useState({
-    amount: '',
-    description: '',
-    destinationAccount: '',
-  });
+  const [showBalance, setShowBalance] = useState(true);
+
+  const [tab, setTab] = useState('overview');
+  const [form, setForm] = useState({ amount: '', description: '', destinationAccount: '' });
+  const [submitting, setSubmitting] = useState(false);
 
   const user = authService.getCurrentUser();
 
+  useEffect(() => { loadData(); }, []);
   useEffect(() => {
-    loadData();
-  }, []);
+    if (success || error) {
+      const t = setTimeout(() => { setSuccess(''); setError(''); }, 4500);
+      return () => clearTimeout(t);
+    }
+  }, [success, error]);
 
   const loadData = async () => {
     try {
-      const [profileRes, transactionsRes] = await Promise.all([
+      setLoading(true);
+      const [profileRes, txRes] = await Promise.all([
         userService.getProfile(),
         userService.getTransactions(),
       ]);
       setProfile(profileRes.data);
-      setTransactions(transactionsRes.data);
+      setTransactions(Array.isArray(txRes.data) ? txRes.data : []);
     } catch (err) {
-      setError('Erro ao carregar dados');
+      setError('Erro ao carregar dados da conta.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeposit = async () => {
-    if (!transactionForm.amount || transactionForm.amount <= 0) {
-      setError('Digite um valor válido');
-      return;
-    }
+  const cents = (v) => Math.round(parseFloat(v) * 100);
 
+  const submit = async (kind) => {
+    if (!form.amount || parseFloat(form.amount) <= 0) return setError('Digite um valor válido.');
+    if (kind === 'transfer' && !form.destinationAccount) return setError('Informe a conta de destino.');
+    setSubmitting(true);
     try {
-      setLoading(true);
-      await userService.deposit(
-        Math.round(parseFloat(transactionForm.amount) * 100),
-        transactionForm.description
+      if (kind === 'deposit') await userService.deposit(cents(form.amount), form.description);
+      if (kind === 'withdraw') await userService.withdraw(cents(form.amount), form.description);
+      if (kind === 'transfer') await userService.transfer(cents(form.amount), form.destinationAccount, form.description);
+      setSuccess(
+        kind === 'deposit' ? 'Depósito realizado.' :
+        kind === 'withdraw' ? 'Saque realizado.' : 'Transferência enviada.'
       );
-      setSuccess('Depósito realizado com sucesso!');
-      setTransactionForm({ amount: '', description: '', destinationAccount: '' });
+      setForm({ amount: '', description: '', destinationAccount: '' });
       await loadData();
-      setActiveTab('overview');
+      setTab('overview');
     } catch (err) {
-      setError(err.response?.data || 'Erro ao realizar depósito');
+      const msg = err?.response?.data?.message || err?.response?.data || 'Falha na operação.';
+      setError(typeof msg === 'string' ? msg : 'Falha na operação.');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  const handleWithdraw = async () => {
-    if (!transactionForm.amount || transactionForm.amount <= 0) {
-      setError('Digite um valor válido');
-      return;
-    }
+  // ====== Computed ======
+  const stats = useMemo(() => {
+    const inflow = transactions
+      .filter((t) => ['DEPOSIT', 'TRANSFER_IN'].includes(t.type))
+      .reduce((acc, t) => acc + (t.amount || 0), 0);
+    const outflow = transactions
+      .filter((t) => ['WITHDRAWAL', 'TRANSFER_OUT', 'PAYMENT'].includes(t.type))
+      .reduce((acc, t) => acc + (t.amount || 0), 0);
+    return { inflow, outflow, count: transactions.length };
+  }, [transactions]);
 
-    try {
-      setLoading(true);
-      await userService.withdraw(
-        Math.round(parseFloat(transactionForm.amount) * 100),
-        transactionForm.description
-      );
-      setSuccess('Saque realizado com sucesso!');
-      setTransactionForm({ amount: '', description: '', destinationAccount: '' });
-      await loadData();
-      setActiveTab('overview');
-    } catch (err) {
-      setError(err.response?.data || 'Erro ao realizar saque');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const chartData = useMemo(() => {
+    // last 7 days running balance approximation
+    const days = [...Array(7)].map((_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - (6 - i));
+      return { key: d.toISOString().slice(0, 10), label: d.toLocaleDateString('pt-BR', { weekday: 'short' }), value: 0 };
+    });
+    transactions.forEach((t) => {
+      const k = (t.createdAt || t.date || '').slice(0, 10);
+      const found = days.find((d) => d.key === k);
+      if (found) {
+        const signed = ['DEPOSIT', 'TRANSFER_IN'].includes(t.type) ? (t.amount || 0) : -(t.amount || 0);
+        found.value += signed;
+      }
+    });
+    // running cumulative
+    let acc = 0;
+    return days.map((d) => { acc += d.value; return { ...d, saldo: acc / 100 }; });
+  }, [transactions]);
 
-  const handleTransfer = async () => {
-    if (!transactionForm.amount || transactionForm.amount <= 0) {
-      setError('Digite um valor válido');
-      return;
-    }
-    if (!transactionForm.destinationAccount) {
-      setError('Digite a conta de destino');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      await userService.transfer(
-        Math.round(parseFloat(transactionForm.amount) * 100),
-        transactionForm.destinationAccount,
-        transactionForm.description
-      );
-      setSuccess('Transferência realizada com sucesso!');
-      setTransactionForm({ amount: '', description: '', destinationAccount: '' });
-      await loadData();
-      setActiveTab('overview');
-    } catch (err) {
-      setError(err.response?.data || 'Erro ao realizar transferência');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (loading && !profile) {
+  // ====== UI ======
+  if (loading) {
     return (
-      <div className="loading">
-        <div className="spinner"></div>
-      </div>
+      <main className="container-app py-10 space-y-6">
+        <div className="skeleton h-32" />
+        <div className="grid md:grid-cols-3 gap-5">
+          {[...Array(3)].map((_, i) => <div key={i} className="skeleton h-24" />)}
+        </div>
+        <div className="skeleton h-80" />
+      </main>
     );
   }
 
+  const balance = profile?.balance ?? 0;
+  const accountNumber = profile?.accountNumber || profile?.customerCode || '0000-0000-00';
+
+  const Tab = ({ id, label, icon: Icon }) => (
+    <button
+      onClick={() => setTab(id)}
+      className={cn(
+        'inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition',
+        tab === id ? 'bg-white/10 text-white shadow-card' : 'text-ink-300 hover:text-white hover:bg-white/5'
+      )}
+    >
+      <Icon className="h-4 w-4" /> {label}
+    </button>
+  );
+
   return (
-    <div className="container" style={{ marginTop: '30px' }}>
-      <h1 style={{ color: 'var(--primary)', marginBottom: '10px', fontSize: '36px' }}>
-        👋 Olá, {user?.fullName || user?.username}!
-      </h1>
-      <p style={{ color: 'var(--text-secondary)', marginBottom: '30px' }}>
-        Bem-vindo ao seu painel Bravus Bank
-      </p>
+    <main className="container-app py-10">
+      {/* ==== Greeting + Balance ==== */}
+      <div className="grid lg:grid-cols-3 gap-6">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="lg:col-span-2 card-premium p-8 relative overflow-hidden"
+        >
+          <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full bg-gradient-gold opacity-15 blur-3xl" />
+          <div className="text-xs uppercase tracking-widest text-ink-300">
+            Olá, <span className="text-white">{user?.fullName || user?.username}</span>
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <div className="text-sm text-ink-300">Saldo disponível</div>
+            <button onClick={() => setShowBalance((v) => !v)} className="text-ink-400 hover:text-white transition">
+              {showBalance ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            </button>
+          </div>
+          <div className="mt-1 font-display tabular-nums text-5xl font-bold">
+            {showBalance ? (
+              <>R$ <span className="gradient-text">{formatCurrency(balance).replace('R$', '').trim()}</span></>
+            ) : (
+              <span className="text-ink-400">R$ ••••••</span>
+            )}
+          </div>
+          <div className="mt-2 text-xs text-ink-400 font-mono">Conta {accountNumber}</div>
 
-      {error && (
-        <div className="alert alert-error" style={{ marginBottom: '20px' }}>
-          {error}
-          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '20px' }}>×</button>
-        </div>
-      )}
+          <div className="mt-6 flex flex-wrap gap-2">
+            <button onClick={() => setTab('deposit')} className="btn-secondary"><ArrowDownToLine className="h-4 w-4" /> Depositar</button>
+            <button onClick={() => setTab('withdraw')} className="btn-secondary"><ArrowUpFromLine className="h-4 w-4" /> Sacar</button>
+            <button onClick={() => setTab('transfer')} className="btn-primary"><ArrowRightLeft className="h-4 w-4" /> Transferir</button>
+          </div>
+        </motion.div>
 
-      {success && (
-        <div className="alert alert-success" style={{ marginBottom: '20px' }}>
-          {success}
-          <button onClick={() => setSuccess('')} style={{ float: 'right', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '20px' }}>×</button>
-        </div>
-      )}
-
-      {/* Account Summary */}
-      <div className="grid grid-3" style={{ marginBottom: '30px' }}>
-        <div className="stat-card">
-          <div className="stat-label">💰 Saldo Disponível</div>
-          <div className="stat-value">{formatCurrency(profile?.balance || 0)}</div>
-        </div>
-        
-        <div className="stat-card">
-          <div className="stat-label">🏦 Número da Conta</div>
-          <div className="stat-value" style={{ fontSize: '20px' }}>{profile?.accountNumber}</div>
-        </div>
-        
-        <div className="stat-card">
-          <div className="stat-label">📊 Tipo de Conta</div>
-          <div className="stat-value" style={{ fontSize: '20px' }}>{profile?.accountType}</div>
+        {/* Stats stack */}
+        <div className="grid sm:grid-cols-2 lg:grid-cols-1 gap-4">
+          <div className="card-premium p-5 flex items-center gap-4">
+            <div className="h-11 w-11 rounded-xl bg-emerald-400/15 text-emerald-300 inline-flex items-center justify-center">
+              <TrendingUp className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs text-ink-300">Entradas</div>
+              <div className="font-display text-lg font-semibold tabular-nums">{formatCurrency(stats.inflow)}</div>
+            </div>
+          </div>
+          <div className="card-premium p-5 flex items-center gap-4">
+            <div className="h-11 w-11 rounded-xl bg-red-400/15 text-red-300 inline-flex items-center justify-center">
+              <TrendingDown className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs text-ink-300">Saídas</div>
+              <div className="font-display text-lg font-semibold tabular-nums">{formatCurrency(stats.outflow)}</div>
+            </div>
+          </div>
+          <div className="card-premium p-5 flex items-center gap-4">
+            <div className="h-11 w-11 rounded-xl bg-bravus-400/15 text-bravus-200 inline-flex items-center justify-center">
+              <Activity className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs text-ink-300">Transações</div>
+              <div className="font-display text-lg font-semibold tabular-nums">{stats.count}</div>
+            </div>
+          </div>
         </div>
       </div>
 
+      {/* Alerts */}
+      <AnimatePresence>
+        {error && (
+          <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="mt-5">
+            <div className="alert-error inline-flex items-center gap-2"><AlertCircle className="h-4 w-4" /> {error}</div>
+          </motion.div>
+        )}
+        {success && (
+          <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="mt-5">
+            <div className="alert-success inline-flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> {success}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '2px solid var(--border)', paddingBottom: '10px' }}>
-        <button 
-          className={`btn ${activeTab === 'overview' ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setActiveTab('overview')}
-        >
-          📊 Visão Geral
-        </button>
-        <button 
-          className={`btn ${activeTab === 'deposit' ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setActiveTab('deposit')}
-        >
-          💵 Depósito
-        </button>
-        <button 
-          className={`btn ${activeTab === 'withdraw' ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setActiveTab('withdraw')}
-        >
-          🏧 Saque
-        </button>
-        <button 
-          className={`btn ${activeTab === 'transfer' ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setActiveTab('transfer')}
-        >
-          💸 Transferir
-        </button>
+      <div className="mt-8 flex flex-wrap gap-2">
+        <Tab id="overview" label="Visão geral" icon={Wallet} />
+        <Tab id="deposit" label="Depósito" icon={ArrowDownToLine} />
+        <Tab id="withdraw" label="Saque" icon={ArrowUpFromLine} />
+        <Tab id="transfer" label="Transferência" icon={ArrowRightLeft} />
       </div>
 
       {/* Content */}
-      {activeTab === 'overview' && (
-        <div className="card">
-          <h2 style={{ color: 'var(--primary)', marginBottom: '20px' }}>📜 Histórico de Transações</h2>
-          {transactions.length === 0 ? (
-            <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '40px' }}>
-              Nenhuma transação encontrada
-            </p>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Data</th>
-                    <th>Tipo</th>
-                    <th>Valor</th>
-                    <th>Descrição</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {transactions.map((transaction) => (
-                    <tr key={transaction.id}>
-                      <td>{formatDate(transaction.createdAt)}</td>
-                      <td>{getTransactionTypeLabel(transaction.type)}</td>
-                      <td style={{ color: transaction.type.includes('IN') || transaction.type === 'DEPOSIT' ? 'var(--success)' : 'var(--danger)' }}>
-                        {transaction.type.includes('IN') || transaction.type === 'DEPOSIT' ? '+' : '-'}{formatCurrency(transaction.amount)}
-                      </td>
-                      <td>{transaction.description || '-'}</td>
-                      <td>
-                        <span className={`badge badge-${getTransactionColor(transaction.status)}`}>
-                          {transaction.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      <div className="mt-6">
+        {tab === 'overview' && (
+          <div className="grid lg:grid-cols-3 gap-6">
+            {/* Chart */}
+            <div className="lg:col-span-2 card-premium p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="title-md">Movimentação · 7 dias</h3>
+                  <p className="text-xs text-ink-400 mt-0.5">Saldo acumulado por dia</p>
+                </div>
+              </div>
+              <div className="h-64">
+                <ResponsiveContainer>
+                  <AreaChart data={chartData}>
+                    <defs>
+                      <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#eecb54" stopOpacity={0.5} />
+                        <stop offset="100%" stopColor="#eecb54" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="#ffffff10" vertical={false} />
+                    <XAxis dataKey="label" stroke="#8a93ac" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#8a93ac" fontSize={12} tickLine={false} axisLine={false} width={50} />
+                    <Tooltip
+                      contentStyle={{ background: '#0b0f1c', border: '1px solid #ffffff20', borderRadius: 12 }}
+                      labelStyle={{ color: '#fff' }}
+                      formatter={(v) => [`R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'Saldo']}
+                    />
+                    <Area type="monotone" dataKey="saldo" stroke="#eecb54" strokeWidth={2} fill="url(#g1)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
             </div>
-          )}
-        </div>
-      )}
 
-      {activeTab === 'deposit' && (
-        <div className="card">
-          <h2 style={{ color: 'var(--primary)', marginBottom: '20px' }}>💵 Fazer Depósito</h2>
-          <div className="form-group">
-            <label className="form-label">Valor (R$)</label>
-            <input
-              type="number"
-              className="form-input"
-              value={transactionForm.amount}
-              onChange={(e) => setTransactionForm({ ...transactionForm, amount: e.target.value })}
-              placeholder="0.00"
-              step="0.01"
-              min="0.01"
-            />
+            {/* Transactions list */}
+            <div className="card-premium p-6">
+              <h3 className="title-md mb-4">Últimas transações</h3>
+              {transactions.length === 0 ? (
+                <p className="text-sm text-ink-300">Nenhuma transação ainda.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {transactions.slice(0, 8).map((t, idx) => {
+                    const { Icon, color, bg } = txIcon(t.type);
+                    return (
+                      <li key={t.id || idx} className="flex items-center gap-3">
+                        <div className={cn('h-9 w-9 rounded-lg inline-flex items-center justify-center', bg)}>
+                          <Icon className={cn('h-4 w-4', color)} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-white truncate">{getTransactionTypeLabel(t.type)}</div>
+                          <div className="text-xs text-ink-400">{formatDate(t.createdAt || t.date)}</div>
+                        </div>
+                        <div className={cn('text-sm font-medium tabular-nums', txSignClass(t.type))}>
+                          {txSign(t.type)} {formatCurrency(t.amount)}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">Descrição (Opcional)</label>
-            <input
-              type="text"
-              className="form-input"
-              value={transactionForm.description}
-              onChange={(e) => setTransactionForm({ ...transactionForm, description: e.target.value })}
-              placeholder="Ex: Salário"
-            />
-          </div>
-          <button className="btn btn-primary" onClick={handleDeposit} disabled={loading}>
-            {loading ? 'Processando...' : 'Confirmar Depósito'}
-          </button>
-        </div>
-      )}
+        )}
 
-      {activeTab === 'withdraw' && (
-        <div className="card">
-          <h2 style={{ color: 'var(--primary)', marginBottom: '20px' }}>🏧 Fazer Saque</h2>
-          <div className="form-group">
-            <label className="form-label">Valor (R$)</label>
-            <input
-              type="number"
-              className="form-input"
-              value={transactionForm.amount}
-              onChange={(e) => setTransactionForm({ ...transactionForm, amount: e.target.value })}
-              placeholder="0.00"
-              step="0.01"
-              min="0.01"
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Descrição (Opcional)</label>
-            <input
-              type="text"
-              className="form-input"
-              value={transactionForm.description}
-              onChange={(e) => setTransactionForm({ ...transactionForm, description: e.target.value })}
-              placeholder="Ex: Retirada"
-            />
-          </div>
-          <button className="btn btn-primary" onClick={handleWithdraw} disabled={loading}>
-            {loading ? 'Processando...' : 'Confirmar Saque'}
-          </button>
-        </div>
-      )}
+        {/* Forms */}
+        {(tab === 'deposit' || tab === 'withdraw' || tab === 'transfer') && (
+          <div className="card-premium p-6 max-w-xl">
+            <h3 className="title-md mb-1">
+              {tab === 'deposit' ? 'Novo depósito' : tab === 'withdraw' ? 'Novo saque' : 'Nova transferência'}
+            </h3>
+            <p className="text-sm text-ink-300 mb-5">
+              {tab === 'transfer' ? 'Envie para outra conta Bravus.' : 'Operação em conta corrente.'}
+            </p>
 
-      {activeTab === 'transfer' && (
-        <div className="card">
-          <h2 style={{ color: 'var(--primary)', marginBottom: '20px' }}>💸 Fazer Transferência</h2>
-          <div className="form-group">
-            <label className="form-label">Conta de Destino</label>
-            <input
-              type="text"
-              className="form-input"
-              value={transactionForm.destinationAccount}
-              onChange={(e) => setTransactionForm({ ...transactionForm, destinationAccount: e.target.value })}
-              placeholder="0000000000"
-            />
+            <div className="space-y-4">
+              <div>
+                <label className="form-label">Valor (R$)</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  className="form-input"
+                  placeholder="0,00"
+                  value={form.amount}
+                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                />
+              </div>
+
+              {tab === 'transfer' && (
+                <div>
+                  <label className="form-label">Conta de destino</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="0000000000"
+                    value={form.destinationAccount}
+                    onChange={(e) => setForm({ ...form, destinationAccount: e.target.value })}
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="form-label">Descrição (opcional)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Ex: Pagamento aluguel"
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                />
+              </div>
+
+              <button
+                disabled={submitting}
+                onClick={() => submit(tab)}
+                className="btn-primary w-full"
+              >
+                {submitting ? 'Processando...' : (
+                  tab === 'deposit' ? 'Confirmar depósito' :
+                  tab === 'withdraw' ? 'Confirmar saque' : 'Confirmar transferência'
+                )}
+              </button>
+            </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">Valor (R$)</label>
-            <input
-              type="number"
-              className="form-input"
-              value={transactionForm.amount}
-              onChange={(e) => setTransactionForm({ ...transactionForm, amount: e.target.value })}
-              placeholder="0.00"
-              step="0.01"
-              min="0.01"
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Descrição (Opcional)</label>
-            <input
-              type="text"
-              className="form-input"
-              value={transactionForm.description}
-              onChange={(e) => setTransactionForm({ ...transactionForm, description: e.target.value })}
-              placeholder="Ex: Pagamento"
-            />
-          </div>
-          <button className="btn btn-primary" onClick={handleTransfer} disabled={loading}>
-            {loading ? 'Processando...' : 'Confirmar Transferência'}
-          </button>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </main>
   );
 }
-
-export default UserDashboard;

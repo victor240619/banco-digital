@@ -1,183 +1,95 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { ArrowRight, UserPlus } from 'lucide-react';
 import { authService } from '../services/api';
 
-function Register() {
+export default function Register() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
-    username: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    fullName: '',
-    cpf: '',
-    phone: '',
+    username: '', email: '', password: '', confirmPassword: '',
+    fullName: '', cpf: '', phone: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-
-    if (formData.password !== formData.confirmPassword) {
-      setError('As senhas não coincidem');
-      return;
-    }
-
-    if (formData.password.length < 6) {
-      setError('A senha deve ter no mínimo 6 caracteres');
-      return;
-    }
-
+    if (formData.password !== formData.confirmPassword) return setError('As senhas não coincidem');
+    if (formData.password.length < 6) return setError('A senha deve ter no mínimo 6 caracteres');
     setLoading(true);
-
     try {
-      const { confirmPassword, ...registerData } = formData;
-      await authService.register(registerData);
+      const { confirmPassword, ...payload } = formData;
+      await authService.register(payload);
       navigate('/dashboard');
     } catch (err) {
-      setError(err.response?.data || 'Erro ao criar conta. Tente novamente.');
+      const msg = err?.response?.data?.message || err?.response?.data || 'Erro ao criar conta. Tente novamente.';
+      setError(typeof msg === 'string' ? msg : 'Erro ao criar conta.');
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="container" style={{ maxWidth: '600px', marginTop: '50px' }}>
-      <div className="card">
-        <h1 style={{ color: 'var(--primary)', marginBottom: '10px', fontSize: '32px' }}>
-          📝 Cadastro
-        </h1>
-        <p style={{ color: 'var(--text-secondary)', marginBottom: '30px' }}>
-          Crie sua conta no Bravus Bank
-        </p>
-
-        {error && (
-          <div className="alert alert-error">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit}>
-          <div className="grid grid-2" style={{ gap: '16px' }}>
-            <div className="form-group">
-              <label className="form-label">Usuário *</label>
-              <input
-                type="text"
-                name="username"
-                className="form-input"
-                value={formData.username}
-                onChange={handleChange}
-                required
-                minLength={3}
-                placeholder="Seu usuário"
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Email *</label>
-              <input
-                type="email"
-                name="email"
-                className="form-input"
-                value={formData.email}
-                onChange={handleChange}
-                required
-                placeholder="seu@email.com"
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Nome Completo *</label>
-              <input
-                type="text"
-                name="fullName"
-                className="form-input"
-                value={formData.fullName}
-                onChange={handleChange}
-                required
-                placeholder="Seu nome completo"
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">CPF</label>
-              <input
-                type="text"
-                name="cpf"
-                className="form-input"
-                value={formData.cpf}
-                onChange={handleChange}
-                placeholder="000.000.000-00"
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Telefone</label>
-              <input
-                type="tel"
-                name="phone"
-                className="form-input"
-                value={formData.phone}
-                onChange={handleChange}
-                placeholder="(00) 00000-0000"
-              />
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Senha *</label>
-            <input
-              type="password"
-              name="password"
-              className="form-input"
-              value={formData.password}
-              onChange={handleChange}
-              required
-              minLength={6}
-              placeholder="Mínimo 6 caracteres"
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Confirmar Senha *</label>
-            <input
-              type="password"
-              name="confirmPassword"
-              className="form-input"
-              value={formData.confirmPassword}
-              onChange={handleChange}
-              required
-              placeholder="Confirme sua senha"
-            />
-          </div>
-
-          <button
-            type="submit"
-            className="btn btn-primary"
-            style={{ width: '100%', marginTop: '10px' }}
-            disabled={loading}
-          >
-            {loading ? 'Criando conta...' : 'Criar Conta'}
-          </button>
-        </form>
-
-        <div style={{ marginTop: '20px', textAlign: 'center' }}>
-          <p style={{ color: 'var(--text-secondary)' }}>
-            Já tem uma conta?{' '}
-            <Link to="/login" style={{ color: 'var(--primary)', textDecoration: 'none' }}>
-              Faça login aqui
-            </Link>
-          </p>
-        </div>
-      </div>
+  const Field = ({ label, name, type = 'text', required, placeholder, minLength }) => (
+    <div>
+      <label className="form-label">{label}{required && ' *'}</label>
+      <input
+        type={type}
+        name={name}
+        className="form-input"
+        value={formData[name]}
+        onChange={handleChange}
+        required={required}
+        minLength={minLength}
+        placeholder={placeholder}
+      />
     </div>
   );
-}
 
-export default Register;
+  return (
+    <main className="container-app py-12 sm:py-16">
+      <motion.div
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45 }}
+        className="mx-auto max-w-2xl"
+      >
+        <div className="card-premium p-8 sm:p-10">
+          <div className="mb-7">
+            <div className="pill-gold mb-3"><UserPlus className="h-3.5 w-3.5" /> Abertura de conta</div>
+            <h1 className="title-md">Crie sua conta Bravus</h1>
+            <p className="mt-1.5 text-sm text-ink-300">Leva menos de 2 minutos. 100% digital.</p>
+          </div>
+
+          {error && <div className="alert-error mb-5">{error}</div>}
+
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="grid sm:grid-cols-2 gap-4">
+              <Field label="Usuário" name="username" required placeholder="seu.usuario" minLength={3} />
+              <Field label="E-mail" name="email" type="email" required placeholder="voce@email.com" />
+              <Field label="Nome completo" name="fullName" required placeholder="Seu nome completo" />
+              <Field label="CPF" name="cpf" placeholder="000.000.000-00" />
+              <Field label="Telefone" name="phone" type="tel" placeholder="(00) 00000-0000" />
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <Field label="Senha" name="password" type="password" required minLength={6} placeholder="Mínimo 6 caracteres" />
+              <Field label="Confirmar senha" name="confirmPassword" type="password" required placeholder="Repita a senha" />
+            </div>
+
+            <button type="submit" disabled={loading} className="btn-primary w-full !py-3">
+              {loading ? 'Criando conta...' : (<>Abrir minha conta <ArrowRight className="h-4 w-4" /></>)}
+            </button>
+          </form>
+
+          <p className="mt-6 text-center text-sm text-ink-300">
+            Já é cliente?{' '}
+            <Link to="/login" className="font-medium text-gold-300 hover:text-gold-200">Entrar</Link>
+          </p>
+        </div>
+      </motion.div>
+    </main>
+  );
+}

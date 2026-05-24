@@ -1,102 +1,238 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import {
+  ShieldCheck, Zap, Globe2, Banknote, LineChart, Lock,
+  ArrowRight, Sparkles, Smartphone, Award
+} from 'lucide-react';
 import { authService } from '../services/api';
 
-function Home() {
+const FeatureCard = ({ icon: Icon, title, desc, accent }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 14 }}
+    whileInView={{ opacity: 1, y: 0 }}
+    viewport={{ once: true, margin: '-40px' }}
+    transition={{ duration: 0.45 }}
+    className="card-premium p-6 hover:border-white/20 transition-colors"
+  >
+    <div className={`inline-flex h-11 w-11 items-center justify-center rounded-xl ${accent}`}>
+      <Icon className="h-5 w-5" />
+    </div>
+    <h3 className="mt-4 font-display text-lg font-semibold text-white">{title}</h3>
+    <p className="mt-1.5 text-sm text-ink-300 leading-relaxed">{desc}</p>
+  </motion.div>
+);
+
+const Stat = ({ value, label }) => (
+  <div className="text-center">
+    <div className="font-display text-3xl sm:text-4xl font-bold gradient-text tabular-nums">{value}</div>
+    <div className="mt-1 text-xs uppercase tracking-widest text-ink-400">{label}</div>
+  </div>
+);
+
+export default function Home() {
   const isAuthenticated = authService.isAuthenticated();
   const isAdmin = authService.hasRole('ROLE_ADMIN');
 
   return (
-    <div className="container" style={{ marginTop: '60px' }}>
-      <div style={{ textAlign: 'center', marginBottom: '60px' }}>
-        <h1 style={{ 
-          fontSize: '64px', 
-          background: 'linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%)',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          marginBottom: '20px',
-          fontWeight: 'bold'
-        }}>
-          ⚡ BRAVUS BANK
-        </h1>
-        <p style={{ fontSize: '24px', color: 'var(--text-secondary)', marginBottom: '40px' }}>
-          O Futuro do Banking Digital
-        </p>
-        
-        {!isAuthenticated ? (
-          <div style={{ display: 'flex', gap: '20px', justifyContent: 'center' }}>
-            <Link to="/login">
-              <button className="btn btn-primary" style={{ padding: '16px 40px', fontSize: '18px' }}>
-                Entrar
-              </button>
-            </Link>
-            <Link to="/register">
-              <button className="btn btn-secondary" style={{ padding: '16px 40px', fontSize: '18px' }}>
-                Criar Conta
-              </button>
-            </Link>
+    <main>
+      {/* ============ HERO ============ */}
+      <section className="container-app pt-16 sm:pt-24 pb-16">
+        <div className="grid lg:grid-cols-12 gap-12 items-center">
+          <div className="lg:col-span-7">
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+              className="pill-gold mb-6"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Premium Digital Banking
+            </motion.div>
+
+            <motion.h1
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.05 }}
+              className="title-xl"
+            >
+              Seu dinheiro,<br />
+              <span className="gradient-text">no padrão Bravus.</span>
+            </motion.h1>
+
+            <motion.p
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.15 }}
+              className="mt-5 max-w-xl text-lg text-ink-200 leading-relaxed"
+            >
+              Conta digital premium com segurança bancária de verdade, transferências instantâneas
+              e uma experiência feita pra quem exige mais.
+            </motion.p>
+
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.25 }}
+              className="mt-8 flex flex-wrap gap-3"
+            >
+              {!isAuthenticated ? (
+                <>
+                  <Link to="/register" className="btn-primary text-base !py-3 !px-6">
+                    Abrir minha conta <ArrowRight className="h-4 w-4" />
+                  </Link>
+                  <Link to="/login" className="btn-secondary text-base !py-3 !px-6">
+                    Já sou cliente
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link to="/dashboard" className="btn-primary text-base !py-3 !px-6">
+                    Ir para o Dashboard <ArrowRight className="h-4 w-4" />
+                  </Link>
+                  {isAdmin && (
+                    <Link to="/admin" className="btn-secondary text-base !py-3 !px-6">
+                      Painel admin
+                    </Link>
+                  )}
+                </>
+              )}
+            </motion.div>
+
+            <div className="mt-10 flex flex-wrap items-center gap-5 text-sm text-ink-300">
+              <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-gold-400" /> Criptografia TLS 1.3</span>
+              <span className="inline-flex items-center gap-2"><Lock className="h-4 w-4 text-gold-400" /> JWT + 2FA</span>
+              <span className="inline-flex items-center gap-2"><Award className="h-4 w-4 text-gold-400" /> Compliance LGPD</span>
+            </div>
           </div>
-        ) : (
-          <div style={{ display: 'flex', gap: '20px', justifyContent: 'center' }}>
-            <Link to="/dashboard">
-              <button className="btn btn-primary" style={{ padding: '16px 40px', fontSize: '18px' }}>
-                Meu Dashboard
-              </button>
+
+          {/* Card visual mock */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.7, delay: 0.2 }}
+            className="lg:col-span-5"
+          >
+            <div className="relative">
+              {/* Glow */}
+              <div className="absolute -inset-6 bg-gradient-to-br from-gold-400/20 via-bravus-500/20 to-transparent blur-3xl rounded-3xl" />
+              {/* Card */}
+              <div className="relative card-premium p-6 rounded-3xl overflow-hidden">
+                <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-gradient-gold opacity-20 blur-2xl" />
+                <div className="flex items-center justify-between">
+                  <div className="text-xs uppercase tracking-widest text-ink-300">Saldo disponível</div>
+                  <div className="pill-gold">Premium</div>
+                </div>
+                <div className="mt-3 font-display tabular-nums text-4xl font-bold">
+                  R$ <span className="gradient-text">128.450,90</span>
+                </div>
+                <div className="mt-1 text-xs text-ink-400">Ag. 0001 · CC 0042-7</div>
+
+                <div className="mt-6 grid grid-cols-3 gap-2">
+                  {['PIX', 'Boleto', 'Transferir'].map((t) => (
+                    <div key={t} className="rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-center text-xs font-medium hover:bg-white/10 transition-colors">
+                      {t}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-6">
+                  <div className="text-xs text-ink-400 mb-2">Últimas movimentações</div>
+                  <ul className="space-y-2">
+                    {[
+                      { t: 'PIX recebido', v: '+ R$ 1.200,00', c: 'text-emerald-300' },
+                      { t: 'Assinatura Bravus', v: '- R$ 49,90', c: 'text-red-300' },
+                      { t: 'Transferência', v: '- R$ 850,00', c: 'text-red-300' },
+                    ].map((m, i) => (
+                      <li key={i} className="flex items-center justify-between text-sm">
+                        <span className="text-ink-200">{m.t}</span>
+                        <span className={`font-medium tabular-nums ${m.c}`}>{m.v}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* ============ STATS ============ */}
+      <section className="container-app">
+        <div className="card-premium grid grid-cols-2 md:grid-cols-4 gap-6 p-8">
+          <Stat value="< 200ms" label="Latência PIX" />
+          <Stat value="99.99%" label="Uptime SLA" />
+          <Stat value="256-bit" label="Criptografia" />
+          <Stat value="24/7" label="Suporte" />
+        </div>
+      </section>
+
+      {/* ============ FEATURES ============ */}
+      <section className="container-app mt-20">
+        <div className="max-w-2xl">
+          <div className="pill-gold mb-3"><Sparkles className="h-3.5 w-3.5" /> Por que Bravus</div>
+          <h2 className="title-lg">Uma camada acima do digital banking comum.</h2>
+          <p className="mt-3 text-ink-300">
+            Tudo o que você precisa, construído com a obsessão de quem entende de finanças e tecnologia.
+          </p>
+        </div>
+
+        <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          <FeatureCard
+            icon={Zap}
+            title="Transferências instantâneas"
+            desc="PIX, TED e transferências internas processadas em tempo real, sem fricção."
+            accent="bg-gold-400/15 text-gold-300"
+          />
+          <FeatureCard
+            icon={ShieldCheck}
+            title="Segurança bancária"
+            desc="JWT, hashing forte de senhas, auditoria completa e compliance LGPD."
+            accent="bg-emerald-400/15 text-emerald-300"
+          />
+          <FeatureCard
+            icon={LineChart}
+            title="Visão completa"
+            desc="Dashboards com indicadores em tempo real, extratos e relatórios exportáveis."
+            accent="bg-bravus-400/15 text-bravus-200"
+          />
+          <FeatureCard
+            icon={Banknote}
+            title="Pagamentos Stripe"
+            desc="Integração nativa com Stripe para assinaturas e cobranças seguras."
+            accent="bg-fuchsia-400/15 text-fuchsia-300"
+          />
+          <FeatureCard
+            icon={Globe2}
+            title="Disponível 24/7"
+            desc="Infraestrutura altamente disponível com observabilidade de classe mundial."
+            accent="bg-sky-400/15 text-sky-300"
+          />
+          <FeatureCard
+            icon={Smartphone}
+            title="Experiência impecável"
+            desc="UI moderna, responsiva e acessível em qualquer dispositivo."
+            accent="bg-amber-400/15 text-amber-300"
+          />
+        </div>
+      </section>
+
+      {/* ============ CTA ============ */}
+      <section className="container-app mt-20">
+        <div className="relative card-premium overflow-hidden p-10 sm:p-14 text-center">
+          <div className="absolute -top-24 -left-24 w-72 h-72 rounded-full bg-gradient-gold opacity-10 blur-3xl" />
+          <div className="absolute -bottom-24 -right-24 w-72 h-72 rounded-full bg-bravus-500 opacity-20 blur-3xl" />
+          <h2 className="title-lg gradient-text">Pronto pra subir de padrão?</h2>
+          <p className="mt-3 text-ink-200 max-w-xl mx-auto">
+            Abra sua conta em menos de 2 minutos. 100% digital, com a confiança que você espera de um banco premium.
+          </p>
+          {!isAuthenticated && (
+            <Link to="/register" className="btn-primary mt-7 text-base !py-3 !px-8">
+              Abrir conta grátis <ArrowRight className="h-4 w-4" />
             </Link>
-            {isAdmin && (
-              <Link to="/admin">
-                <button className="btn btn-secondary" style={{ padding: '16px 40px', fontSize: '18px' }}>
-                  Painel Admin
-                </button>
-              </Link>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="grid grid-3" style={{ marginTop: '80px' }}>
-        <div className="card" style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '48px', marginBottom: '20px' }}>🚀</div>
-          <h3 style={{ color: 'var(--primary)', marginBottom: '15px' }}>Rápido & Seguro</h3>
-          <p style={{ color: 'var(--text-secondary)' }}>
-            Transações instantâneas com a mais alta segurança em criptografia
-          </p>
+          )}
         </div>
-
-        <div className="card" style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '48px', marginBottom: '20px' }}>💳</div>
-          <h3 style={{ color: 'var(--primary)', marginBottom: '15px' }}>Sem Taxas</h3>
-          <p style={{ color: 'var(--text-secondary)' }}>
-            Transferências e operações sem taxas abusivas. Transparência total
-          </p>
-        </div>
-
-        <div className="card" style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '48px', marginBottom: '20px' }}>🌐</div>
-          <h3 style={{ color: 'var(--primary)', marginBottom: '15px' }}>24/7 Online</h3>
-          <p style={{ color: 'var(--text-secondary)' }}>
-            Acesse sua conta a qualquer hora, de qualquer lugar do mundo
-          </p>
-        </div>
-      </div>
-
-      <div className="card" style={{ marginTop: '60px', textAlign: 'center', padding: '60px 40px' }}>
-        <h2 style={{ color: 'var(--primary)', fontSize: '32px', marginBottom: '20px' }}>
-          Pronto para começar?
-        </h2>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '18px', marginBottom: '30px' }}>
-          Abra sua conta em menos de 2 minutos
-        </p>
-        {!isAuthenticated && (
-          <Link to="/register">
-            <button className="btn btn-primary" style={{ padding: '16px 60px', fontSize: '18px' }}>
-              Criar Conta Grátis
-            </button>
-          </Link>
-        )}
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
-
-export default Home;
