@@ -18,7 +18,9 @@ export default function Login() {
     setLoading(true);
     try {
       const response = await authService.login(formData.username, formData.password);
-      navigate(response.roles?.includes('ROLE_ADMIN') ? '/admin' : '/dashboard');
+      const roles = Array.isArray(response?.roles) ? response.roles : [];
+      const isAdmin = roles.includes('ROLE_ADMIN');
+      navigate(isAdmin ? '/admin' : '/dashboard', { replace: true });
     } catch (err) {
       const msg = err?.response?.data?.message || err?.response?.data || 'Credenciais inválidas. Tente novamente.';
       setError(typeof msg === 'string' ? msg : 'Erro ao fazer login.');

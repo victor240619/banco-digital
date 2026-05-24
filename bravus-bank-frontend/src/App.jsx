@@ -10,10 +10,13 @@ import UserDashboard from './pages/UserDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import { authService } from './services/api';
 
-function ProtectedRoute({ children, requireAdmin = false }) {
+function ProtectedRoute({ children, requireAdmin = false, userOnly = false }) {
   const isAuthenticated = authService.isAuthenticated();
   const isAdmin = authService.hasRole('ROLE_ADMIN');
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  // Admin tentando entrar na tela de usuário → manda pro /admin
+  if (userOnly && isAdmin) return <Navigate to="/admin" replace />;
+  // Usuário comum tentando entrar no /admin → manda pro /dashboard
   if (requireAdmin && !isAdmin) return <Navigate to="/dashboard" replace />;
   return children;
 }
@@ -23,6 +26,14 @@ function PublicRoute({ children }) {
   const isAdmin = authService.hasRole('ROLE_ADMIN');
   if (isAuthenticated) return <Navigate to={isAdmin ? '/admin' : '/dashboard'} replace />;
   return children;
+}
+
+
+function NotFoundRedirect() {
+  const isAuthenticated = authService.isAuthenticated();
+  const isAdmin = authService.hasRole('ROLE_ADMIN');
+  if (!isAuthenticated) return <Navigate to="/" replace />;
+  return <Navigate to={isAdmin ? '/admin' : '/dashboard'} replace />;
 }
 
 export default function App() {
@@ -66,9 +77,9 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
             <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
-            <Route path="/dashboard" element={<ProtectedRoute><UserDashboard /></ProtectedRoute>} />
+            <Route path="/dashboard" element={<ProtectedRoute userOnly><UserDashboard /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<NotFoundRedirect />} />
           </Routes>
         </div>
 

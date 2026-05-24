@@ -46,15 +46,16 @@ export default function Navbar() {
           <nav className="hidden md:flex items-center gap-1">
             {isAuthenticated ? (
               <>
-                <NavLink to="/dashboard">
-                  <span className="inline-flex items-center gap-1.5">
-                    <LayoutDashboard className="h-4 w-4" /> Dashboard
-                  </span>
-                </NavLink>
-                {isAdmin && (
+                {isAdmin ? (
                   <NavLink to="/admin">
                     <span className="inline-flex items-center gap-1.5">
-                      <Shield className="h-4 w-4" /> Admin
+                      <Shield className="h-4 w-4" /> Painel Admin
+                    </span>
+                  </NavLink>
+                ) : (
+                  <NavLink to="/dashboard">
+                    <span className="inline-flex items-center gap-1.5">
+                      <LayoutDashboard className="h-4 w-4" /> Minha Conta
                     </span>
                   </NavLink>
                 )}
@@ -94,8 +95,9 @@ export default function Navbar() {
           <div className="md:hidden pb-4 flex flex-col gap-1 animate-slide-up">
             {isAuthenticated ? (
               <>
-                <NavLink to="/dashboard">Dashboard</NavLink>
-                {isAdmin && <NavLink to="/admin">Admin</NavLink>}
+                {isAdmin
+                  ? <NavLink to="/admin">Painel Admin</NavLink>
+                  : <NavLink to="/dashboard">Minha Conta</NavLink>}
                 <button onClick={handleLogout} className="btn-secondary mt-2">
                   <LogOut className="h-4 w-4" /> Sair ({user?.username})
                 </button>
