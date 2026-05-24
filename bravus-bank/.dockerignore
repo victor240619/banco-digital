@@ -1,0 +1,13 @@
+target/
+.idea/
+*.iml
+.git/
+.gitignore
+README.md
+*.log
+.env
+.env.*
+backup.sh
+dev-up.sh
+docker-compose.yml
+src/test/

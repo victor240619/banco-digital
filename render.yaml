@@ -1,0 +1,34 @@
+# ============================================================
+# Bravus Bank — Render Blueprint (Infrastructure as Code)
+# https://render.com/docs/blueprint-spec
+# ============================================================
+
+services:
+  # --- Backend (Spring Boot) ---
+  - type: web
+    name: bravus-bank-api
+    runtime: docker
+    plan: free
+    region: oregon                # Oregon é o que tem mais capacidade no Free
+    dockerfilePath: ./bravus-bank/Dockerfile
+    dockerContext: ./bravus-bank
+    healthCheckPath: /actuator/health
+    autoDeploy: true              # Deploy automático em cada push pro master
+    branch: master
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: PORT
+        value: "9000"
+      - key: DB_URL
+        sync: false               # Settado manualmente no dashboard
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true       # Render gera um secret seguro automaticamente
+      - key: CORS_ORIGIN
+        sync: false               # URL do frontend depois do deploy
+      - key: JAVA_TOOL_OPTIONS
+        value: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=70.0"
