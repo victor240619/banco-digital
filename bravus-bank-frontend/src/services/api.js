@@ -100,4 +100,14 @@ export const adminService = {
   getAllTransactions: () => api.get('/admin/transactions'),
 };
 
+// ====== Ledger / Contabilidade (admin) ======
+export const ledgerAdminService = {
+  balanceSheet: () => api.get('/admin/ledger/balance-sheet'),
+  validateChain: () => api.get('/admin/ledger/validate-chain'),
+  entries: (page = 0, size = 50) =>
+    api.get(`/admin/ledger/entries?page=${page}&size=${size}`),
+  grantsByUser: (userId) => api.get(`/admin/ledger/credit/by-user/${userId}`),
+  grantCredit: (payload) => api.post('/admin/ledger/credit/grant', payload),
+};
+
 export default api;
