@@ -46,30 +46,51 @@ public class MercadoPagoController {
         public String description;
     }
 
-    /**
-     * Cria uma cobrança PIX. O user precisa estar autenticado.
-     * Retorna o QR Code e o ticket_url pra cliente pagar.
-     */
     @PostMapping("/pix")
     public ResponseEntity<?> createPix(@RequestBody PixRequest req, Authentication auth) {
         try {
             UserEntity user = userRepo.findByUsername(auth.getName())
                     .orElseThrow(() -> new IllegalStateException("User não encontrado"));
 
+            // Valida dados mínimos exigidos pelo MP em produção
+            if (user.getCpf() == null || user.getCpf().isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "error", "CPF obrigatório para gerar PIX. Atualize seu perfil."));
+            }
+            if (user.getFullName() == null || user.getFullName().isBlank()
+                    || !user.getFullName().contains(" ")) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "error", "Nome completo (nome + sobrenome) obrigatório para gerar PIX."));
+            }
+
+            // Quebra fullName em first/last
+            String[] nameParts = user.getFullName().trim().split("\\s+", 2);
+            String firstName = nameParts[0];
+            String lastName = nameParts.length > 1 ? nameParts[1] : firstName;
+
+            MercadoPagoService.PayerInfo payer = new MercadoPagoService.PayerInfo();
+            payer.email = user.getEmail();
+            payer.firstName = firstName;
+            payer.lastName = lastName;
+            payer.cpf = user.getCpf();
+
             String externalRef = "bravus:user:" + user.getId() + ":ts:" + System.currentTimeMillis();
 
             JsonNode payment = mp.createPixPayment(
                     req.amountCentavos,
                     req.description != null ? req.description : "Depósito Bravus Bank",
-                    user.getEmail(),
+                    payer,
                     externalRef
             );
 
             JsonNode poi = payment.path("point_of_interaction").path("transaction_data");
+            String status = payment.path("status").asText();
+            String statusDetail = payment.path("status_detail").asText();
 
             Map<String, Object> resp = new HashMap<>();
             resp.put("paymentId", payment.path("id").asText());
-            resp.put("status", payment.path("status").asText());
+            resp.put("status", status);
+            resp.put("statusDetail", statusDetail);
             resp.put("amountCentavos", req.amountCentavos);
             resp.put("externalReference", externalRef);
             resp.put("qrCodeBase64", poi.path("qr_code_base64").asText());
@@ -77,8 +98,9 @@ public class MercadoPagoController {
             resp.put("ticketUrl", poi.path("ticket_url").asText());
             resp.put("expiresAt", payment.path("date_of_expiration").asText());
 
-            log.info("PIX criado: paymentId={}, user={}, amount={}c",
-                    payment.path("id").asText(), user.getUsername(), req.amountCentavos);
+            log.info("PIX criado: paymentId={}, user={}, amount={}c, status={}, detail={}",
+                    payment.path("id").asText(), user.getUsername(),
+                    req.amountCentavos, status, statusDetail);
 
             return ResponseEntity.ok(resp);
         } catch (Exception e) {
@@ -87,11 +109,6 @@ public class MercadoPagoController {
         }
     }
 
-    /**
-     * Webhook do Mercado Pago. Chamado quando um pagamento muda de status.
-     * O MP manda: { "action": "payment.updated", "data": { "id": "..." } }
-     * Buscamos o pagamento completo e creditamos escrituralmente se aprovado.
-     */
     @PostMapping("/webhook")
     @Transactional
     public ResponseEntity<?> webhook(@RequestBody(required = false) Map<String, Object> body,
@@ -99,7 +116,6 @@ public class MercadoPagoController {
         log.info("MP webhook recebido — body={}, query={}", body, query);
 
         try {
-            // ID do pagamento vem em body.data.id ou query string ?id=...&topic=payment
             String paymentId = null;
             if (body != null) {
                 Object data = body.get("data");
@@ -128,7 +144,6 @@ public class MercadoPagoController {
                 return ResponseEntity.ok(Map.of("ok", true, "status", status, "credited", false));
             }
 
-            // Extrai userId do external_reference "bravus:user:{id}:ts:{...}"
             if (!externalRef.startsWith("bravus:user:")) {
                 log.warn("external_reference inválido: {}", externalRef);
                 return ResponseEntity.ok(Map.of("ignored", true, "ref", externalRef));
@@ -139,20 +154,14 @@ public class MercadoPagoController {
             UserEntity user = userRepo.findById(userId)
                     .orElseThrow(() -> new IllegalStateException("User " + userId + " não existe"));
 
-            // Idempotência: marca pagamento já processado via descrição do ledger
             String paymentTag = "MP:" + paymentId;
-
-            // Se já existir lançamento com essa tag, ignora (evita crédito duplicado)
-            // Como não temos query por descrição, usamos o referenciaId do MP
-            // (paymentId é numérico no MP)
             Long mpPaymentRef = Long.parseLong(paymentId);
 
-            // Cria lançamento ledger: DEBITO 1.1.1 (Caixa), CREDITO 2.1.1 (Obrigações)
             LedgerService.AppendEntryCommand cmd = new LedgerService.AppendEntryCommand();
             cmd.tipo = "DEPOSITO_EXTERNO";
             cmd.descricao = "Depósito PIX via Mercado Pago - " + paymentTag;
-            cmd.debitoCodigo = "1.1.1";    // Caixa/Reserva do Banco aumenta
-            cmd.creditoCodigo = "2.1.1";   // Obrigação Escritural ao cliente aumenta
+            cmd.debitoCodigo = "1.1.1";
+            cmd.creditoCodigo = "2.1.1";
             cmd.valor = amountCentavos;
             cmd.referenciaId = mpPaymentRef;
             cmd.referenciaTipo = "MP_PAYMENT";
@@ -161,7 +170,6 @@ public class MercadoPagoController {
 
             LedgerEntryEntity entry = ledger.appendEntry(cmd);
 
-            // Credita saldo do user
             long oldBalance = user.getBalance() == null ? 0L : user.getBalance();
             user.setBalance(oldBalance + amountCentavos);
             userRepo.save(user);
@@ -180,8 +188,6 @@ public class MercadoPagoController {
             ));
         } catch (Exception e) {
             log.error("Erro processando webhook MP", e);
-            // Devolve 200 mesmo em erro pra MP não ficar retentando infinitamente
-            // (logamos pra inspecionar manualmente)
             return ResponseEntity.ok(Map.of("error", e.getMessage()));
         }
     }

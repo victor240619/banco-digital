@@ -10,6 +10,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -34,13 +36,23 @@ public class MercadoPagoService {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
+    public static class PayerInfo {
+        public String email;
+        public String firstName;
+        public String lastName;
+        public String cpf;        // só números ou com pontuação
+        public String phoneArea;  // ex: "62"
+        public String phoneNumber; // ex: "999875592"
+    }
+
     /**
      * Cria uma cobrança PIX no Mercado Pago.
-     * Retorna o objeto Payment completo com qr_code e ticket_url.
+     * Em produção (live_mode=true), o MP exige payer completo (nome, CPF, email real)
+     * pra não rejeitar com rejected_high_risk.
      */
     public JsonNode createPixPayment(long amountCentavos,
                                      String description,
-                                     String payerEmail,
+                                     PayerInfo payer,
                                      String externalReference) throws Exception {
         if (accessToken == null || accessToken.isBlank()) {
             throw new IllegalStateException("MP_ACCESS_TOKEN não configurado");
@@ -48,14 +60,33 @@ public class MercadoPagoService {
 
         double amount = amountCentavos / 100.0;
 
-        Map<String, Object> body = Map.of(
-                "transaction_amount", amount,
-                "description", description == null ? "Depósito Bravus Bank" : description,
-                "payment_method_id", "pix",
-                "payer", Map.of("email", payerEmail == null ? "cliente@bravusbank.com" : payerEmail),
-                "external_reference", externalReference == null ? UUID.randomUUID().toString() : externalReference,
-                "notification_url", publicUrl + "/api/payments/mp/webhook"
-        );
+        // Monta payer completo
+        Map<String, Object> payerMap = new LinkedHashMap<>();
+        payerMap.put("email", payer.email != null && !payer.email.isBlank()
+                ? payer.email : "cliente@bravusbank.com");
+
+        if (payer.firstName != null && !payer.firstName.isBlank()) {
+            payerMap.put("first_name", payer.firstName);
+        }
+        if (payer.lastName != null && !payer.lastName.isBlank()) {
+            payerMap.put("last_name", payer.lastName);
+        }
+        if (payer.cpf != null && !payer.cpf.isBlank()) {
+            String cpfDigits = payer.cpf.replaceAll("[^0-9]", "");
+            Map<String, Object> ident = new HashMap<>();
+            ident.put("type", "CPF");
+            ident.put("number", cpfDigits);
+            payerMap.put("identification", ident);
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("transaction_amount", amount);
+        body.put("description", description == null ? "Depósito Bravus Bank" : description);
+        body.put("payment_method_id", "pix");
+        body.put("payer", payerMap);
+        body.put("external_reference", externalReference == null ? UUID.randomUUID().toString() : externalReference);
+        body.put("notification_url", publicUrl + "/api/payments/mp/webhook");
+        body.put("statement_descriptor", "BRAVUSBANK");
 
         String json = mapper.writeValueAsString(body);
         String idempotencyKey = UUID.randomUUID().toString();
@@ -78,9 +109,7 @@ public class MercadoPagoService {
         return mapper.readTree(resp.body());
     }
 
-    /**
-     * Consulta um pagamento por ID. Usado no webhook pra confirmar status.
-     */
+    /** Consulta um pagamento por ID. Usado no webhook pra confirmar status. */
     public JsonNode getPayment(String paymentId) throws Exception {
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(API_BASE + "/v1/payments/" + paymentId))
