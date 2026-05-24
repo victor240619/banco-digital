@@ -1,16 +1,29 @@
-# Build
-/target/
+# Maven
+target/
 *.jar
-*.class
+!**/src/main/**/*.jar
+!**/src/test/**/*.jar
 
-# IDE
-*.iml
+# IntelliJ / Eclipse
 .idea/
+*.iml
+*.iws
+.classpath
+.project
+.settings/
+bin/
+
+# VS Code
+.vscode/
+
+# Local env
+.env
+.env.local
+
+# Logs
+*.log
+logs/
 
 # OS
 .DS_Store
-
-# Env files (keep .env.example)
-.env
-.env.local
-.envrc
+Thumbs.db
