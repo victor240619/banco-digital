@@ -39,7 +39,7 @@ public class CustomerController {
 
     @PostMapping
     public ResponseEntity<?> create(@RequestBody @Valid CreateCustomerRequest request) throws StripeException {
-        Map<String, Object> metadata = new HashMap<>();
+        Map<String, String> metadata = new HashMap<>();
         metadata.put("type", request.type());
         if (request.document() != null) metadata.put("document", request.document());
 
