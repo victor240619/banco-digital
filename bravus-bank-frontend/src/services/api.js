@@ -76,6 +76,7 @@ export const authService = {
 // ====== User ======
 export const userService = {
   getProfile: () => api.get('/user/profile'),
+  getMe: () => api.get('/user/me'),
   getBalance: () => api.get('/user/balance'),
   getTransactions: () => api.get('/user/transactions'),
   deposit: (amount, description) =>

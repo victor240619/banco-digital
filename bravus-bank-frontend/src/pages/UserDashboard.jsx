@@ -8,6 +8,7 @@ import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
 import { userService, authService } from '../services/api';
+import BankIdentityCard from '../components/BankIdentityCard';
 import {
   formatCurrency, formatDate, getTransactionTypeLabel,
 } from '../utils/helpers';
@@ -37,6 +38,7 @@ const txSign = (type) =>
 // ============ Component ============
 export default function UserDashboard() {
   const [profile, setProfile] = useState(null);
+  const [me, setMe] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -60,11 +62,13 @@ export default function UserDashboard() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [profileRes, txRes] = await Promise.all([
+      const [profileRes, meRes, txRes] = await Promise.all([
         userService.getProfile(),
+        userService.getMe().catch(() => ({ data: null })),
         userService.getTransactions(),
       ]);
       setProfile(profileRes.data);
+      setMe(meRes?.data || null);
       setTransactions(Array.isArray(txRes.data) ? txRes.data : []);
     } catch (err) {
       setError('Erro ao carregar dados da conta.');
@@ -157,7 +161,10 @@ export default function UserDashboard() {
   );
 
   return (
-    <main className="container-app py-10">
+    <main className="container-app py-10 space-y-6">
+      {/* ==== Bank Identity Card ==== */}
+      {me && <BankIdentityCard me={me} />}
+
       {/* ==== Greeting + Balance ==== */}
       <div className="grid lg:grid-cols-3 gap-6">
         <motion.div
