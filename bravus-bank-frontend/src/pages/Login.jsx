@@ -1,99 +1,136 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
 import { authService } from '../services/api';
-import { IconShield, IconArrow } from '../components/Icon';
+import Logo from '../components/Logo';
 
 export default function Login() {
-  const nav = useNavigate();
+  const navigate = useNavigate();
   const [form, setForm] = useState({ username: '', password: '' });
-  const [err, setErr] = useState('');
-  const [debug, setDebug] = useState('');
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const onSubmit = async (e) => {
-    e.preventDefault();
-    setErr(''); setDebug(''); setLoading(true);
+  const canSubmit = form.username.trim().length > 0 && form.password.length > 0 && !loading;
+
+  const onSubmit = async (event) => {
+    event.preventDefault();
+    if (!canSubmit) return;
+
+    setError('');
+    setLoading(true);
+
     try {
-      const r = await authService.login(form.username.trim(), form.password);
-      setDebug(`OK token=${(r?.token||'').slice(0,18)}... roles=${JSON.stringify(r?.roles)}`);
-      const admin = (r?.roles || []).includes('ROLE_ADMIN');
-      // pequena espera pra garantir que o localStorage está consistente antes de navegar
-      setTimeout(() => nav(admin ? '/admin' : '/dashboard', { replace: true }), 200);
-    } catch (e2) {
-      const status = e2?.response?.status;
-      const m = e2?.response?.data;
-      const msg = typeof m === 'string' ? m : (m?.message || e2?.message || 'Credenciais inválidas.');
-      setErr(`[${status||'NET'}] ${msg}`);
-      setDebug(`URL=${e2?.config?.url||'?'} code=${e2?.code||'?'} msg=${e2?.message||'?'}`);
-    } finally { setLoading(false); }
+      const response = await authService.login(form.username.trim(), form.password);
+      const isAdmin = (response?.roles || []).includes('ROLE_ADMIN');
+      navigate(isAdmin ? '/admin' : '/dashboard', { replace: true });
+    } catch (err) {
+      const status = err?.response?.status;
+      const payload = err?.response?.data;
+      const message = typeof payload === 'string' ? payload : payload?.message;
+
+      if (status === 400 || status === 401 || status === 403) {
+        setError('Usuário ou senha incorretos.');
+      } else if (err?.code === 'ECONNABORTED') {
+        setError('A conexão demorou demais. Tente novamente em instantes.');
+      } else {
+        setError(message || 'Não foi possível entrar agora. Verifique a conexão com a API.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateField = (field) => (event) => {
+    setForm((current) => ({ ...current, [field]: event.target.value }));
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-bg px-4 py-8">
-      <div className="text-center mb-7">
-        <div className="logo-tx text-[42px]" style={{ letterSpacing: '7px' }}>BRAVUS</div>
-        <div className="text-[10px] tracking-[3px] uppercase text-text2 mt-1">Premium Bank · Cód. 999</div>
+    <main className="container-app py-12 sm:py-16">
+      <div className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1fr_420px] lg:items-center">
+        <section className="hidden lg:block">
+          <div className="pill-gold mb-5">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Acesso protegido
+          </div>
+          <h1 className="title-xl">
+            Entre com segurança no seu
+            <span className="gradient-text"> Bravus Bank.</span>
+          </h1>
+          <p className="mt-5 max-w-xl text-base leading-relaxed text-ink-300">
+            Acesse saldo, transferências, extrato e operações bancárias em um ambiente digital com proteção por JWT e auditoria de sessões.
+          </p>
+        </section>
+
+        <section className="card-premium p-7 sm:p-8">
+          <div className="mb-7">
+            <Logo />
+            <div className="mt-6 inline-flex items-center gap-1.5 rounded-full border border-gold-400/25 bg-gold-400/15 px-3 py-1 text-xs font-medium text-gold-200">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Acesso seguro
+            </div>
+            <h2 className="title-md mt-4">Bem-vindo de volta</h2>
+            <p className="mt-1.5 text-sm text-ink-300">Use suas credenciais para acessar sua conta.</p>
+          </div>
+
+          {error && (
+            <div className="alert-error mb-5" role="alert">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={onSubmit} className="space-y-5">
+            <div>
+              <label className="form-label" htmlFor="username">Usuário</label>
+              <input
+                id="username"
+                className="form-input"
+                type="text"
+                value={form.username}
+                onChange={updateField('username')}
+                placeholder="seu.usuario"
+                required
+                autoFocus
+                autoComplete="username"
+              />
+            </div>
+
+            <div>
+              <label className="form-label" htmlFor="password">Senha</label>
+              <input
+                id="password"
+                className="form-input"
+                type="password"
+                value={form.password}
+                onChange={updateField('password')}
+                placeholder="Digite sua senha"
+                required
+                autoComplete="current-password"
+              />
+            </div>
+
+            <button type="submit" disabled={!canSubmit} className="btn-primary w-full !py-3">
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Entrando...
+                </>
+              ) : (
+                <>
+                  Entrar
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
+            </button>
+          </form>
+
+          <p className="mt-6 text-center text-sm text-ink-300">
+            Ainda não tem conta?{' '}
+            <Link to="/register" className="font-medium text-gold-300 hover:text-gold-200">
+              Abrir conta
+            </Link>
+          </p>
+        </section>
       </div>
-
-      <div className="w-full max-w-[420px] card-gold p-7">
-        <div className="inline-flex items-center gap-1.5 bg-gold/10 border border-border2 text-gold text-[8px] tracking-[2px] uppercase px-2.5 py-1 rounded-sm mb-4">
-          <IconShield size={10} /> Acesso seguro
-        </div>
-        <h1 className="font-display text-[24px] tracking-[2px]">Bem-vindo de volta</h1>
-        <p className="text-[12px] text-text2 mt-1">Acesse sua conta Bravus Premium Bank</p>
-
-        {err && (
-          <div className="mt-4 px-3 py-2 rounded text-[11px] bg-red/10 border border-red/30 text-red-l">
-            {err}
-          </div>
-        )}
-        {debug && (
-          <div className="mt-2 px-3 py-2 rounded text-[10px] font-mono bg-card2 border border-border2 text-text2 break-all">
-            {debug}
-          </div>
-        )}
-
-        <form onSubmit={onSubmit} className="mt-5" autoComplete="off">
-          <div className="fg">
-            <label className="fl">Usuário</label>
-            <input
-              className="fi"
-              type="text"
-              name="bravus_user"
-              value={form.username}
-              onChange={(e) => setForm({ ...form, username: e.target.value })}
-              placeholder="seu.usuario"
-              required
-              autoFocus
-              autoComplete="off"
-            />
-          </div>
-          <div className="fg">
-            <label className="fl">Senha</label>
-            <input
-              className="fi"
-              type="password"
-              name="bravus_pass"
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              placeholder="••••••••"
-              required
-              autoComplete="new-password"
-            />
-          </div>
-          <button type="submit" disabled={loading} className="btn-full-gold disabled:opacity-60 flex items-center justify-center gap-2">
-            {loading ? 'Entrando…' : <>Entrar <IconArrow size={14} strokeWidth={2.2} /></>}
-          </button>
-        </form>
-
-        <div className="text-center text-[11px] text-text2 mt-5">
-          Ainda não tem conta? <Link to="/register" className="text-gold font-semibold">Abrir conta</Link>
-        </div>
-      </div>
-
-      <div className="text-[9px] text-text3 tracking-[2px] uppercase mt-6">
-        Criptografia TLS 1.3 · JWT + 2FA · © 2026 Bravus Bank
-      </div>
-    </div>
+    </main>
   );
 }
