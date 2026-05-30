@@ -1,14 +1,26 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
-import Home from './pages/Home';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import UserDashboard from './pages/UserDashboard';
-import AdminDashboard from './pages/AdminDashboard';
 import { authService } from './services/api';
+
+const Home = lazy(() => import('./pages/Home'));
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const UserDashboard = lazy(() => import('./pages/UserDashboard'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+
+function PageFallback() {
+  return (
+    <div className="container-app py-16">
+      <div className="card-premium mx-auto flex max-w-sm items-center justify-center gap-2 p-6 text-sm text-ink-200">
+        <Loader2 className="h-4 w-4 animate-spin text-gold-300" />
+        Carregando pagina...
+      </div>
+    </div>
+  );
+}
 
 function ProtectedRoute({ children, requireAdmin = false, userOnly = false }) {
   const isAuthenticated = authService.isAuthenticated();
@@ -50,7 +62,7 @@ export default function App() {
   }, []);
 
   return (
-    <Router>
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <div className="min-h-screen flex flex-col">
         <Navbar />
 
@@ -73,14 +85,16 @@ export default function App() {
         )}
 
         <div className="flex-1">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
-            <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
-            <Route path="/dashboard" element={<ProtectedRoute userOnly><UserDashboard /></ProtectedRoute>} />
-            <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>} />
-            <Route path="*" element={<NotFoundRedirect />} />
-          </Routes>
+          <Suspense fallback={<PageFallback />}>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+              <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
+              <Route path="/dashboard" element={<ProtectedRoute userOnly><UserDashboard /></ProtectedRoute>} />
+              <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>} />
+              <Route path="*" element={<NotFoundRedirect />} />
+            </Routes>
+          </Suspense>
         </div>
 
         <Footer />
