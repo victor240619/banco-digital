@@ -1,15 +1,19 @@
 export const formatCurrency = (amount) => {
-  if (amount === null || amount === undefined) return 'R$ 0,00';
-  const value = amount / 100;
+  const value = Number(amount);
+  if (!Number.isFinite(value)) return 'R$ 0,00';
+
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL',
-  }).format(value);
+  }).format(value / 100);
 };
 
 export const formatDate = (dateString) => {
   if (!dateString) return '';
+
   const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return '';
+
   return new Intl.DateTimeFormat('pt-BR', {
     day: '2-digit',
     month: '2-digit',
@@ -21,18 +25,18 @@ export const formatDate = (dateString) => {
 
 export const formatAccountNumber = (accountNumber) => {
   if (!accountNumber) return '';
-  return accountNumber.replace(/(\d{4})(\d{4})(\d{2})/, '$1-$2-$3');
+  return String(accountNumber).replace(/(\d{4})(\d{4})(\d{2})/, '$1-$2-$3');
 };
 
 export const getTransactionTypeLabel = (type) => {
   const labels = {
     DEPOSIT: 'Depósito',
     WITHDRAWAL: 'Saque',
-    TRANSFER_OUT: 'Transferência Enviada',
-    TRANSFER_IN: 'Transferência Recebida',
+    TRANSFER_OUT: 'Transferência enviada',
+    TRANSFER_IN: 'Transferência recebida',
     PAYMENT: 'Pagamento',
   };
-  return labels[type] || type;
+  return labels[type] || type || 'Transação';
 };
 
 export const getTransactionColor = (type) => {
