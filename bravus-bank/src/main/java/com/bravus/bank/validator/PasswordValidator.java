@@ -13,6 +13,6 @@ public class PasswordValidator {
     }
     
     public static String getRequirements() {
-        return "Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, and one number.";
+        return "A senha deve ter pelo menos 8 caracteres e conter pelo menos uma letra maiuscula, uma letra minuscula e um numero.";
     }
 }

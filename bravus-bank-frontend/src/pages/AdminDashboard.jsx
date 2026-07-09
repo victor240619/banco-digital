@@ -14,7 +14,7 @@ import { formatCurrency, formatDate, getTransactionTypeLabel } from '../utils/he
 import { cn } from '../lib/cn';
 
 // ============ Helpers ============
-const brl = (cents) => formatCurrency((cents ?? 0) / 100);
+const brl = (cents) => formatCurrency(cents ?? 0);
 const pct = (n) => `${(n ?? 0).toFixed(1)}%`;
 
 const KpiCard = ({ icon: Icon, label, value, accent, hint }) => (
@@ -202,7 +202,7 @@ function BankView({ bs, chain, stats }) {
   const reserva = bs.reservaMestre || {};
   const internas = bs.reservasInternas || [];
 
-  const pieData = internas.map((r) => ({ name: r.nome, value: (r.valorDisponivel ?? 0) / 100 }));
+  const pieData = internas.map((r) => ({ name: r.nome, value: r.valorDisponivel ?? 0 }));
 
   return (
     <div className="space-y-6">
