@@ -99,7 +99,7 @@ export default function App() {
               <Route path="/" element={<RootRoute />} />
               <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
               <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
-              <Route path="/dashboard" element={<ProtectedRoute userOnly><UserDashboard /></ProtectedRoute>} />
+              <Route path="/dashboard/*" element={<ProtectedRoute userOnly><UserDashboard /></ProtectedRoute>} />
               <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>} />
               <Route path="*" element={<NotFoundRedirect />} />
             </Routes>

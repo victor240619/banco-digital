@@ -6,10 +6,12 @@ import {
   Send, Landmark, CreditCard, Percent,
   FileText, Barcode, CalendarDays, LineChart, UserCheck, UsersRound,
   ClipboardCheck, ShieldCheck, Smartphone, Building2, List, Grid3X3,
+  Download, Share2,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { userService, authService } from '../services/api';
 import BankIdentityCard from '../components/BankIdentityCard';
 import {
@@ -58,6 +60,60 @@ const EMPTY_FORM = {
   pixKeyType: 'CPF',
 };
 
+const TAB_ROUTES = {
+  overview: '/dashboard',
+  deposit: '/dashboard/deposit',
+  withdraw: '/dashboard/withdraw',
+  transfer: '/dashboard/transfer',
+  statements: '/dashboard/extratos',
+};
+
+const MODULE_ROUTES = {
+  balances: '/dashboard/extratos',
+  payments: '/dashboard/pagamentos',
+  transfers: '/dashboard/transferencias',
+  receipts: '/dashboard/comprovantes',
+  pix: '/dashboard/pix',
+  'deposit-check': '/dashboard/deposit',
+  credit: '/dashboard/credito',
+  dda: '/dashboard/dda',
+  cards: '/dashboard/cartoes',
+  checks: '/dashboard/cheques',
+  schedules: '/dashboard/agendamentos',
+  investments: '/dashboard/investimentos',
+  pending: '/dashboard/pendencias',
+  beneficiaries: '/dashboard/favorecidos',
+  limits: '/dashboard/limites',
+  security: '/dashboard/seguranca',
+};
+
+const routeStateForPath = (pathname) => {
+  const path = pathname.replace(/\/+$/, '') || '/dashboard';
+  const states = {
+    '/dashboard': { tab: 'overview', activeModule: 'balances' },
+    '/dashboard/deposit': { tab: 'deposit', activeModule: 'deposit-check' },
+    '/dashboard/withdraw': { tab: 'withdraw', activeModule: 'balances' },
+    '/dashboard/saque': { tab: 'withdraw', activeModule: 'balances' },
+    '/dashboard/transfer': { tab: 'transfer', activeModule: 'transfers', transferMode: 'internal', channel: 'PIX' },
+    '/dashboard/transferencias': { tab: 'transfer', activeModule: 'transfers', transferMode: 'internal', channel: 'PIX' },
+    '/dashboard/pagamentos': { tab: 'transfer', activeModule: 'payments', transferMode: 'external', channel: 'PIX' },
+    '/dashboard/pix': { tab: 'transfer', activeModule: 'pix', transferMode: 'external', channel: 'PIX' },
+    '/dashboard/extratos': { tab: 'statements', activeModule: 'balances' },
+    '/dashboard/comprovantes': { tab: 'overview', activeModule: 'receipts' },
+    '/dashboard/credito': { tab: 'overview', activeModule: 'credit' },
+    '/dashboard/dda': { tab: 'overview', activeModule: 'dda' },
+    '/dashboard/cartoes': { tab: 'overview', activeModule: 'cards' },
+    '/dashboard/cheques': { tab: 'overview', activeModule: 'checks' },
+    '/dashboard/agendamentos': { tab: 'overview', activeModule: 'schedules' },
+    '/dashboard/investimentos': { tab: 'overview', activeModule: 'investments' },
+    '/dashboard/pendencias': { tab: 'overview', activeModule: 'pending' },
+    '/dashboard/favorecidos': { tab: 'overview', activeModule: 'beneficiaries' },
+    '/dashboard/limites': { tab: 'overview', activeModule: 'limits' },
+    '/dashboard/seguranca': { tab: 'overview', activeModule: 'security' },
+  };
+  return states[path] || states['/dashboard'];
+};
+
 const operationErrorMessage = (err, fallback = 'Falha na operacao.') => {
   const data = err?.response?.data;
   if (typeof data === 'string') return data;
@@ -103,6 +159,264 @@ const transactionCounterparty = (tx) => {
   return { label, name, document, account, bank, detail };
 };
 
+const BRAVUS_FULL_LOGO_SRC = '/brand/bravus-logo-transparent.png';
+
+const escapeHtml = (value) =>
+  String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[char]));
+
+const documentLogoUrl = () => {
+  if (typeof window === 'undefined') return BRAVUS_FULL_LOGO_SRC;
+  return new URL(BRAVUS_FULL_LOGO_SRC, window.location.origin).href;
+};
+
+const documentDate = (dateString) => formatDate(dateString) || '-';
+
+const monthKeyForDate = (dateString) => {
+  const date = dateString ? new Date(dateString) : new Date();
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  return `${safeDate.getFullYear()}-${String(safeDate.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const monthLabel = (key) => {
+  const [year, month] = String(key).split('-').map(Number);
+  const date = new Date(year, (month || 1) - 1, 1);
+  if (Number.isNaN(date.getTime())) return key;
+  return date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+};
+
+const selectedMonthLabel = (months) =>
+  months.length === 1 ? monthLabel(months[0]) : `${months.length} meses selecionados`;
+
+const documentFilename = (prefix, identifier) =>
+  `${prefix}-${String(identifier || new Date().toISOString().slice(0, 10))
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()}.html`;
+
+const downloadHtmlDocument = ({ filename, html }) => {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
+const shareHtmlDocument = async ({ filename, html, title, text }) => {
+  const file = new File([html], filename, { type: 'text/html' });
+  if (navigator.canShare?.({ files: [file] })) {
+    await navigator.share({ files: [file], title, text });
+    return 'Arquivo compartilhado.';
+  }
+  if (navigator.share) {
+    await navigator.share({ title, text, url: window.location.href });
+    return 'Link compartilhado.';
+  }
+  await navigator.clipboard?.writeText(text);
+  downloadHtmlDocument({ filename, html });
+  return 'Compartilhamento direto indisponivel. O arquivo foi baixado e o resumo foi copiado.';
+};
+
+const buildPrintableHtml = ({ title, subtitle, body, footer }) => `
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f4f4f5; color: #000; font-family: Arial, Helvetica, sans-serif; }
+    .document { max-width: 920px; margin: 24px auto; background: #fff; border: 1px solid #d4d4d8; padding: 32px; }
+    .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; border-bottom: 2px solid #000; padding-bottom: 20px; }
+    .logo { width: 260px; max-width: 48%; height: auto; object-fit: contain; }
+    .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .16em; font-weight: 700; }
+    h1 { margin: 8px 0 0; font-size: 28px; line-height: 1.15; }
+    .subtitle { margin-top: 6px; font-size: 14px; }
+    .section { margin-top: 24px; border: 1px solid #d4d4d8; padding: 16px; }
+    .section h2 { margin: 0 0 12px; font-size: 16px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; }
+    .line { display: flex; justify-content: space-between; gap: 18px; border-bottom: 1px solid #e4e4e7; padding: 7px 0; font-size: 13px; }
+    .line span:last-child { text-align: right; font-family: "Courier New", monospace; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border-bottom: 1px solid #d4d4d8; padding: 9px 6px; text-align: left; vertical-align: top; }
+    th { background: #f4f4f5; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    td.amount, th.amount { text-align: right; white-space: nowrap; font-family: "Courier New", monospace; font-weight: 700; }
+    .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .summary div { border: 1px solid #d4d4d8; padding: 12px; }
+    .summary strong { display: block; margin-top: 4px; font-family: "Courier New", monospace; }
+    .footer { margin-top: 24px; border-top: 1px solid #d4d4d8; padding-top: 14px; font-size: 11px; color: #000; }
+    @media (max-width: 700px) {
+      .document { margin: 0; padding: 18px; border: 0; }
+      .header { flex-direction: column; }
+      .logo { max-width: 100%; width: 230px; }
+      .grid, .summary { grid-template-columns: 1fr; }
+      table { font-size: 11px; }
+    }
+    @media print {
+      body { background: #fff; }
+      .document { margin: 0; max-width: none; border: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="document">
+    <header class="header">
+      <img class="logo" src="${escapeHtml(documentLogoUrl())}" alt="Bravus Bank" />
+      <div>
+        <div class="eyebrow">Bravus Premium Bank</div>
+        <h1>${escapeHtml(title)}</h1>
+        <div class="subtitle">${escapeHtml(subtitle)}</div>
+      </div>
+    </header>
+    ${body}
+    <footer class="footer">${escapeHtml(footer || `Documento emitido em ${formatDate(new Date().toISOString())}`)}</footer>
+  </main>
+</body>
+</html>`;
+
+const accountRowsHtml = ({ me, profile, user }) => {
+  const account = me?.dadosBancarios || {};
+  const rows = [
+    ['Titular', me?.fullName || profile?.fullName || user?.fullName || user?.username],
+    ['CPF/CNPJ', me?.cpf || profile?.cpf || user?.cpf],
+    ['Banco', account.nomeBanco || 'Bravus Premium Bank'],
+    ['Codigo banco', account.codigoBanco || '999'],
+    ['Agencia', account.agencia || profile?.agencia || '0001'],
+    ['Conta', account.contaFormatada || account.conta || profile?.accountNumber || '-'],
+    ['Tipo', account.tipoConta || me?.accountType || 'CORRENTE'],
+  ];
+  return rows.map(([label, value]) => `<div class="line"><span>${escapeHtml(label)}</span><span>${escapeHtml(value || '-')}</span></div>`).join('');
+};
+
+const receiptRowsHtml = (rows) =>
+  rows.map(([label, value]) => `<div class="line"><span>${escapeHtml(label)}</span><span>${escapeHtml(value || '-')}</span></div>`).join('');
+
+const partyRows = (party) => [
+  ['Nome', party?.name],
+  ['Documento', party?.document],
+  ['Banco', party?.bankName || party?.bankCode],
+  ['Codigo', party?.bankCode],
+  ['ISPB', party?.ispb],
+  ['Agencia', party?.agency],
+  ['Conta', [party?.accountNumber, party?.accountDigit].filter(Boolean).join('-')],
+  ['Tipo', party?.accountType],
+  ['Chave Pix', party?.pixKey],
+  ['Tipo chave', party?.pixKeyType],
+];
+
+const buildReceiptDocument = (receipt) => {
+  const title = `Comprovante Bravus ${formatCurrency(receipt?.amountCentavos)}`;
+  const body = `
+    <section class="section">
+      <h2>Dados da transferencia</h2>
+      ${receiptRowsHtml([
+        ['Comprovante', receipt?.receiptId],
+        ['Tipo', receipt?.receiptKind],
+        ['Transacao', receipt?.transactionId],
+        ['Valor', formatCurrency(receipt?.amountCentavos)],
+        ['Canal', receipt?.channel],
+        ['Status', receipt?.status],
+        ['Liquidacao', receipt?.settlementStatus],
+        ['Data', documentDate(receipt?.createdAt)],
+      ])}
+    </section>
+    <section class="section">
+      <h2>Pagador</h2>
+      ${receiptRowsHtml(partyRows(receipt?.payer))}
+    </section>
+    <section class="section">
+      <h2>Recebedor</h2>
+      ${receiptRowsHtml(partyRows(receipt?.beneficiary))}
+    </section>
+    <section class="section">
+      <h2>Rastreabilidade</h2>
+      ${receiptRowsHtml([
+        ['Provedor', receipt?.provider],
+        ['ID provedor', receipt?.providerTransferId],
+        ['Rede destino', receipt?.destinationNetwork],
+        ['Participante', receipt?.destinationParticipantCode],
+        ['Confirmacao destino', receipt?.destinationConfirmationId],
+        ['Confirmado em', documentDate(receipt?.destinationConfirmedAt)],
+        ['Mensagem', receipt?.settlementMessage],
+        ['Idempotencia', receipt?.idempotencyKey],
+        ['Descricao', receipt?.description || 'Transferencia Bravus'],
+      ])}
+    </section>`;
+  return {
+    filename: documentFilename('comprovante-bravus', receipt?.receiptId || receipt?.transactionId),
+    html: buildPrintableHtml({
+      title,
+      subtitle: `${receipt?.channel || 'BRAVUS'} | ${receipt?.settlementStatus || receipt?.status || 'PROCESSADO'}`,
+      body,
+      footer: `Comprovante emitido em ${formatDate(new Date().toISOString())}. Validacao interna: ${receipt?.receiptId || '-'}`,
+    }),
+    text: `${title}\nRecebedor: ${receipt?.beneficiary?.name || '-'}\nValor: ${formatCurrency(receipt?.amountCentavos)}\nComprovante: ${receipt?.receiptId || '-'}`,
+  };
+};
+
+const buildStatementDocument = ({ months, transactions, me, profile, user }) => {
+  const selected = new Set(months);
+  const filtered = transactions
+    .filter((tx) => selected.has(monthKeyForDate(tx.createdAt || tx.date)))
+    .slice()
+    .sort((a, b) => new Date(a.createdAt || a.date || 0) - new Date(b.createdAt || b.date || 0));
+  const inflow = filtered.filter((tx) => isCreditTransaction(tx.type)).reduce((acc, tx) => acc + (tx.amount || 0), 0);
+  const outflow = filtered.filter((tx) => !isCreditTransaction(tx.type)).reduce((acc, tx) => acc + (tx.amount || 0), 0);
+  const rows = filtered.map((tx) => {
+    const counterparty = transactionCounterparty(tx);
+    const signed = `${txSign(tx.type)} ${formatCurrency(tx.amount)}`;
+    return `<tr>
+      <td>${escapeHtml(documentDate(tx.createdAt || tx.date))}</td>
+      <td>${escapeHtml(getTransactionTypeLabel(tx.type))}<br/><small>${escapeHtml(tx.description || '')}</small></td>
+      <td>${escapeHtml(counterparty.name || '-')}<br/><small>${escapeHtml(counterparty.detail || '')}</small></td>
+      <td class="amount">${escapeHtml(signed)}</td>
+    </tr>`;
+  }).join('');
+  const period = selectedMonthLabel(months);
+  const body = `
+    <section class="section">
+      <h2>Conta</h2>
+      <div class="grid">${accountRowsHtml({ me, profile, user })}</div>
+    </section>
+    <section class="section">
+      <h2>Resumo do periodo</h2>
+      <div class="summary">
+        <div>Entradas<strong>${escapeHtml(formatCurrency(inflow))}</strong></div>
+        <div>Saidas<strong>${escapeHtml(formatCurrency(outflow))}</strong></div>
+        <div>Movimentos<strong>${filtered.length}</strong></div>
+      </div>
+    </section>
+    <section class="section">
+      <h2>Movimentacoes</h2>
+      <table>
+        <thead><tr><th>Data</th><th>Operacao</th><th>Contraparte</th><th class="amount">Valor</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="4">Nenhuma movimentacao no periodo selecionado.</td></tr>'}</tbody>
+      </table>
+    </section>`;
+  return {
+    filename: documentFilename('extrato-bravus', months.join('-')),
+    html: buildPrintableHtml({
+      title: 'Extrato Bravus Bank',
+      subtitle: `Periodo: ${period}`,
+      body,
+      footer: `Extrato emitido em ${formatDate(new Date().toISOString())}. Documento gerado pelo Bravus Premium Bank.`,
+    }),
+    text: `Extrato Bravus Bank\nPeriodo: ${period}\nEntradas: ${formatCurrency(inflow)}\nSaidas: ${formatCurrency(outflow)}\nMovimentos: ${filtered.length}`,
+  };
+};
+
 // ============ Component ============
 export default function UserDashboard() {
   const [profile, setProfile] = useState(null);
@@ -126,8 +440,24 @@ export default function UserDashboard() {
   const [submitting, setSubmitting] = useState(false);
 
   const user = authService.getCurrentUser();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    const route = routeStateForPath(location.pathname);
+    setTab(route.tab);
+    setActiveModule(route.activeModule);
+    if (route.transferMode) {
+      setForm({
+        ...EMPTY_FORM,
+        transferMode: route.transferMode,
+        channel: route.channel || 'PIX',
+        destinationNetwork: route.channel === 'TED' ? 'TED_BR' : 'PIX_BR',
+      });
+      setResolvedRecipient(null);
+    }
+  }, [location.pathname]);
   useEffect(() => {
     if (success || error) {
       const t = setTimeout(() => { setSuccess(''); setError(''); }, 4500);
@@ -264,7 +594,7 @@ export default function UserDashboard() {
       setForm(EMPTY_FORM);
       setResolvedRecipient(null);
       await loadData();
-      setTab('overview');
+      navigateToTab('overview');
     } catch (err) {
       setError(operationErrorMessage(err));
     } finally {
@@ -282,6 +612,27 @@ export default function UserDashboard() {
       setError(operationErrorMessage(err, 'Falha ao carregar comprovante.'));
     } finally {
       setReceiptLoading(null);
+    }
+  };
+
+  const downloadReceipt = () => {
+    if (!selectedReceipt) return;
+    const document = buildReceiptDocument(selectedReceipt);
+    downloadHtmlDocument(document);
+    setSuccess('Comprovante baixado.');
+  };
+
+  const shareReceipt = async () => {
+    if (!selectedReceipt) return;
+    const document = buildReceiptDocument(selectedReceipt);
+    try {
+      const message = await shareHtmlDocument({
+        ...document,
+        title: 'Comprovante Bravus Bank',
+      });
+      setSuccess(message);
+    } catch (err) {
+      if (err?.name !== 'AbortError') setError('Nao foi possivel compartilhar o comprovante.');
     }
   };
 
@@ -340,6 +691,11 @@ export default function UserDashboard() {
   const annualInterestRate = Number(creditSummary?.taxaJurosAnualMedia ?? 0);
   const monthlyInterestRate = Number(creditSummary?.taxaJurosMensalEquivalente ?? 0);
 
+  const navigateToTab = (id) => {
+    setTab(id);
+    navigate(TAB_ROUTES[id] || '/dashboard');
+  };
+
   const openTransferMode = (transferMode = 'internal', channel = 'PIX') => {
     setForm({
       ...EMPTY_FORM,
@@ -351,6 +707,7 @@ export default function UserDashboard() {
         : channel,
     });
     setTab('transfer');
+    navigate(transferMode === 'internal' ? '/dashboard/transfer' : '/dashboard/pagamentos');
   };
 
   const bankingModules = [
@@ -374,17 +731,17 @@ export default function UserDashboard() {
 
   const handleModuleClick = (moduleId) => {
     setActiveModule(moduleId);
-    if (moduleId === 'balances') setTab('overview');
-    if (moduleId === 'payments' || moduleId === 'pix') openTransferMode('external', 'PIX');
-    if (moduleId === 'transfers') openTransferMode('internal', 'PIX');
-    if (moduleId === 'deposit-check') setTab('deposit');
-    if (moduleId === 'credit') openTransferMode('external', 'PIX');
-    if (moduleId === 'receipts') setTab('overview');
+    if (moduleId === 'payments' || moduleId === 'pix') return openTransferMode('external', 'PIX');
+    if (moduleId === 'transfers') return openTransferMode('internal', 'PIX');
+    if (moduleId === 'deposit-check') return navigateToTab('deposit');
+    if (moduleId === 'balances') return navigateToTab('statements');
+    setTab('overview');
+    return navigate(MODULE_ROUTES[moduleId] || '/dashboard');
   };
 
   const Tab = ({ id, label, icon: Icon }) => (
     <button
-      onClick={() => setTab(id)}
+      onClick={() => navigateToTab(id)}
       className={cn(
         'inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition',
         tab === id ? 'bg-white/10 text-white shadow-card' : 'text-ink-300 hover:text-white hover:bg-white/5'
@@ -471,9 +828,9 @@ export default function UserDashboard() {
           </div>
 
           <div className="mt-6 flex flex-wrap gap-2">
-            <button onClick={() => setTab('deposit')} className="btn-secondary"><ArrowDownToLine className="h-4 w-4" /> Depositar</button>
-            <button onClick={() => setTab('withdraw')} className="btn-secondary"><ArrowUpFromLine className="h-4 w-4" /> Sacar</button>
-            <button onClick={() => setTab('transfer')} className="btn-primary"><ArrowRightLeft className="h-4 w-4" /> Transferir</button>
+            <button onClick={() => navigateToTab('deposit')} className="btn-secondary"><ArrowDownToLine className="h-4 w-4" /> Depositar</button>
+            <button onClick={() => navigateToTab('withdraw')} className="btn-secondary"><ArrowUpFromLine className="h-4 w-4" /> Sacar</button>
+            <button onClick={() => navigateToTab('transfer')} className="btn-primary"><ArrowRightLeft className="h-4 w-4" /> Transferir</button>
           </div>
         </motion.div>
 
@@ -525,7 +882,7 @@ export default function UserDashboard() {
         openReceipt={openReceipt}
         receiptLoading={receiptLoading}
         openTransferMode={openTransferMode}
-        setTab={setTab}
+        setTab={navigateToTab}
       />
 
       {/* Alerts */}
@@ -548,6 +905,7 @@ export default function UserDashboard() {
         <Tab id="deposit" label="Depósito" icon={ArrowDownToLine} />
         <Tab id="withdraw" label="Saque" icon={ArrowUpFromLine} />
         <Tab id="transfer" label="Transferência" icon={ArrowRightLeft} />
+        <Tab id="statements" label="Extratos" icon={FileText} />
       </div>
 
       {/* Content */}
@@ -606,6 +964,17 @@ export default function UserDashboard() {
               )}
             </div>
           </div>
+        )}
+
+        {tab === 'statements' && (
+          <StatementExportPanel
+            transactions={transactions}
+            me={me}
+            profile={profile}
+            user={user}
+            onSuccess={setSuccess}
+            onError={setError}
+          />
         )}
 
         {/* Forms */}
@@ -916,6 +1285,11 @@ export default function UserDashboard() {
               >
               <div className="flex items-start justify-between gap-4">
                 <div>
+                  <img
+                    src={BRAVUS_FULL_LOGO_SRC}
+                    alt="Bravus Bank"
+                    className="mb-4 h-16 w-auto object-contain"
+                  />
                   <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-slate-300 bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-black">
                     <Receipt className="h-3.5 w-3.5" />
                     Comprovante Bravus
@@ -925,13 +1299,31 @@ export default function UserDashboard() {
                     {selectedReceipt.channel} · {selectedReceipt.status} · {selectedReceipt.settlementStatus}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-slate-100"
-                  onClick={() => setSelectedReceipt(null)}
-                >
-                  Fechar
-                </button>
+                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-slate-100"
+                    onClick={downloadReceipt}
+                  >
+                    <Download className="h-4 w-4" />
+                    Baixar
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-slate-100"
+                    onClick={shareReceipt}
+                  >
+                    <Share2 className="h-4 w-4" />
+                    Compartilhar
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-slate-100"
+                    onClick={() => setSelectedReceipt(null)}
+                  >
+                    Fechar
+                  </button>
+                </div>
               </div>
 
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -1123,6 +1515,12 @@ function PortalModuleDetail({
           <div className="mt-1 text-lg font-display font-semibold text-white">{module?.label}</div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {activeModule === 'balances' && (
+            <button type="button" className="btn-primary !py-2 !px-3" onClick={() => setTab('statements')}>
+              <Download className="h-4 w-4" />
+              Extratos
+            </button>
+          )}
           {(activeModule === 'payments' || activeModule === 'pix') && (
             <button type="button" className="btn-primary !py-2 !px-3" onClick={() => openTransferMode('external', 'PIX')}>
               <Send className="h-4 w-4" />
@@ -1209,6 +1607,135 @@ function PortalModuleDetail({
           <Metric label="Ultima atualizacao" value={formatDate(new Date().toISOString())} />
         </div>
       )}
+    </div>
+  );
+}
+
+function StatementExportPanel({ transactions, me, profile, user, onSuccess, onError }) {
+  const monthOptions = useMemo(() => {
+    const keys = Array.from(new Set(transactions.map((tx) => monthKeyForDate(tx.createdAt || tx.date))));
+    if (keys.length === 0) keys.push(monthKeyForDate(new Date().toISOString()));
+    return keys
+      .sort((a, b) => b.localeCompare(a))
+      .slice(0, 18)
+      .map((key) => ({
+        key,
+        label: monthLabel(key),
+        count: transactions.filter((tx) => monthKeyForDate(tx.createdAt || tx.date) === key).length,
+      }));
+  }, [transactions]);
+  const [selectedMonths, setSelectedMonths] = useState(() => monthOptions[0]?.key ? [monthOptions[0].key] : []);
+
+  useEffect(() => {
+    if (selectedMonths.length === 0 && monthOptions[0]?.key) {
+      setSelectedMonths([monthOptions[0].key]);
+    }
+  }, [monthOptions, selectedMonths.length]);
+
+  const selectedSet = new Set(selectedMonths);
+  const selectedTransactions = transactions.filter((tx) => selectedSet.has(monthKeyForDate(tx.createdAt || tx.date)));
+  const selectedInflow = selectedTransactions.filter((tx) => isCreditTransaction(tx.type)).reduce((acc, tx) => acc + (tx.amount || 0), 0);
+  const selectedOutflow = selectedTransactions.filter((tx) => !isCreditTransaction(tx.type)).reduce((acc, tx) => acc + (tx.amount || 0), 0);
+
+  const toggleMonth = (key) => {
+    setSelectedMonths((current) => {
+      if (current.includes(key)) return current.filter((item) => item !== key);
+      return [...current, key].sort((a, b) => b.localeCompare(a));
+    });
+  };
+
+  const buildDocument = () => buildStatementDocument({
+    months: selectedMonths.length ? selectedMonths.slice().sort() : [monthOptions[0]?.key].filter(Boolean),
+    transactions,
+    me,
+    profile,
+    user,
+  });
+
+  const downloadStatement = () => {
+    if (selectedMonths.length === 0) return onError('Selecione pelo menos um mes para baixar o extrato.');
+    const document = buildDocument();
+    downloadHtmlDocument(document);
+    onSuccess('Extrato baixado com a logo completa do Bravus Bank.');
+  };
+
+  const shareStatement = async () => {
+    if (selectedMonths.length === 0) return onError('Selecione pelo menos um mes para compartilhar o extrato.');
+    const document = buildDocument();
+    try {
+      const message = await shareHtmlDocument({
+        ...document,
+        title: 'Extrato Bravus Bank',
+      });
+      onSuccess(message);
+    } catch (err) {
+      if (err?.name !== 'AbortError') onError('Nao foi possivel compartilhar o extrato.');
+    }
+  };
+
+  return (
+    <div className="card-premium p-6" data-testid="statement-export-panel">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <img src={BRAVUS_FULL_LOGO_SRC} alt="Bravus Bank" className="h-14 w-auto object-contain" />
+            <div>
+              <h3 className="title-md">Extratos Bravus Bank</h3>
+              <p className="mt-1 text-sm text-ink-300">Selecione um ou mais meses para baixar ou compartilhar.</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => setSelectedMonths(monthOptions.map((option) => option.key))}>
+            Todos
+          </button>
+          <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => setSelectedMonths([])}>
+            Limpar
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {monthOptions.map((option) => (
+          <label
+            key={option.key}
+            className={cn(
+              'flex cursor-pointer items-center justify-between gap-3 rounded-xl border p-4 transition',
+              selectedMonths.includes(option.key)
+                ? 'border-amber-300/50 bg-amber-300/10'
+                : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06]'
+            )}
+          >
+            <span>
+              <span className="block text-sm font-semibold text-white">{option.label}</span>
+              <span className="block text-xs text-ink-400">{option.count} movimentacoes</span>
+            </span>
+            <input
+              type="checkbox"
+              className="h-5 w-5 accent-amber-300"
+              checked={selectedMonths.includes(option.key)}
+              onChange={() => toggleMonth(option.key)}
+            />
+          </label>
+        ))}
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-3">
+        <Metric label="Meses selecionados" value={String(selectedMonths.length)} />
+        <Metric label="Entradas no periodo" value={formatCurrency(selectedInflow)} />
+        <Metric label="Saidas no periodo" value={formatCurrency(selectedOutflow)} />
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-3">
+        <button type="button" className="btn-primary" onClick={downloadStatement}>
+          <Download className="h-4 w-4" />
+          Baixar extrato
+        </button>
+        <button type="button" className="btn-secondary" onClick={shareStatement}>
+          <Share2 className="h-4 w-4" />
+          Compartilhar extrato
+        </button>
+      </div>
     </div>
   );
 }
