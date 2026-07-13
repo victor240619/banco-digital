@@ -16,6 +16,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -180,7 +181,7 @@ public class UserController {
     @Transactional
     public ResponseEntity<?> transfer(@RequestBody @Valid TransactionRequest request) {
         if (!"TRANSFER_OUT".equals(request.type())) {
-            return ResponseEntity.badRequest().body("Invalid transaction type");
+            return transactionError("Tipo de transacao invalido para transferencia.", "INVALID_TRANSACTION_TYPE");
         }
         
         String username = SecurityContextHolder.getContext().getAuthentication().getName();
@@ -188,17 +189,19 @@ public class UserController {
                 .orElseThrow(() -> new RuntimeException("User not found"));
         
         if (fromUser.getBalance() < request.amount()) {
-            return ResponseEntity.badRequest().body("Insufficient balance");
+            return transactionError("Saldo contabil insuficiente para concluir a transferencia.", "INSUFFICIENT_BALANCE");
         }
         
         UserEntity toUser = findTransferDestination(request.destinationAccount()).orElse(null);
         
         if (toUser == null) {
-            return ResponseEntity.badRequest().body("Destino Bravus nao encontrado. Informe conta, CPF, e-mail, username ou chave Pix.");
+            return transactionError(
+                    "Destino Bravus nao encontrado. Para outros bancos, use Pagamentos/Pix ou Outros bancos.",
+                    "BRAVUS_DESTINATION_NOT_FOUND");
         }
         
         if (fromUser.getId().equals(toUser.getId())) {
-            return ResponseEntity.badRequest().body("Cannot transfer to same account");
+            return transactionError("Nao e permitido transferir para a propria conta Bravus.", "SELF_TRANSFER");
         }
         
         // Update balances
@@ -233,7 +236,22 @@ public class UserController {
         inTransaction.setStatus("COMPLETED");
         transactionRepository.save(inTransaction);
         
-        return ResponseEntity.ok("Transfer successful. New balance: " + fromUser.getBalance());
+        return ResponseEntity.ok(Map.of(
+                "message", "Transferencia interna Bravus liquidada.",
+                "status", "COMPLETED",
+                "provider", "BRAVUS_INTERNAL_LEDGER",
+                "settlementStatus", "LIQUIDADA_CONFIRMADA",
+                "balanceCentavos", fromUser.getBalance(),
+                "transactionId", outTransaction.getId(),
+                "destinationAccount", toUser.getAccountNumber()
+        ));
+    }
+
+    private ResponseEntity<Map<String, String>> transactionError(String message, String code) {
+        return ResponseEntity.badRequest().body(Map.of(
+                "message", message,
+                "code", code
+        ));
     }
 
     private Optional<UserEntity> findTransferDestination(String destination) {

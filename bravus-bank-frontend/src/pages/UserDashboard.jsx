@@ -58,6 +58,12 @@ const EMPTY_FORM = {
   pixKeyType: 'CPF',
 };
 
+const operationErrorMessage = (err, fallback = 'Falha na operacao.') => {
+  const data = err?.response?.data;
+  if (typeof data === 'string') return data;
+  return data?.message || fallback;
+};
+
 // ============ Component ============
 export default function UserDashboard() {
   const [profile, setProfile] = useState(null);
@@ -141,7 +147,19 @@ export default function UserDashboard() {
       if (kind === 'deposit') await userService.deposit(amountCentavos, form.description);
       if (kind === 'withdraw') await userService.withdraw(amountCentavos, form.description);
       if (kind === 'transfer' && form.transferMode === 'internal') {
-        await userService.transfer(amountCentavos, form.destinationAccount, form.description);
+        const { data } = await userService.transfer(amountCentavos, form.destinationAccount, form.description);
+        if (data?.provider === 'BRAVUS_INTERNAL_LEDGER') {
+          message = 'Transferencia Bravus liquidada na hora.';
+        }
+        if (data?.provider === 'BRAVUS_SELF_PROVIDER') {
+          message = data?.settlementStatus === 'LIQUIDADA_CONFIRMADA'
+            ? 'Pagamento liquidado pelo provedor Bravus.'
+            : 'Pagamento debitado no Bravus. Aguardando confirmacao do destino.';
+          if (data?.id) {
+            const receiptRes = await userService.getExternalTransferReceipt(data.id).catch(() => ({ data: null }));
+            if (receiptRes?.data) setSelectedReceipt(receiptRes.data);
+          }
+        }
       }
       if (kind === 'transfer' && form.transferMode === 'external') {
         const { data } = await userService.externalTransfer({
@@ -179,8 +197,7 @@ export default function UserDashboard() {
       await loadData();
       setTab('overview');
     } catch (err) {
-      const msg = err?.response?.data?.message || err?.response?.data || 'Falha na operação.';
-      setError(typeof msg === 'string' ? msg : 'Falha na operação.');
+      setError(operationErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -193,8 +210,7 @@ export default function UserDashboard() {
       const { data } = await userService.getExternalTransferReceipt(orderId);
       setSelectedReceipt(data);
     } catch (err) {
-      const msg = err?.response?.data?.message || err?.response?.data || 'Falha ao carregar comprovante.';
-      setError(typeof msg === 'string' ? msg : 'Falha ao carregar comprovante.');
+      setError(operationErrorMessage(err, 'Falha ao carregar comprovante.'));
     } finally {
       setReceiptLoading(null);
     }

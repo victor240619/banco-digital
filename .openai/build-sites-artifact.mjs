@@ -54,7 +54,7 @@ for (const file of await walk(distDir)) {
 }
 files["/"] = files["/index.html"];
 
-const entrypoint = `const buildTarget = "bravus-sites-api-v7";
+const entrypoint = `const buildTarget = "bravus-sites-api-v8";
 const files = ${JSON.stringify(files)};
 const now = () => new Date().toISOString();
 const joaoCreditGrant = {
@@ -141,6 +141,9 @@ function json(data, init = {}) {
     },
   });
 }
+function badRequest(message, code, extra = {}) {
+  return json({ message, code, ...extra }, { status: 400 });
+}
 
 function userSummary(user) {
   return {
@@ -209,14 +212,16 @@ function findTransferDestination(value) {
   const raw = String(value || "").trim();
   const onlyDigits = digits(raw);
   if (!raw) return null;
+  const rawLower = raw.toLowerCase();
   return Object.values(state.users).find((item) =>
     item.accountNumber === raw
-    || item.accountNumber === onlyDigits
-    || item.cpf === onlyDigits
-    || String(item.email || "").toLowerCase() === raw.toLowerCase()
-    || String(item.username || "").toLowerCase() === raw.toLowerCase()
-    || item.cpf === raw
-    || String(item.chavePix || "").toLowerCase() === raw.toLowerCase()
+    || (onlyDigits && item.accountNumber === onlyDigits)
+    || (onlyDigits && item.cpf === onlyDigits)
+    || (onlyDigits && item.chavePix === onlyDigits)
+    || String(item.email || "").toLowerCase() === rawLower
+    || String(item.username || "").toLowerCase() === rawLower
+    || (item.cpf && item.cpf === raw)
+    || String(item.chavePix || "").toLowerCase() === rawLower
   ) || null;
 }
 
@@ -602,17 +607,91 @@ async function handleApi(request) {
 
   if (request.method === "POST" && ["/user/deposit", "/user/withdraw", "/user/transfer"].includes(path)) {
     const body = await request.json().catch(() => ({}));
-    const amount = Number(body.amount || 0);
-    if (!amount || amount <= 0) return json("Digite um valor valido.", { status: 400 });
-    if (path !== "/user/deposit" && user.balance < amount) return json("Insufficient balance", { status: 400 });
+    const amount = Number(body.amount || body.amountCentavos || 0);
+    if (!amount || amount <= 0) return badRequest("Digite um valor valido.", "INVALID_AMOUNT");
+    if (path !== "/user/deposit" && user.balance < amount) {
+      return badRequest("Saldo contabil insuficiente para concluir a operacao.", "INSUFFICIENT_BALANCE", { balanceCentavos: user.balance });
+    }
     let destination = null;
     if (path === "/user/transfer") {
-      destination = findTransferDestination(body.destinationAccount);
+      const destinationRaw = body.destinationAccount || body.pixKey || body.accountNumber || "";
+      destination = findTransferDestination(destinationRaw);
       if (!destination) {
-        return json("Destino Bravus nao encontrado. Informe conta, CPF, e-mail, username ou chave Pix.", { status: 400 });
+        const raw = String(destinationRaw || "").trim();
+        const rawDigits = digits(raw);
+        const pixKeyType = body.pixKeyType || (raw.includes("@") ? "EMAIL" : rawDigits.length === 11 ? "CPF" : rawDigits.length === 14 ? "CNPJ" : "EVP");
+        const externalBody = {
+          ...body,
+          channel: body.channel || "PIX",
+          destinationNetwork: body.destinationNetwork || "PIX_BR",
+          pixKey: body.pixKey || raw || null,
+          pixKeyType,
+          beneficiaryName: body.beneficiaryName || "Beneficiario informado",
+          beneficiaryDocument: body.beneficiaryDocument || rawDigits || "00000000000",
+          description: body.description || "Pagamento via Bravus",
+        };
+        if (!externalBody.pixKey && !externalBody.accountNumber) {
+          return badRequest(
+            "Informe conta, CPF, e-mail ou chave Pix. Para outros bancos, use Pagamentos/Pix ou Outros bancos.",
+            "DESTINATION_REQUIRED"
+          );
+        }
+        if (availableCreditFor(user) < amount) {
+          return badRequest("Saldo escritural liberado insuficiente.", "INSUFFICIENT_CREDIT", { availableCreditCentavos: availableCreditFor(user) });
+        }
+        user.balance -= amount;
+        consumeCreditIfAvailable(user, amount);
+        const tx = {
+          id: state.transactions.length + 1,
+          username: user.username,
+          type: "TRANSFER_EXTERNAL",
+          amount,
+          description: externalBody.description,
+          destinationAccount: externalBody.pixKey || [externalBody.bankCode, externalBody.agency, externalBody.accountNumber].filter(Boolean).join(" "),
+          status: "COMPLETED",
+          createdAt: now(),
+        };
+        state.transactions.unshift(tx);
+        const idempotencyKey = "legacy-transfer-" + Date.now();
+        const settlement = settlementFor(externalBody, idempotencyKey);
+        const order = {
+          id: state.externalTransfers.length + 1,
+          username: user.username,
+          transactionId: tx.id,
+          amountCentavos: amount,
+          channel: externalBody.channel,
+          currency: "BRL",
+          beneficiaryName: externalBody.beneficiaryName,
+          beneficiaryDocument: String(externalBody.beneficiaryDocument || "").replace(/\\D/g, ""),
+          bankCode: externalBody.bankCode || null,
+          ispb: externalBody.ispb || null,
+          agency: externalBody.agency || null,
+          accountNumber: externalBody.accountNumber || null,
+          accountDigit: externalBody.accountDigit || null,
+          accountType: externalBody.accountType || null,
+          pixKey: externalBody.pixKey || null,
+          pixKeyType: externalBody.pixKeyType || null,
+          description: externalBody.description,
+          provider: "BRAVUS_SELF_PROVIDER",
+          providerTransferId: "bravus-self-legacy-" + Date.now(),
+          idempotencyKey,
+          status: "COMPLETED",
+          settlementStatus: settlement.settlementStatus,
+          receiptKind: settlement.receiptKind,
+          destinationNetwork: settlement.destinationNetwork,
+          destinationParticipantCode: settlement.destinationParticipantCode || null,
+          destinationConfirmationId: settlement.destinationConfirmationId || null,
+          destinationConfirmedAt: settlement.destinationConfirmedAt || null,
+          settlementMessage: "Endpoint legado /user/transfer processado como pagamento Pix pelo provedor Bravus. " + settlement.settlementMessage,
+          errorMessage: null,
+          rawResponse: "{\\"provider\\":\\"BRAVUS_SELF_PROVIDER\\",\\"status\\":\\"COMPLETED\\",\\"legacyEndpoint\\":\\"/api/user/transfer\\"}",
+          createdAt: now(),
+        };
+        state.externalTransfers.unshift(order);
+        return json(order);
       }
       if (destination.username === user.username) {
-        return json("Cannot transfer to same account", { status: 400 });
+        return badRequest("Nao e permitido transferir para a propria conta Bravus.", "SELF_TRANSFER");
       }
     }
     if (path === "/user/deposit") {
@@ -645,7 +724,15 @@ async function handleApi(request) {
         createdAt: now(),
       });
     }
-    return json("Operacao realizada. New balance: " + user.balance);
+    return json({
+      message: destination ? "Transferencia interna Bravus liquidada." : "Operacao realizada.",
+      status: "COMPLETED",
+      provider: destination ? "BRAVUS_INTERNAL_LEDGER" : "BRAVUS_SITES_LEDGER",
+      settlementStatus: destination ? "LIQUIDADA_CONFIRMADA" : "COMPLETED",
+      balanceCentavos: user.balance,
+      transaction: tx,
+      destination: destination ? userSummary(destination) : null,
+    });
   }
 
   if (!user.roles.includes("ROLE_ADMIN") && path.startsWith("/admin/")) {
