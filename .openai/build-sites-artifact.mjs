@@ -220,6 +220,13 @@ function findTransferDestination(value) {
   ) || null;
 }
 
+function resolveBravusTransferDestination(body) {
+  return findTransferDestination(body.pixKey)
+    || findTransferDestination(body.accountNumber)
+    || findTransferDestination(body.beneficiaryDocument)
+    || null;
+}
+
 function availableCreditFor(user) {
   return user.username === joao.username ? joaoCreditGrant.valorDisponivel : 0;
 }
@@ -422,8 +429,13 @@ async function handleApi(request) {
 
   if (request.method === "POST" && path === "/auth/register") {
     const body = await request.json().catch(() => ({}));
-    if (request.headers.get("x-bravus-client") !== "android-apk" || body.clientChannel !== "ANDROID_APK") {
-      return json("A abertura de conta esta disponivel somente no APK Bravus Bank.", { status: 403 });
+    const client = request.headers.get("x-bravus-client");
+    const mobileClient =
+      (client === "android-apk" && body.clientChannel === "ANDROID_APK")
+      || (client === "ios-app" && body.clientChannel === "IOS_APP")
+      || (client === "mobile-app" && body.clientChannel === "MOBILE_APP");
+    if (!mobileClient) {
+      return json("A abertura de conta esta disponivel somente no app mobile Bravus Bank.", { status: 403 });
     }
     if (String(body.cpf || "").replace(/\\D/g, "").length !== 11) {
       return json("Informe CPF com 11 digitos para abertura de conta.", { status: 400 });
@@ -467,6 +479,73 @@ async function handleApi(request) {
     const body = await request.json().catch(() => ({}));
     const amount = Number(body.amountCentavos || 0);
     if (!amount || amount <= 0) return json("Digite um valor valido.", { status: 400 });
+    const bravusDestination = resolveBravusTransferDestination(body);
+    if (bravusDestination) {
+      if (bravusDestination.username === user.username) {
+        return json("Nao e permitido transferir para a propria conta Bravus.", { status: 400 });
+      }
+      if (user.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });
+      user.balance -= amount;
+      bravusDestination.balance += amount;
+      consumeCreditIfAvailable(user, amount);
+      const tx = {
+        id: state.transactions.length + 1,
+        username: user.username,
+        type: "TRANSFER_OUT",
+        amount,
+        description: body.description || "Transferencia interna Bravus",
+        destinationAccount: bravusDestination.accountNumber,
+        status: "COMPLETED",
+        createdAt: now(),
+      };
+      state.transactions.unshift(tx);
+      state.transactions.unshift({
+        id: state.transactions.length + 1,
+        username: bravusDestination.username,
+        type: "TRANSFER_IN",
+        amount,
+        description: body.description || "Transferencia recebida Bravus",
+        destinationAccount: user.accountNumber,
+        status: "COMPLETED",
+        createdAt: now(),
+      });
+      const idempotencyKey = "sites-bravus-internal-" + Date.now();
+      const order = {
+        id: state.externalTransfers.length + 1,
+        username: user.username,
+        transactionId: tx.id,
+        amountCentavos: amount,
+        channel: body.channel || "PIX",
+        currency: "BRL",
+        beneficiaryName: bravusDestination.fullName,
+        beneficiaryDocument: bravusDestination.cpf,
+        bankCode: "999",
+        ispb: "99999999",
+        agency: "0001",
+        accountNumber: bravusDestination.accountNumber,
+        accountDigit: null,
+        accountType: bravusDestination.accountType,
+        pixKey: bravusDestination.cpf || bravusDestination.email,
+        pixKeyType: bravusDestination.cpf ? "CPF" : "EMAIL",
+        description: body.description || null,
+        provider: "BRAVUS_INTERNAL_LEDGER",
+        providerTransferId: idempotencyKey,
+        idempotencyKey,
+        status: "COMPLETED",
+        settlementStatus: "LIQUIDADA_CONFIRMADA",
+        receiptKind: "COMPROVANTE_LIQUIDACAO_CONFIRMADA",
+        destinationNetwork: "INTERNAL_BRAVUS",
+        destinationParticipantCode: "BRAVUS-INTERNAL",
+        destinationConfirmationId: idempotencyKey,
+        destinationConfirmedAt: now(),
+        settlementMessage: "Liquidacao interna confirmada no ledger Bravus, sem uso de Celcoin.",
+        errorMessage: null,
+        rawResponse: "{\\"provider\\":\\"BRAVUS_INTERNAL_LEDGER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
+        createdAt: now(),
+      };
+      state.externalTransfers.unshift(order);
+      return json(order);
+    }
     if (availableCreditFor(user) < amount) return json("Saldo escritural liberado insuficiente.", { status: 400 });
     if (user.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });
     user.balance -= amount;
@@ -591,6 +670,73 @@ async function handleApi(request) {
     if (!origin) return json("Usuario nao encontrado.", { status: 400 });
     const amount = Number(body.amountCentavos || 0);
     if (!amount || amount <= 0) return json("Digite um valor valido.", { status: 400 });
+    const bravusDestination = resolveBravusTransferDestination(body);
+    if (bravusDestination) {
+      if (bravusDestination.username === origin.username) {
+        return json("Nao e permitido transferir para a propria conta Bravus.", { status: 400 });
+      }
+      if (origin.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });
+      origin.balance -= amount;
+      bravusDestination.balance += amount;
+      consumeCreditIfAvailable(origin, amount);
+      const tx = {
+        id: state.transactions.length + 1,
+        username: origin.username,
+        type: "TRANSFER_OUT",
+        amount,
+        description: body.description || "Transferencia interna admin Bravus",
+        destinationAccount: bravusDestination.accountNumber,
+        status: "COMPLETED",
+        createdAt: now(),
+      };
+      state.transactions.unshift(tx);
+      state.transactions.unshift({
+        id: state.transactions.length + 1,
+        username: bravusDestination.username,
+        type: "TRANSFER_IN",
+        amount,
+        description: body.description || "Transferencia recebida Bravus",
+        destinationAccount: origin.accountNumber,
+        status: "COMPLETED",
+        createdAt: now(),
+      });
+      const idempotencyKey = "sites-admin-bravus-internal-" + Date.now();
+      const order = {
+        id: state.externalTransfers.length + 1,
+        username: origin.username,
+        transactionId: tx.id,
+        amountCentavos: amount,
+        channel: body.channel || "PIX",
+        currency: "BRL",
+        beneficiaryName: bravusDestination.fullName,
+        beneficiaryDocument: bravusDestination.cpf,
+        bankCode: "999",
+        ispb: "99999999",
+        agency: "0001",
+        accountNumber: bravusDestination.accountNumber,
+        accountDigit: null,
+        accountType: bravusDestination.accountType,
+        pixKey: bravusDestination.cpf || bravusDestination.email,
+        pixKeyType: bravusDestination.cpf ? "CPF" : "EMAIL",
+        description: body.description || null,
+        provider: "BRAVUS_INTERNAL_LEDGER",
+        providerTransferId: idempotencyKey,
+        idempotencyKey,
+        status: "COMPLETED",
+        settlementStatus: "LIQUIDADA_CONFIRMADA",
+        receiptKind: "COMPROVANTE_LIQUIDACAO_CONFIRMADA",
+        destinationNetwork: "INTERNAL_BRAVUS",
+        destinationParticipantCode: "BRAVUS-INTERNAL",
+        destinationConfirmationId: idempotencyKey,
+        destinationConfirmedAt: now(),
+        settlementMessage: "Liquidacao interna confirmada no ledger Bravus, sem uso de Celcoin.",
+        errorMessage: null,
+        rawResponse: "{\\"provider\\":\\"BRAVUS_INTERNAL_LEDGER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
+        createdAt: now(),
+      };
+      state.externalTransfers.unshift(order);
+      return json(order);
+    }
     if (availableCreditFor(origin) < amount) return json("Saldo escritural liberado insuficiente.", { status: 400 });
     if (origin.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });
     origin.balance -= amount;

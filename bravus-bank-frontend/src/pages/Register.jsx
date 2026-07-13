@@ -6,7 +6,7 @@ import {
   ShieldCheck, Smartphone, UserPlus,
 } from 'lucide-react';
 import { authService } from '../services/api';
-import { APK_DOWNLOAD_URL, isAndroidApk } from '../lib/appChannel';
+import { APK_DOWNLOAD_URL, isMobileApp } from '../lib/appChannel';
 
 const PASSWORD_MESSAGE = 'Use no mínimo 8 caracteres, com letra maiúscula, minúscula e número.';
 const STRONG_PASSWORD = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
@@ -105,17 +105,17 @@ function DownloadAppGate() {
           </div>
           <div className="pill-gold mx-auto mb-4 w-fit">
             <ShieldCheck className="h-3.5 w-3.5" />
-            Cadastro protegido no APK
+            Cadastro protegido no app
           </div>
           <h1 className="title-md">Abra sua conta pelo app Bravus Bank</h1>
           <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink-300">
-            Por seguranca, a criacao de conta com documento e biometria facial fica disponivel somente no aplicativo Android.
-            Baixe o APK, instale no celular e conclua a abertura por la.
+            Por seguranca, a criacao de conta com documento e biometria facial fica disponivel somente no app mobile.
+            No Android, baixe o APK. No iPhone, use a versao iOS gerada para instalacao via Apple Developer/TestFlight.
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">
             <a href={APK_DOWNLOAD_URL} download className="btn-primary !py-3 !px-6">
               <Download className="h-4 w-4" />
-              Baixar APK
+              Baixar APK Android
             </a>
             <a href="/login" className="btn-secondary !py-3 !px-6">
               Ja sou cliente
@@ -153,11 +153,11 @@ export default function Register() {
   const [cameraError, setCameraError] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const nativeApk = isAndroidApk();
+  const nativeApp = isMobileApp();
 
   useEffect(() => () => stopCamera(), []);
 
-  if (!nativeApk) {
+  if (!nativeApp) {
     return <DownloadAppGate />;
   }
 

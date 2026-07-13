@@ -11,6 +11,9 @@
     "build": "vite build",
     "android:sync": "npm run build && cap sync android",
     "android:apk": "powershell -ExecutionPolicy Bypass -File scripts/build-apk.ps1",
+    "ios:sync": "npm run build && cap sync ios",
+    "ios:open": "cap open ios",
+    "ios:archive": "bash scripts/build-ios.sh",
     "preview": "vite preview",
     "lint": "echo 'lint placeholder'"
   },
@@ -18,6 +21,7 @@
     "@capacitor/android": "^8.4.1",
     "@capacitor/cli": "^8.4.1",
     "@capacitor/core": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
     "axios": "^1.6.2",
     "clsx": "^2.1.1",
     "framer-motion": "^11.0.0",

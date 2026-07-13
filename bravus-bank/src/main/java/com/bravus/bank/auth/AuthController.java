@@ -129,7 +129,7 @@ public class AuthController {
                                       @RequestHeader(value = "X-Bravus-Client", required = false) String bravusClient) {
         if (!isAndroidApkRegistration(request, bravusClient)) {
             return ResponseEntity.status(403)
-                    .body("A abertura de conta esta disponivel somente no APK Bravus Bank.");
+                    .body("A abertura de conta esta disponivel somente no app mobile Bravus Bank.");
         }
         String normalizedCpf = normalizeDocument(request.cpf());
         if (normalizedCpf == null || normalizedCpf.length() != 11) {
@@ -237,7 +237,15 @@ public class AuthController {
     }
 
     private boolean isAndroidApkRegistration(RegisterRequest request, String bravusClient) {
-        return "android-apk".equalsIgnoreCase(bravusClient)
-                && "ANDROID_APK".equalsIgnoreCase(request.clientChannel());
+        if ("android-apk".equalsIgnoreCase(bravusClient)
+                && "ANDROID_APK".equalsIgnoreCase(request.clientChannel())) {
+            return true;
+        }
+        if ("ios-app".equalsIgnoreCase(bravusClient)
+                && "IOS_APP".equalsIgnoreCase(request.clientChannel())) {
+            return true;
+        }
+        return "mobile-app".equalsIgnoreCase(bravusClient)
+                && "MOBILE_APP".equalsIgnoreCase(request.clientChannel());
     }
 }

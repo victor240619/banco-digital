@@ -1,10 +1,15 @@
 import axios from 'axios';
-import { APK_DEFAULT_API_URL, APP_CLIENT_HEADER, isAndroidApk } from '../lib/appChannel';
+import {
+  MOBILE_APP_API_URL,
+  getAppClientChannel,
+  getAppClientHeader,
+  isMobileApp,
+} from '../lib/appChannel';
 
 const resolveApiUrl = () => {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
   if (typeof window === 'undefined') return 'http://localhost:9000/api';
-  if (isAndroidApk()) return APK_DEFAULT_API_URL;
+  if (isMobileApp()) return MOBILE_APP_API_URL;
 
   const { hostname } = window.location;
   if (hostname === '127.0.0.1') return 'http://127.0.0.1:9000/api';
@@ -84,14 +89,15 @@ export const authService = {
   register: async (userData) => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    const appHeader = getAppClientHeader();
     const { data } = await api.post(
       '/auth/register',
       {
         ...userData,
-        clientChannel: isAndroidApk() ? 'ANDROID_APK' : 'WEB',
+        clientChannel: getAppClientChannel(),
       },
-      isAndroidApk()
-        ? { headers: { 'X-Bravus-Client': APP_CLIENT_HEADER } }
+      appHeader
+        ? { headers: { 'X-Bravus-Client': appHeader } }
         : undefined
     );
     if (data.token) {

@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -69,6 +70,11 @@ public class ExternalTransferService {
                 .orElseThrow(() -> new IllegalArgumentException("Usuario nao encontrado: " + cmd.userId));
         UserEntity requestedBy = userRepo.findByUsername(requestedByUsername).orElse(null);
         documentAnalysisService.assertApprovedForUser(user);
+
+        UserEntity bravusDestination = resolveBravusDestination(cmd).orElse(null);
+        if (bravusDestination != null) {
+            return submitInternalBravusTransfer(cmd, requestedByUsername, channel, user, requestedBy, bravusDestination);
+        }
 
         DocumentAnalysisService.AnalysisCommand beneficiaryAnalysis =
                 new DocumentAnalysisService.AnalysisCommand();
@@ -185,6 +191,142 @@ public class ExternalTransferService {
         result.status = "PENDING_PROVIDER";
         result.rawResponse = "{\"status\":\"PENDING_PROVIDER\",\"message\":\"Banking provider not configured\"}";
         return result;
+    }
+
+    private ExternalTransferEntity submitInternalBravusTransfer(ExternalTransferCommand cmd,
+                                                               String requestedByUsername,
+                                                               String channel,
+                                                               UserEntity fromUser,
+                                                               UserEntity requestedBy,
+                                                               UserEntity toUser) {
+        if (fromUser.getId().equals(toUser.getId())) {
+            throw new IllegalArgumentException("Nao e permitido transferir para a propria conta Bravus.");
+        }
+        if (fromUser.getBalance() == null || fromUser.getBalance() < cmd.amountCentavos) {
+            throw new IllegalStateException("Saldo contabil do usuario insuficiente.");
+        }
+
+        String idempotencyKey = "bravus-internal-" + UUID.randomUUID();
+
+        fromUser.setBalance(fromUser.getBalance() - cmd.amountCentavos);
+        toUser.setBalance((toUser.getBalance() == null ? 0L : toUser.getBalance()) + cmd.amountCentavos);
+        userRepo.save(fromUser);
+        userRepo.save(toUser);
+
+        TransactionEntity outTx = new TransactionEntity();
+        outTx.setUser(fromUser);
+        outTx.setType("TRANSFER_OUT");
+        outTx.setAmount(cmd.amountCentavos);
+        outTx.setDescription(cmd.description != null ? cmd.description : "Transferencia interna Bravus");
+        outTx.setDestinationAccount(toUser.getAccountNumber());
+        outTx.setStatus("COMPLETED");
+        outTx = transactionRepo.save(outTx);
+
+        consumeCreditIfAvailable(
+                fromUser,
+                cmd.amountCentavos,
+                outTx.getId(),
+                requestedByUsername,
+                "Transferencia interna Bravus para " + toUser.getAccountNumber());
+
+        TransactionEntity inTx = new TransactionEntity();
+        inTx.setUser(toUser);
+        inTx.setType("TRANSFER_IN");
+        inTx.setAmount(cmd.amountCentavos);
+        inTx.setDescription(cmd.description != null ? cmd.description : "Transferencia recebida Bravus");
+        inTx.setDestinationAccount(fromUser.getAccountNumber());
+        inTx.setStatus("COMPLETED");
+        transactionRepo.save(inTx);
+
+        ExternalTransferEntity order = new ExternalTransferEntity();
+        order.setUser(fromUser);
+        order.setRequestedBy(requestedBy);
+        order.setTransactionId(outTx.getId());
+        order.setAmountCentavos(cmd.amountCentavos);
+        order.setChannel(channel);
+        order.setCurrency("BRL");
+        order.setBeneficiaryName(toUser.getFullName() != null ? toUser.getFullName() : cmd.beneficiaryName);
+        order.setBeneficiaryDocument(DocumentUtilsBridge.digits(
+                toUser.getCpf() != null ? toUser.getCpf() : cmd.beneficiaryDocument));
+        order.setBankCode("999");
+        order.setIspb("99999999");
+        order.setAgency("0001");
+        order.setAccountNumber(toUser.getAccountNumber());
+        order.setAccountDigit(cmd.accountDigit);
+        order.setAccountType(toUser.getAccountType() != null ? toUser.getAccountType() : "CORRENTE");
+        order.setPixKey(toUser.getChavePix() != null ? toUser.getChavePix() : cmd.pixKey);
+        order.setPixKeyType(cmd.pixKeyType);
+        order.setDescription(cmd.description);
+        order.setProvider("BRAVUS_INTERNAL_LEDGER");
+        order.setProviderTransferId(idempotencyKey);
+        order.setIdempotencyKey(idempotencyKey);
+        order.setStatus("COMPLETED");
+        order.setSettlementStatus("LIQUIDADA_CONFIRMADA");
+        order.setReceiptKind("COMPROVANTE_LIQUIDACAO_CONFIRMADA");
+        order.setDestinationNetwork("INTERNAL_BRAVUS");
+        order.setDestinationParticipantCode("BRAVUS-INTERNAL");
+        order.setDestinationConfirmationId(idempotencyKey);
+        order.setDestinationConfirmedAt(java.time.OffsetDateTime.now());
+        order.setSettlementMessage("Liquidacao interna confirmada no ledger Bravus, sem uso de Celcoin.");
+        order.setErrorMessage(null);
+        order.setRawResponse("{\"provider\":\"BRAVUS_INTERNAL_LEDGER\",\"status\":\"COMPLETED\",\"settlement\":\"INTERNAL_LEDGER\"}");
+        return transferRepo.save(order);
+    }
+
+    private Optional<UserEntity> resolveBravusDestination(ExternalTransferCommand cmd) {
+        return findBravusUser(cmd.pixKey)
+                .or(() -> findBravusUser(cmd.accountNumber))
+                .or(() -> findBravusUser(cmd.beneficiaryDocument));
+    }
+
+    private Optional<UserEntity> findBravusUser(String destination) {
+        if (blank(destination)) {
+            return Optional.empty();
+        }
+        String raw = destination.trim();
+        String digits = DocumentUtilsBridge.digits(raw);
+
+        Optional<UserEntity> found = userRepo.findByAccountNumber(raw);
+        if (found.isPresent()) return found;
+
+        if (!digits.isBlank()) {
+            found = userRepo.findByAccountNumber(digits);
+            if (found.isPresent()) return found;
+            if (digits.length() == 11 || digits.length() == 14) {
+                found = userRepo.findByCpf(digits);
+                if (found.isPresent()) return found;
+            }
+            found = userRepo.findByChavePix(digits);
+            if (found.isPresent()) return found;
+        }
+
+        return userRepo.findByEmail(raw)
+                .or(() -> userRepo.findByUsername(raw))
+                .or(() -> userRepo.findByChavePix(raw));
+    }
+
+    private void consumeCreditIfAvailable(UserEntity user,
+                                          Long amount,
+                                          Long transactionId,
+                                          String createdBy,
+                                          String note) {
+        Long availableCredit = grantRepo.sumAvailableByUser(user.getId());
+        if (availableCredit == null || availableCredit <= 0) {
+            return;
+        }
+        long coveredByCredit = Math.min(amount, availableCredit);
+        if (coveredByCredit <= 0) {
+            return;
+        }
+
+        CreditService.UseCommand use = new CreditService.UseCommand();
+        use.userId = user.getId();
+        use.valor = coveredByCredit;
+        use.tipo = "TRANSFERENCIA_INTERNA";
+        use.transactionId = transactionId;
+        use.criadoPor = createdBy;
+        use.observacao = note;
+        creditService.useCredit(use);
     }
 
     private BankingTransferProvider.ProviderTransferCommand toProviderCommand(
