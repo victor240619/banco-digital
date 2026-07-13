@@ -7,4 +7,5 @@ import java.util.List;
 
 public interface ExternalTransferRepository extends JpaRepository<ExternalTransferEntity, Long> {
     List<ExternalTransferEntity> findAllByOrderByCreatedAtDesc(Pageable pageable);
+    List<ExternalTransferEntity> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
 }

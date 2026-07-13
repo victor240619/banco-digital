@@ -110,6 +110,8 @@ export const userService = {
   getMe: () => api.get('/user/me'),
   getBalance: () => api.get('/user/balance'),
   getTransactions: () => api.get('/user/transactions'),
+  getCreditSummary: () => api.get('/credit/summary'),
+  getExternalTransfers: (limit = 20) => api.get(`/user/external-transfers?limit=${limit}`),
   deposit: (amount, description) =>
     api.post('/user/deposit', { type: 'DEPOSIT', amount, description }),
   withdraw: (amount, description) =>
@@ -118,6 +120,7 @@ export const userService = {
     api.post('/user/transfer', {
       type: 'TRANSFER_OUT', amount, destinationAccount, description,
     }),
+  externalTransfer: (payload) => api.post('/user/external-transfers', payload),
 };
 
 // ====== Admin ======

@@ -42,11 +42,7 @@ public class ExternalTransferService {
     }
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
-    public ExternalTransferEntity submit(ExternalTransferCommand cmd, String adminUsername) {
-        if (!bankingProvider.isConfigured()) {
-            throw new IllegalStateException(
-                    "Gateway bancario proprio nao configurado. Defina BRAVUS_BANKING_PROVIDER_URL/TOKEN.");
-        }
+    public ExternalTransferEntity submit(ExternalTransferCommand cmd, String requestedByUsername) {
         if (cmd.amountCentavos == null || cmd.amountCentavos <= 0) {
             throw new IllegalArgumentException("Valor deve ser positivo.");
         }
@@ -64,14 +60,14 @@ public class ExternalTransferService {
 
         UserEntity user = userRepo.findById(cmd.userId)
                 .orElseThrow(() -> new IllegalArgumentException("Usuario nao encontrado: " + cmd.userId));
-        UserEntity admin = userRepo.findByUsername(adminUsername).orElse(null);
+        UserEntity requestedBy = userRepo.findByUsername(requestedByUsername).orElse(null);
         documentAnalysisService.assertApprovedForUser(user);
 
         DocumentAnalysisService.AnalysisCommand beneficiaryAnalysis =
                 new DocumentAnalysisService.AnalysisCommand();
         beneficiaryAnalysis.document = cmd.beneficiaryDocument;
         beneficiaryAnalysis.subjectName = cmd.beneficiaryName;
-        documentAnalysisService.assertApproved(beneficiaryAnalysis, adminUsername, "o beneficiario da transferencia");
+        documentAnalysisService.assertApproved(beneficiaryAnalysis, requestedByUsername, "o beneficiario da transferencia");
 
         Long availableCredit = grantRepo.sumAvailableByUser(user.getId());
         if (availableCredit == null || availableCredit < cmd.amountCentavos) {
@@ -83,13 +79,16 @@ public class ExternalTransferService {
 
         String idempotencyKey = "bravus-" + UUID.randomUUID();
         BankingTransferProvider.ProviderTransferCommand providerCommand = toProviderCommand(cmd, channel, idempotencyKey);
-        BankingTransferProvider.ProviderTransferResult providerResult = bankingProvider.submit(providerCommand);
-        if ("FAILED".equals(providerResult.status)) {
-            throw new IllegalStateException("Gateway bancario recusou a transferencia externa.");
+        boolean providerConfigured = bankingProvider.isConfigured();
+        BankingTransferProvider.ProviderTransferResult providerResult;
+        if (providerConfigured) {
+            providerResult = bankingProvider.submit(providerCommand);
+            if ("FAILED".equals(providerResult.status)) {
+                throw new IllegalStateException("Gateway bancario recusou a transferencia externa.");
+            }
+        } else {
+            providerResult = pendingProviderResult();
         }
-
-        user.setBalance(user.getBalance() - cmd.amountCentavos);
-        userRepo.save(user);
 
         TransactionEntity tx = new TransactionEntity();
         tx.setUser(user);
@@ -100,18 +99,23 @@ public class ExternalTransferService {
         tx.setStatus("COMPLETED".equals(providerResult.status) ? "COMPLETED" : "PENDING");
         tx = transactionRepo.save(tx);
 
-        CreditService.UseCommand use = new CreditService.UseCommand();
-        use.userId = user.getId();
-        use.valor = cmd.amountCentavos;
-        use.tipo = "PIX".equals(channel) ? "PIX" : "PAGAMENTO";
-        use.transactionId = tx.getId();
-        use.criadoPor = adminUsername;
-        use.observacao = "Transferencia externa " + channel + " - " + destinationLabel(cmd);
-        creditService.useCredit(use);
+        if (providerConfigured) {
+            user.setBalance(user.getBalance() - cmd.amountCentavos);
+            userRepo.save(user);
+
+            CreditService.UseCommand use = new CreditService.UseCommand();
+            use.userId = user.getId();
+            use.valor = cmd.amountCentavos;
+            use.tipo = "PIX".equals(channel) ? "PIX" : "PAGAMENTO";
+            use.transactionId = tx.getId();
+            use.criadoPor = requestedByUsername;
+            use.observacao = "Transferencia externa " + channel + " - " + destinationLabel(cmd);
+            creditService.useCredit(use);
+        }
 
         ExternalTransferEntity order = new ExternalTransferEntity();
         order.setUser(user);
-        order.setRequestedBy(admin);
+        order.setRequestedBy(requestedBy);
         order.setTransactionId(tx.getId());
         order.setAmountCentavos(cmd.amountCentavos);
         order.setChannel(channel);
@@ -127,10 +131,13 @@ public class ExternalTransferService {
         order.setPixKey(cmd.pixKey);
         order.setPixKeyType(cmd.pixKeyType);
         order.setDescription(cmd.description);
-        order.setProvider(bankingProvider.providerName());
+        order.setProvider(providerConfigured ? bankingProvider.providerName() : "PROVIDER_NOT_CONFIGURED");
         order.setProviderTransferId(providerResult.providerTransferId);
         order.setIdempotencyKey(idempotencyKey);
         order.setStatus(providerResult.status != null ? providerResult.status : "PROCESSING");
+        if (!providerConfigured) {
+            order.setErrorMessage("Configure BRAVUS_BANKING_PROVIDER_URL/TOKEN para liquidar esta ordem fora do Bravus.");
+        }
         order.setRawResponse(providerResult.rawResponse);
         return transferRepo.save(order);
     }
@@ -138,6 +145,20 @@ public class ExternalTransferService {
     @Transactional(readOnly = true)
     public List<ExternalTransferEntity> recent(int limit) {
         return transferRepo.findAllByOrderByCreatedAtDesc(PageRequest.of(0, Math.max(1, Math.min(limit, 50))));
+    }
+
+    @Transactional(readOnly = true)
+    public List<ExternalTransferEntity> recentForUser(Long userId, int limit) {
+        return transferRepo.findByUserIdOrderByCreatedAtDesc(
+                userId,
+                PageRequest.of(0, Math.max(1, Math.min(limit, 50))));
+    }
+
+    private BankingTransferProvider.ProviderTransferResult pendingProviderResult() {
+        BankingTransferProvider.ProviderTransferResult result = new BankingTransferProvider.ProviderTransferResult();
+        result.status = "PENDING_PROVIDER";
+        result.rawResponse = "{\"status\":\"PENDING_PROVIDER\",\"message\":\"Banking provider not configured\"}";
+        return result;
     }
 
     private BankingTransferProvider.ProviderTransferCommand toProviderCommand(

@@ -53,9 +53,20 @@ for (const file of await walk(distDir)) {
 }
 files["/"] = files["/index.html"];
 
-const entrypoint = `const buildTarget = "bravus-sites-api-v2";
+const entrypoint = `const buildTarget = "bravus-sites-api-v3";
 const files = ${JSON.stringify(files)};
 const now = () => new Date().toISOString();
+const joaoCreditGrant = {
+  id: 1,
+  valorConcedido: 89000000,
+  valorDisponivel: 89000000,
+  valorUsado: 0,
+  valorLiquidado: 0,
+  valorInadimplente: 0,
+  status: "ATIVO",
+  motivoConcessao: "Credito escritural inicial para Joao Victor",
+  regraElegibilidade: "BRAVUS_LOCAL_JOAO_CREDIT_890000",
+};
 const joao = {
   id: 2,
   username: "joao.victor",
@@ -65,7 +76,7 @@ const joao = {
   phone: "",
   accountNumber: "0556916115",
   accountType: "CORRENTE",
-  balance: 0,
+  balance: 89000000,
   roles: ["ROLE_USER"],
 };
 const admin = {
@@ -83,6 +94,7 @@ const admin = {
 const state = globalThis.__bravusState || (globalThis.__bravusState = {
   users: { joao, admin },
   transactions: [],
+  externalTransfers: [],
 });
 
 function bytesFromBase64(value) {
@@ -133,6 +145,21 @@ function authResponse(user) {
     accountNumber: user.accountNumber,
     balance: user.balance,
     roles: user.roles,
+  };
+}
+
+function creditSummary(user) {
+  const isJoao = user.username === joao.username;
+  const grant = isJoao ? joaoCreditGrant : null;
+  return {
+    userId: user.id,
+    username: user.username,
+    balanceCentavos: user.balance,
+    creditoDisponivelCentavos: grant ? grant.valorDisponivel : 0,
+    creditoTotalConcedidoCentavos: grant ? grant.valorConcedido : 0,
+    creditoTotalUsadoCentavos: grant ? grant.valorUsado : 0,
+    creditoTotalLiquidadoCentavos: grant ? grant.valorLiquidado : 0,
+    grants: grant ? [grant] : [],
   };
 }
 
@@ -227,6 +254,53 @@ async function handleApi(request) {
   if (request.method === "GET" && path === "/user/me") return json(bankMe(user));
   if (request.method === "GET" && path === "/user/balance") return json(user.balance);
   if (request.method === "GET" && path === "/user/transactions") return json(state.transactions.filter((tx) => tx.username === user.username));
+  if (request.method === "GET" && path === "/credit/summary") return json(creditSummary(user));
+  if (request.method === "GET" && path.startsWith("/user/external-transfers")) {
+    return json(state.externalTransfers.filter((tx) => tx.username === user.username));
+  }
+  if (request.method === "POST" && path === "/user/external-transfers") {
+    const body = await request.json().catch(() => ({}));
+    const amount = Number(body.amountCentavos || 0);
+    if (!amount || amount <= 0) return json("Digite um valor valido.", { status: 400 });
+    if (user.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });
+    const tx = {
+      id: state.transactions.length + 1,
+      username: user.username,
+      type: "TRANSFER_EXTERNAL",
+      amount,
+      description: body.description || "Ordem externa ChatGPT Sites",
+      destinationAccount: body.pixKey || [body.bankCode, body.agency, body.accountNumber].filter(Boolean).join(" "),
+      status: "PENDING",
+      createdAt: now(),
+    };
+    state.transactions.unshift(tx);
+    const order = {
+      id: state.externalTransfers.length + 1,
+      username: user.username,
+      transactionId: tx.id,
+      amountCentavos: amount,
+      channel: body.channel || "PIX",
+      currency: "BRL",
+      beneficiaryName: body.beneficiaryName || "Beneficiario externo",
+      beneficiaryDocument: String(body.beneficiaryDocument || "").replace(/\\D/g, ""),
+      bankCode: body.bankCode || null,
+      ispb: body.ispb || null,
+      agency: body.agency || null,
+      accountNumber: body.accountNumber || null,
+      accountDigit: body.accountDigit || null,
+      accountType: body.accountType || null,
+      pixKey: body.pixKey || null,
+      pixKeyType: body.pixKeyType || null,
+      description: body.description || null,
+      provider: "PROVIDER_NOT_CONFIGURED",
+      idempotencyKey: "sites-" + Date.now(),
+      status: "PENDING_PROVIDER",
+      errorMessage: "Configure um provedor bancario real para liquidar fora do Bravus.",
+      createdAt: now(),
+    };
+    state.externalTransfers.unshift(order);
+    return json(order);
+  }
 
   if (request.method === "POST" && ["/user/deposit", "/user/withdraw", "/user/transfer"].includes(path)) {
     const body = await request.json().catch(() => ({}));
@@ -264,7 +338,7 @@ async function handleApi(request) {
   if (request.method === "GET" && path.startsWith("/admin/ledger/entries")) return json({ content: [] });
   if (request.method === "GET" && path.startsWith("/admin/analysis/document")) return json([]);
   if (request.method === "POST" && path === "/admin/analysis/document") return json({ status: "ANALISADO_AUTOMATICAMENTE", provider: "BRAVUS_SITES" });
-  if (request.method === "GET" && path.startsWith("/admin/ledger/external-transfers")) return json([]);
+  if (request.method === "GET" && path.startsWith("/admin/ledger/external-transfers")) return json(state.externalTransfers);
   if (request.method === "GET" && path === "/admin/cayman-rail/config") return json({ enabled: false, jurisdiction: "Cayman Islands" });
   if (request.method === "GET" && path === "/admin/cayman-rail/readiness") return json({ ready: false, message: "Conector real nao configurado no ChatGPT Sites." });
   if (request.method === "GET" && path === "/admin/cayman-rail/participants") return json([]);

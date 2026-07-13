@@ -1,6 +1,7 @@
 package com.bravus.bank.ledger.entity;
 
 import com.bravus.bank.db.entity.UserEntity;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -18,10 +19,12 @@ public class CreditGrantEntity {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id")
+    @JsonIgnore
     private UserEntity user;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "internal_reserve_id")
+    @JsonIgnore
     private InternalReserveEntity internalReserve;
 
     @Column(name = "valor_concedido", nullable = false)
@@ -59,6 +62,7 @@ public class CreditGrantEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "aprovado_por")
+    @JsonIgnore
     private UserEntity aprovadoPor;
 
     @Column(name = "ledger_entry_id")

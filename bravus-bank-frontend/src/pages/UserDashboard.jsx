@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowDownToLine, ArrowUpFromLine, ArrowRightLeft, Wallet, Eye, EyeOff,
   TrendingUp, TrendingDown, Activity, Receipt, CheckCircle2, AlertCircle,
+  Send, Landmark, CreditCard,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -22,6 +23,7 @@ const txIcon = (type) => {
       return { Icon: ArrowDownToLine, color: 'text-emerald-300', bg: 'bg-emerald-400/10' };
     case 'WITHDRAWAL':
     case 'TRANSFER_OUT':
+    case 'TRANSFER_EXTERNAL':
       return { Icon: ArrowUpFromLine, color: 'text-red-300', bg: 'bg-red-400/10' };
     case 'PAYMENT':
       return { Icon: Receipt, color: 'text-amber-300', bg: 'bg-amber-400/10' };
@@ -35,18 +37,38 @@ const txSignClass = (type) =>
 const txSign = (type) =>
   ['DEPOSIT', 'TRANSFER_IN'].includes(type) ? '+' : '-';
 
+const EMPTY_FORM = {
+  amount: '',
+  description: '',
+  destinationAccount: '',
+  transferMode: 'internal',
+  channel: 'PIX',
+  beneficiaryName: '',
+  beneficiaryDocument: '',
+  bankCode: '',
+  ispb: '',
+  agency: '',
+  accountNumber: '',
+  accountDigit: '',
+  accountType: 'CORRENTE',
+  pixKey: '',
+  pixKeyType: 'CPF',
+};
+
 // ============ Component ============
 export default function UserDashboard() {
   const [profile, setProfile] = useState(null);
   const [me, setMe] = useState(null);
   const [transactions, setTransactions] = useState([]);
+  const [creditSummary, setCreditSummary] = useState(null);
+  const [externalOrders, setExternalOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showBalance, setShowBalance] = useState(true);
 
   const [tab, setTab] = useState('overview');
-  const [form, setForm] = useState({ amount: '', description: '', destinationAccount: '' });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
 
   const user = authService.getCurrentUser();
@@ -62,14 +84,18 @@ export default function UserDashboard() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [profileRes, meRes, txRes] = await Promise.all([
+      const [profileRes, meRes, txRes, creditRes, externalRes] = await Promise.all([
         userService.getProfile(),
         userService.getMe().catch(() => ({ data: null })),
         userService.getTransactions(),
+        userService.getCreditSummary().catch(() => ({ data: null })),
+        userService.getExternalTransfers(8).catch(() => ({ data: [] })),
       ]);
       setProfile(profileRes.data);
       setMe(meRes?.data || null);
       setTransactions(Array.isArray(txRes.data) ? txRes.data : []);
+      setCreditSummary(creditRes?.data || null);
+      setExternalOrders(Array.isArray(externalRes?.data) ? externalRes.data : []);
     } catch (err) {
       setError('Erro ao carregar dados da conta.');
     } finally {
@@ -81,17 +107,55 @@ export default function UserDashboard() {
 
   const submit = async (kind) => {
     if (!form.amount || parseFloat(form.amount) <= 0) return setError('Digite um valor válido.');
-    if (kind === 'transfer' && !form.destinationAccount) return setError('Informe a conta de destino.');
+    if (kind === 'transfer' && form.transferMode === 'internal' && !form.destinationAccount) {
+      return setError('Informe a conta Bravus de destino.');
+    }
+    if (kind === 'transfer' && form.transferMode === 'external') {
+      if (!form.beneficiaryName || !form.beneficiaryDocument) {
+        return setError('Informe nome e documento do beneficiário.');
+      }
+      if (form.channel === 'PIX' && !form.pixKey) {
+        return setError('Informe a chave PIX do beneficiário.');
+      }
+      if (form.channel === 'TED' && (!form.bankCode || !form.agency || !form.accountNumber)) {
+        return setError('Informe banco, agência e conta para TED.');
+      }
+    }
     setSubmitting(true);
     try {
-      if (kind === 'deposit') await userService.deposit(cents(form.amount), form.description);
-      if (kind === 'withdraw') await userService.withdraw(cents(form.amount), form.description);
-      if (kind === 'transfer') await userService.transfer(cents(form.amount), form.destinationAccount, form.description);
-      setSuccess(
+      const amountCentavos = cents(form.amount);
+      let message =
         kind === 'deposit' ? 'Depósito realizado.' :
-        kind === 'withdraw' ? 'Saque realizado.' : 'Transferência enviada.'
-      );
-      setForm({ amount: '', description: '', destinationAccount: '' });
+        kind === 'withdraw' ? 'Saque realizado.' : 'Transferência enviada.';
+
+      if (kind === 'deposit') await userService.deposit(amountCentavos, form.description);
+      if (kind === 'withdraw') await userService.withdraw(amountCentavos, form.description);
+      if (kind === 'transfer' && form.transferMode === 'internal') {
+        await userService.transfer(amountCentavos, form.destinationAccount, form.description);
+      }
+      if (kind === 'transfer' && form.transferMode === 'external') {
+        const { data } = await userService.externalTransfer({
+          amountCentavos,
+          channel: form.channel,
+          beneficiaryName: form.beneficiaryName,
+          beneficiaryDocument: form.beneficiaryDocument,
+          bankCode: form.bankCode,
+          ispb: form.ispb,
+          agency: form.agency,
+          accountNumber: form.accountNumber,
+          accountDigit: form.accountDigit,
+          accountType: form.accountType,
+          pixKey: form.pixKey,
+          pixKeyType: form.pixKeyType,
+          description: form.description,
+        });
+        message = data?.status === 'PENDING_PROVIDER'
+          ? 'Ordem externa registrada. Aguardando provedor bancário.'
+          : 'Transferência externa enviada.';
+      }
+
+      setSuccess(message);
+      setForm(EMPTY_FORM);
       await loadData();
       setTab('overview');
     } catch (err) {
@@ -108,7 +172,7 @@ export default function UserDashboard() {
       .filter((t) => ['DEPOSIT', 'TRANSFER_IN'].includes(t.type))
       .reduce((acc, t) => acc + (t.amount || 0), 0);
     const outflow = transactions
-      .filter((t) => ['WITHDRAWAL', 'TRANSFER_OUT', 'PAYMENT'].includes(t.type))
+      .filter((t) => ['WITHDRAWAL', 'TRANSFER_OUT', 'TRANSFER_EXTERNAL', 'PAYMENT'].includes(t.type))
       .reduce((acc, t) => acc + (t.amount || 0), 0);
     return { inflow, outflow, count: transactions.length };
   }, [transactions]);
@@ -147,6 +211,11 @@ export default function UserDashboard() {
 
   const balance = profile?.balance ?? 0;
   const accountNumber = profile?.accountNumber || profile?.customerCode || '0000-0000-00';
+  const creditAvailable = creditSummary?.creditoDisponivelCentavos ?? 0;
+  const creditGranted = creditSummary?.creditoTotalConcedidoCentavos ?? 0;
+  const creditUsed = creditSummary?.creditoTotalUsadoCentavos ?? 0;
+  const creditLiquidated = creditSummary?.creditoTotalLiquidadoCentavos ?? 0;
+  const creditDebt = Math.max(0, creditGranted - creditLiquidated);
 
   const Tab = ({ id, label, icon: Icon }) => (
     <button
@@ -191,6 +260,33 @@ export default function UserDashboard() {
             )}
           </div>
           <div className="mt-2 text-xs text-ink-400 font-mono">Conta {accountNumber}</div>
+
+          <div className="mt-5 grid sm:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+              <div className="flex items-center gap-2 text-xs text-ink-300">
+                <CreditCard className="h-4 w-4 text-bravus-200" /> Crédito disponível
+              </div>
+              <div className="mt-1 font-display text-lg font-semibold tabular-nums">
+                {showBalance ? formatCurrency(creditAvailable) : 'R$ ••••••'}
+              </div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+              <div className="flex items-center gap-2 text-xs text-ink-300">
+                <Landmark className="h-4 w-4 text-red-200" /> Dívida com o banco
+              </div>
+              <div className="mt-1 font-display text-lg font-semibold tabular-nums text-red-100">
+                {showBalance ? formatCurrency(creditDebt) : 'R$ ••••••'}
+              </div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+              <div className="flex items-center gap-2 text-xs text-ink-300">
+                <Activity className="h-4 w-4 text-emerald-200" /> Crédito usado
+              </div>
+              <div className="mt-1 font-display text-lg font-semibold tabular-nums">
+                {showBalance ? formatCurrency(creditUsed) : 'R$ ••••••'}
+              </div>
+            </div>
+          </div>
 
           <div className="mt-6 flex flex-wrap gap-2">
             <button onClick={() => setTab('deposit')} className="btn-secondary"><ArrowDownToLine className="h-4 w-4" /> Depositar</button>
@@ -320,15 +416,43 @@ export default function UserDashboard() {
 
         {/* Forms */}
         {(tab === 'deposit' || tab === 'withdraw' || tab === 'transfer') && (
-          <div className="card-premium p-6 max-w-xl">
+          <div className="card-premium p-6 max-w-3xl">
             <h3 className="title-md mb-1">
               {tab === 'deposit' ? 'Novo depósito' : tab === 'withdraw' ? 'Novo saque' : 'Nova transferência'}
             </h3>
             <p className="text-sm text-ink-300 mb-5">
-              {tab === 'transfer' ? 'Envie para outra conta Bravus.' : 'Operação em conta corrente.'}
+              {tab === 'transfer' ? 'Envie para conta Bravus ou registre uma ordem PIX/TED externa.' : 'Operação em conta corrente.'}
             </p>
 
             <div className="space-y-4">
+              {tab === 'transfer' && (
+                <div>
+                  <label className="form-label">Destino</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, transferMode: 'internal' })}
+                      className={cn(
+                        'btn-secondary justify-center',
+                        form.transferMode === 'internal' && '!bg-white/15 !text-white'
+                      )}
+                    >
+                      <ArrowRightLeft className="h-4 w-4" /> Conta Bravus
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, transferMode: 'external' })}
+                      className={cn(
+                        'btn-secondary justify-center',
+                        form.transferMode === 'external' && '!bg-white/15 !text-white'
+                      )}
+                    >
+                      <Send className="h-4 w-4" /> PIX/TED externo
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="form-label">Valor (R$)</label>
                 <input
@@ -340,9 +464,9 @@ export default function UserDashboard() {
                 />
               </div>
 
-              {tab === 'transfer' && (
+              {tab === 'transfer' && form.transferMode === 'internal' && (
                 <div>
-                  <label className="form-label">Conta de destino</label>
+                  <label className="form-label">Conta Bravus de destino</label>
                   <input
                     type="text"
                     className="form-input"
@@ -350,6 +474,139 @@ export default function UserDashboard() {
                     value={form.destinationAccount}
                     onChange={(e) => setForm({ ...form, destinationAccount: e.target.value })}
                   />
+                </div>
+              )}
+
+              {tab === 'transfer' && form.transferMode === 'external' && (
+                <div className="space-y-4">
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="form-label">Canal</label>
+                      <select
+                        className="form-input"
+                        value={form.channel}
+                        onChange={(e) => setForm({ ...form, channel: e.target.value })}
+                      >
+                        <option value="PIX">PIX</option>
+                        <option value="TED">TED</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Documento do beneficiário</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="CPF ou CNPJ"
+                        value={form.beneficiaryDocument}
+                        onChange={(e) => setForm({ ...form, beneficiaryDocument: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="form-label">Nome do beneficiário</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Nome completo ou razão social"
+                      value={form.beneficiaryName}
+                      onChange={(e) => setForm({ ...form, beneficiaryName: e.target.value })}
+                    />
+                  </div>
+
+                  {form.channel === 'PIX' ? (
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="form-label">Tipo de chave PIX</label>
+                        <select
+                          className="form-input"
+                          value={form.pixKeyType}
+                          onChange={(e) => setForm({ ...form, pixKeyType: e.target.value })}
+                        >
+                          <option value="CPF">CPF</option>
+                          <option value="CNPJ">CNPJ</option>
+                          <option value="EMAIL">E-mail</option>
+                          <option value="PHONE">Telefone</option>
+                          <option value="EVP">Chave aleatória</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label">Chave PIX</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="Chave do beneficiário"
+                          value={form.pixKey}
+                          onChange={(e) => setForm({ ...form, pixKey: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid sm:grid-cols-3 gap-4">
+                      <div>
+                        <label className="form-label">Banco</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="001"
+                          value={form.bankCode}
+                          onChange={(e) => setForm({ ...form, bankCode: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label">Agência</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="0001"
+                          value={form.agency}
+                          onChange={(e) => setForm({ ...form, agency: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label">Conta</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="12345678"
+                          value={form.accountNumber}
+                          onChange={(e) => setForm({ ...form, accountNumber: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label">Dígito</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="9"
+                          value={form.accountDigit}
+                          onChange={(e) => setForm({ ...form, accountDigit: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label">Tipo de conta</label>
+                        <select
+                          className="form-input"
+                          value={form.accountType}
+                          onChange={(e) => setForm({ ...form, accountType: e.target.value })}
+                        >
+                          <option value="CORRENTE">Corrente</option>
+                          <option value="POUPANCA">Poupança</option>
+                          <option value="PAGAMENTO">Pagamento</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label">ISPB (opcional)</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="00000000"
+                          value={form.ispb}
+                          onChange={(e) => setForm({ ...form, ispb: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -374,6 +631,24 @@ export default function UserDashboard() {
                   tab === 'withdraw' ? 'Confirmar saque' : 'Confirmar transferência'
                 )}
               </button>
+
+              {tab === 'transfer' && externalOrders.length > 0 && (
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                  <div className="text-sm font-semibold text-white mb-3">Ordens externas recentes</div>
+                  <ul className="space-y-2">
+                    {externalOrders.slice(0, 4).map((order) => (
+                      <li key={order.id} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="min-w-0 truncate text-ink-200">
+                          {order.channel} · {order.beneficiaryName}
+                        </span>
+                        <span className="shrink-0 text-ink-300">
+                          {formatCurrency(order.amountCentavos)} · {order.status}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -34,6 +34,7 @@ export const getTransactionTypeLabel = (type) => {
     WITHDRAWAL: 'Saque',
     TRANSFER_OUT: 'Transferência enviada',
     TRANSFER_IN: 'Transferência recebida',
+    TRANSFER_EXTERNAL: 'Transferência bancária externa',
     PAYMENT: 'Pagamento',
   };
   return labels[type] || type || 'Transação';
@@ -45,6 +46,7 @@ export const getTransactionColor = (type) => {
     TRANSFER_IN: 'success',
     WITHDRAWAL: 'danger',
     TRANSFER_OUT: 'danger',
+    TRANSFER_EXTERNAL: 'danger',
     PAYMENT: 'warning',
   };
   return colors[type] || 'secondary';
