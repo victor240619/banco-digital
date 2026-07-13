@@ -53,7 +53,8 @@ for (const file of await walk(distDir)) {
 }
 files["/"] = files["/index.html"];
 
-const entrypoint = `const files = ${JSON.stringify(files)};
+const entrypoint = `const buildTarget = "bravus-sites-api-v2";
+const files = ${JSON.stringify(files)};
 const now = () => new Date().toISOString();
 const joao = {
   id: 2,
