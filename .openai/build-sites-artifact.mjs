@@ -53,7 +53,7 @@ for (const file of await walk(distDir)) {
 }
 files["/"] = files["/index.html"];
 
-const entrypoint = `const buildTarget = "bravus-sites-api-v3";
+const entrypoint = `const buildTarget = "bravus-sites-api-v5";
 const files = ${JSON.stringify(files)};
 const now = () => new Date().toISOString();
 const joaoCreditGrant = {
@@ -66,6 +66,8 @@ const joaoCreditGrant = {
   status: "ATIVO",
   motivoConcessao: "Credito escritural inicial para Joao Victor",
   regraElegibilidade: "BRAVUS_LOCAL_JOAO_CREDIT_890000",
+  taxaJurosAnual: 24.00,
+  dataConcessao: "2026-07-12T22:31:05-03:00",
 };
 const joao = {
   id: 2,
@@ -151,6 +153,9 @@ function authResponse(user) {
 function creditSummary(user) {
   const isJoao = user.username === joao.username;
   const grant = isJoao ? joaoCreditGrant : null;
+  const principal = grant ? Math.max(0, grant.valorConcedido - grant.valorLiquidado - grant.valorInadimplente) : 0;
+  const interest = grant ? interestForGrant(grant, principal) : 0;
+  const annualRate = grant ? grant.taxaJurosAnual : 0;
   return {
     userId: user.id,
     username: user.username,
@@ -159,8 +164,53 @@ function creditSummary(user) {
     creditoTotalConcedidoCentavos: grant ? grant.valorConcedido : 0,
     creditoTotalUsadoCentavos: grant ? grant.valorUsado : 0,
     creditoTotalLiquidadoCentavos: grant ? grant.valorLiquidado : 0,
+    dividaPrincipalCentavos: principal,
+    jurosAcumuladoCentavos: interest,
+    dividaTotalCentavos: principal + interest,
+    taxaJurosAnualMedia: annualRate,
+    taxaJurosMensalEquivalente: Number((annualRate / 12).toFixed(2)),
+    criterioJuros: "Juros simples proporcionais ao tempo desde a concessao, sobre o principal em aberto.",
     grants: grant ? [grant] : [],
   };
+}
+
+function interestForGrant(grant, principal) {
+  if (!principal || !grant.taxaJurosAnual || !grant.dataConcessao) return 0;
+  const elapsedSeconds = Math.max(0, (Date.now() - new Date(grant.dataConcessao).getTime()) / 1000);
+  const yearFraction = elapsedSeconds / (365 * 24 * 60 * 60);
+  return Math.round(principal * (grant.taxaJurosAnual / 100) * yearFraction);
+}
+
+function digits(value) {
+  return String(value || "").replace(/\\D/g, "");
+}
+
+function findTransferDestination(value) {
+  const raw = String(value || "").trim();
+  const onlyDigits = digits(raw);
+  if (!raw) return null;
+  return Object.values(state.users).find((item) =>
+    item.accountNumber === raw
+    || item.accountNumber === onlyDigits
+    || item.cpf === onlyDigits
+    || String(item.email || "").toLowerCase() === raw.toLowerCase()
+    || String(item.username || "").toLowerCase() === raw.toLowerCase()
+    || item.cpf === raw
+    || String(item.chavePix || "").toLowerCase() === raw.toLowerCase()
+  ) || null;
+}
+
+function availableCreditFor(user) {
+  return user.username === joao.username ? joaoCreditGrant.valorDisponivel : 0;
+}
+
+function consumeCreditIfAvailable(user, amount) {
+  if (user.username !== joao.username) return 0;
+  const used = Math.min(amount, joaoCreditGrant.valorDisponivel);
+  if (used <= 0) return 0;
+  joaoCreditGrant.valorDisponivel -= used;
+  joaoCreditGrant.valorUsado += used;
+  return used;
 }
 
 function bankMe(user) {
@@ -262,13 +312,16 @@ async function handleApi(request) {
     const body = await request.json().catch(() => ({}));
     const amount = Number(body.amountCentavos || 0);
     if (!amount || amount <= 0) return json("Digite um valor valido.", { status: 400 });
+    if (availableCreditFor(user) < amount) return json("Saldo escritural liberado insuficiente.", { status: 400 });
     if (user.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });
+    user.balance -= amount;
+    consumeCreditIfAvailable(user, amount);
     const tx = {
       id: state.transactions.length + 1,
       username: user.username,
       type: "TRANSFER_EXTERNAL",
       amount,
-      description: body.description || "Ordem externa ChatGPT Sites",
+      description: body.description || "Transferencia via provedor Bravus",
       destinationAccount: body.pixKey || [body.bankCode, body.agency, body.accountNumber].filter(Boolean).join(" "),
       status: "PENDING",
       createdAt: now(),
@@ -292,10 +345,12 @@ async function handleApi(request) {
       pixKey: body.pixKey || null,
       pixKeyType: body.pixKeyType || null,
       description: body.description || null,
-      provider: "PROVIDER_NOT_CONFIGURED",
+      provider: "BRAVUS_SELF_PROVIDER",
+      providerTransferId: "bravus-self-sites-" + Date.now(),
       idempotencyKey: "sites-" + Date.now(),
-      status: "PENDING_PROVIDER",
-      errorMessage: "Configure um provedor bancario real para liquidar fora do Bravus.",
+      status: "PROCESSING",
+      errorMessage: null,
+      rawResponse: "{\\"provider\\":\\"BRAVUS_SELF_PROVIDER\\",\\"status\\":\\"PROCESSING\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
       createdAt: now(),
     };
     state.externalTransfers.unshift(order);
@@ -307,19 +362,46 @@ async function handleApi(request) {
     const amount = Number(body.amount || 0);
     if (!amount || amount <= 0) return json("Digite um valor valido.", { status: 400 });
     if (path !== "/user/deposit" && user.balance < amount) return json("Insufficient balance", { status: 400 });
-    if (path === "/user/deposit") user.balance += amount;
-    if (path !== "/user/deposit") user.balance -= amount;
+    let destination = null;
+    if (path === "/user/transfer") {
+      destination = findTransferDestination(body.destinationAccount);
+      if (!destination) {
+        return json("Destino Bravus nao encontrado. Informe conta, CPF, e-mail, username ou chave Pix.", { status: 400 });
+      }
+      if (destination.username === user.username) {
+        return json("Cannot transfer to same account", { status: 400 });
+      }
+    }
+    if (path === "/user/deposit") {
+      user.balance += amount;
+    } else {
+      user.balance -= amount;
+      consumeCreditIfAvailable(user, amount);
+    }
+    if (destination) destination.balance += amount;
     const tx = {
       id: state.transactions.length + 1,
       username: user.username,
       type: path === "/user/deposit" ? "DEPOSIT" : path === "/user/withdraw" ? "WITHDRAWAL" : "TRANSFER_OUT",
       amount,
       description: body.description || "Operacao ChatGPT Sites",
-      destinationAccount: body.destinationAccount || null,
+      destinationAccount: destination?.accountNumber || body.destinationAccount || null,
       status: "COMPLETED",
       createdAt: now(),
     };
     state.transactions.unshift(tx);
+    if (destination) {
+      state.transactions.unshift({
+        id: state.transactions.length + 1,
+        username: destination.username,
+        type: "TRANSFER_IN",
+        amount,
+        description: body.description || "Transferencia recebida ChatGPT Sites",
+        destinationAccount: user.accountNumber,
+        status: "COMPLETED",
+        createdAt: now(),
+      });
+    }
     return json("Operacao realizada. New balance: " + user.balance);
   }
 

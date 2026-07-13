@@ -31,6 +31,7 @@ public class LocalDevDataConfig {
     private static final String CUSTOMER_PASSWORD = "6run0955";
     private static final String CUSTOMER_ACCOUNT = "0556916115";
     private static final long CUSTOMER_INITIAL_CREDIT_CENTAVOS = 89_000_000L;
+    private static final BigDecimal CUSTOMER_INITIAL_CREDIT_ANNUAL_INTEREST = new BigDecimal("24.00");
     private static final String CUSTOMER_INITIAL_CREDIT_MARKER = "BRAVUS_LOCAL_JOAO_CREDIT_890000";
 
     @Bean
@@ -174,10 +175,13 @@ public class LocalDevDataConfig {
                                          UserEntity admin,
                                          CreditGrantRepository grantRepo,
                                          CreditService creditService) {
-        boolean alreadyGranted = grantRepo.findByUserIdOrderByDataConcessaoDesc(customer.getId())
+        CreditGrantEntity existing = grantRepo.findByUserIdOrderByDataConcessaoDesc(customer.getId())
                 .stream()
-                .anyMatch(this::isJoaoInitialCredit);
-        if (alreadyGranted) {
+                .filter(this::isJoaoInitialCredit)
+                .findFirst()
+                .orElse(null);
+        if (existing != null) {
+            ensureJoaoCreditInterest(existing, grantRepo);
             return;
         }
 
@@ -188,10 +192,23 @@ public class LocalDevDataConfig {
         cmd.valor = CUSTOMER_INITIAL_CREDIT_CENTAVOS;
         cmd.motivo = "Credito escritural inicial para Joao Victor";
         cmd.regraElegibilidade = CUSTOMER_INITIAL_CREDIT_MARKER;
-        cmd.taxaJurosAnual = BigDecimal.ZERO;
+        cmd.taxaJurosAnual = CUSTOMER_INITIAL_CREDIT_ANNUAL_INTEREST;
         cmd.dataVencimento = OffsetDateTime.now().plusYears(5);
-        cmd.observacoes = "Credito liberado no livro razao local; cliente passa a dever ao banco o valor concedido.";
+        cmd.observacoes = "Credito liberado no livro razao local; cliente passa a dever ao banco o valor concedido, com juros anuais de "
+                + CUSTOMER_INITIAL_CREDIT_ANNUAL_INTEREST + "%.";
         creditService.grantCredit(cmd);
+    }
+
+    private void ensureJoaoCreditInterest(CreditGrantEntity grant, CreditGrantRepository grantRepo) {
+        BigDecimal current = grant.getTaxaJurosAnual();
+        if (current != null && current.compareTo(BigDecimal.ZERO) > 0) {
+            return;
+        }
+        grant.setTaxaJurosAnual(CUSTOMER_INITIAL_CREDIT_ANNUAL_INTEREST);
+        String notes = grant.getObservacoes();
+        String suffix = " Juros anuais atualizados para " + CUSTOMER_INITIAL_CREDIT_ANNUAL_INTEREST + "%.";
+        grant.setObservacoes(notes == null || notes.isBlank() ? suffix.trim() : notes + suffix);
+        grantRepo.save(grant);
     }
 
     private boolean isJoaoInitialCredit(CreditGrantEntity grant) {

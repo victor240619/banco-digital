@@ -4,6 +4,8 @@ import com.bravus.bank.db.entity.TransactionEntity;
 import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.TransactionRepository;
 import com.bravus.bank.db.repo.UserRepository;
+import com.bravus.bank.ledger.repo.CreditGrantRepository;
+import com.bravus.bank.ledger.service.CreditService;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -14,6 +16,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @RestController
@@ -22,10 +25,17 @@ public class UserController {
     
     private final UserRepository userRepository;
     private final TransactionRepository transactionRepository;
+    private final CreditGrantRepository creditGrantRepository;
+    private final CreditService creditService;
     
-    public UserController(UserRepository userRepository, TransactionRepository transactionRepository) {
+    public UserController(UserRepository userRepository,
+                          TransactionRepository transactionRepository,
+                          CreditGrantRepository creditGrantRepository,
+                          CreditService creditService) {
         this.userRepository = userRepository;
         this.transactionRepository = transactionRepository;
+        this.creditGrantRepository = creditGrantRepository;
+        this.creditService = creditService;
     }
     
     public record UserProfileResponse(
@@ -181,14 +191,13 @@ public class UserController {
             return ResponseEntity.badRequest().body("Insufficient balance");
         }
         
-        UserEntity toUser = userRepository.findByAccountNumber(request.destinationAccount())
-                .orElse(null);
+        UserEntity toUser = findTransferDestination(request.destinationAccount()).orElse(null);
         
         if (toUser == null) {
-            return ResponseEntity.badRequest().body("Destination account not found");
+            return ResponseEntity.badRequest().body("Destino Bravus nao encontrado. Informe conta, CPF, e-mail, username ou chave Pix.");
         }
         
-        if (fromUser.getAccountNumber().equals(toUser.getAccountNumber())) {
+        if (fromUser.getId().equals(toUser.getId())) {
             return ResponseEntity.badRequest().body("Cannot transfer to same account");
         }
         
@@ -206,7 +215,14 @@ public class UserController {
         outTransaction.setDescription(request.description() != null ? request.description() : "Transfer");
         outTransaction.setDestinationAccount(toUser.getAccountNumber());
         outTransaction.setStatus("COMPLETED");
-        transactionRepository.save(outTransaction);
+        outTransaction = transactionRepository.save(outTransaction);
+
+        consumeCreditIfAvailable(
+                fromUser,
+                request.amount(),
+                outTransaction.getId(),
+                username,
+                "Transferencia interna Bravus para " + toUser.getAccountNumber());
         
         TransactionEntity inTransaction = new TransactionEntity();
         inTransaction.setUser(toUser);
@@ -218,5 +234,55 @@ public class UserController {
         transactionRepository.save(inTransaction);
         
         return ResponseEntity.ok("Transfer successful. New balance: " + fromUser.getBalance());
+    }
+
+    private Optional<UserEntity> findTransferDestination(String destination) {
+        if (destination == null || destination.isBlank()) {
+            return Optional.empty();
+        }
+        String raw = destination.trim();
+        String digits = raw.replaceAll("\\D", "");
+
+        Optional<UserEntity> found = userRepository.findByAccountNumber(raw);
+        if (found.isPresent()) return found;
+
+        if (!digits.isBlank()) {
+            found = userRepository.findByAccountNumber(digits);
+            if (found.isPresent()) return found;
+            if (digits.length() == 11 || digits.length() == 14) {
+                found = userRepository.findByCpf(digits);
+                if (found.isPresent()) return found;
+            }
+            found = userRepository.findByChavePix(digits);
+            if (found.isPresent()) return found;
+        }
+
+        return userRepository.findByEmail(raw)
+                .or(() -> userRepository.findByUsername(raw))
+                .or(() -> userRepository.findByChavePix(raw));
+    }
+
+    private void consumeCreditIfAvailable(UserEntity user,
+                                          Long amount,
+                                          Long transactionId,
+                                          String createdBy,
+                                          String note) {
+        Long availableCredit = creditGrantRepository.sumAvailableByUser(user.getId());
+        if (availableCredit == null || availableCredit <= 0) {
+            return;
+        }
+        long coveredByCredit = Math.min(amount, availableCredit);
+        if (coveredByCredit <= 0) {
+            return;
+        }
+
+        CreditService.UseCommand use = new CreditService.UseCommand();
+        use.userId = user.getId();
+        use.valor = coveredByCredit;
+        use.tipo = "TRANSFERENCIA_INTERNA";
+        use.transactionId = transactionId;
+        use.criadoPor = createdBy;
+        use.observacao = note;
+        creditService.useCredit(use);
     }
 }

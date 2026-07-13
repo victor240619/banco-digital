@@ -21,6 +21,9 @@ public class ConfiguredHttpBankingTransferProvider implements BankingTransferPro
     @Value("${BRAVUS_BANKING_PROVIDER_TOKEN:}")
     private String providerToken;
 
+    @Value("${BRAVUS_BANKING_PROVIDER_MODE:SELF}")
+    private String providerMode;
+
     @Value("${BRAVUS_BANKING_PROVIDER_NAME:CONFIGURED_HTTP}")
     private String providerName;
 
@@ -30,16 +33,19 @@ public class ConfiguredHttpBankingTransferProvider implements BankingTransferPro
 
     @Override
     public boolean isConfigured() {
-        return providerUrl != null && !providerUrl.isBlank();
+        return selfProviderMode() || (providerUrl != null && !providerUrl.isBlank());
     }
 
     @Override
     public String providerName() {
-        return providerName;
+        return selfProviderMode() ? "BRAVUS_SELF_PROVIDER" : providerName;
     }
 
     @Override
     public ProviderTransferResult submit(ProviderTransferCommand command) {
+        if (selfProviderMode()) {
+            return acceptOnBravusRail(command);
+        }
         if (!isConfigured()) {
             throw new IllegalStateException(
                     "Configure BRAVUS_BANKING_PROVIDER_URL e BRAVUS_BANKING_PROVIDER_TOKEN para enviar dinheiro real.");
@@ -81,6 +87,20 @@ public class ConfiguredHttpBankingTransferProvider implements BankingTransferPro
             result.rawResponse = String.valueOf(response);
         }
         return result;
+    }
+
+    private ProviderTransferResult acceptOnBravusRail(ProviderTransferCommand command) {
+        ProviderTransferResult result = new ProviderTransferResult();
+        result.providerTransferId = "bravus-self-" + command.idempotencyKey;
+        result.status = "PROCESSING";
+        result.rawResponse = "{\"provider\":\"BRAVUS_SELF_PROVIDER\",\"status\":\"PROCESSING\",\"settlement\":\"INTERNAL_LEDGER\"}";
+        return result;
+    }
+
+    private boolean selfProviderMode() {
+        String mode = providerMode == null ? "SELF" : providerMode.trim().toUpperCase();
+        return mode.isBlank() || "SELF".equals(mode) || "BRAVUS_SELF".equals(mode)
+                || "BRAVUS_SELF_PROVIDER".equals(mode);
     }
 
     private String safe(String value) {

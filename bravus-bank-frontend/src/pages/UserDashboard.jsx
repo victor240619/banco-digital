@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowDownToLine, ArrowUpFromLine, ArrowRightLeft, Wallet, Eye, EyeOff,
   TrendingUp, TrendingDown, Activity, Receipt, CheckCircle2, AlertCircle,
-  Send, Landmark, CreditCard,
+  Send, Landmark, CreditCard, Percent,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -108,7 +108,7 @@ export default function UserDashboard() {
   const submit = async (kind) => {
     if (!form.amount || parseFloat(form.amount) <= 0) return setError('Digite um valor válido.');
     if (kind === 'transfer' && form.transferMode === 'internal' && !form.destinationAccount) {
-      return setError('Informe a conta Bravus de destino.');
+      return setError('Informe conta, CPF, e-mail ou chave Pix Bravus de destino.');
     }
     if (kind === 'transfer' && form.transferMode === 'external') {
       if (!form.beneficiaryName || !form.beneficiaryDocument) {
@@ -150,8 +150,8 @@ export default function UserDashboard() {
           description: form.description,
         });
         message = data?.status === 'PENDING_PROVIDER'
-          ? 'Ordem externa registrada. Aguardando provedor bancário.'
-          : 'Transferência externa enviada.';
+          ? 'Ordem registrada. Aguardando configuração do provedor Bravus.'
+          : 'Transferência aceita pelo provedor Bravus e valor debitado.';
       }
 
       setSuccess(message);
@@ -215,7 +215,11 @@ export default function UserDashboard() {
   const creditGranted = creditSummary?.creditoTotalConcedidoCentavos ?? 0;
   const creditUsed = creditSummary?.creditoTotalUsadoCentavos ?? 0;
   const creditLiquidated = creditSummary?.creditoTotalLiquidadoCentavos ?? 0;
-  const creditDebt = Math.max(0, creditGranted - creditLiquidated);
+  const creditDebtPrincipal = creditSummary?.dividaPrincipalCentavos ?? Math.max(0, creditGranted - creditLiquidated);
+  const interestAccrued = creditSummary?.jurosAcumuladoCentavos ?? 0;
+  const creditDebt = creditSummary?.dividaTotalCentavos ?? (creditDebtPrincipal + interestAccrued);
+  const annualInterestRate = Number(creditSummary?.taxaJurosAnualMedia ?? 0);
+  const monthlyInterestRate = Number(creditSummary?.taxaJurosMensalEquivalente ?? 0);
 
   const Tab = ({ id, label, icon: Icon }) => (
     <button
@@ -261,7 +265,7 @@ export default function UserDashboard() {
           </div>
           <div className="mt-2 text-xs text-ink-400 font-mono">Conta {accountNumber}</div>
 
-          <div className="mt-5 grid sm:grid-cols-3 gap-3">
+          <div className="mt-5 grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
               <div className="flex items-center gap-2 text-xs text-ink-300">
                 <CreditCard className="h-4 w-4 text-bravus-200" /> Crédito disponível
@@ -272,18 +276,35 @@ export default function UserDashboard() {
             </div>
             <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
               <div className="flex items-center gap-2 text-xs text-ink-300">
-                <Landmark className="h-4 w-4 text-red-200" /> Dívida com o banco
+                <Landmark className="h-4 w-4 text-red-200" /> Dívida total
               </div>
               <div className="mt-1 font-display text-lg font-semibold tabular-nums text-red-100">
                 {showBalance ? formatCurrency(creditDebt) : 'R$ ••••••'}
               </div>
+              <div className="mt-1 text-[11px] text-ink-400">
+                Principal {showBalance ? formatCurrency(creditDebtPrincipal) : 'R$ •••'} + juros
+              </div>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
               <div className="flex items-center gap-2 text-xs text-ink-300">
-                <Activity className="h-4 w-4 text-emerald-200" /> Crédito usado
+                <Activity className="h-4 w-4 text-emerald-200" /> Juros acumulados
               </div>
               <div className="mt-1 font-display text-lg font-semibold tabular-nums">
-                {showBalance ? formatCurrency(creditUsed) : 'R$ ••••••'}
+                {showBalance ? formatCurrency(interestAccrued) : 'R$ ••••••'}
+              </div>
+              <div className="mt-1 text-[11px] text-ink-400">
+                Usado {showBalance ? formatCurrency(creditUsed) : 'R$ •••'}
+              </div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+              <div className="flex items-center gap-2 text-xs text-ink-300">
+                <Percent className="h-4 w-4 text-amber-200" /> Taxa do crédito
+              </div>
+              <div className="mt-1 font-display text-lg font-semibold tabular-nums">
+                {annualInterestRate.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}% a.a.
+              </div>
+              <div className="mt-1 text-[11px] text-ink-400">
+                {monthlyInterestRate.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}% a.m. simples
               </div>
             </div>
           </div>
@@ -421,7 +442,7 @@ export default function UserDashboard() {
               {tab === 'deposit' ? 'Novo depósito' : tab === 'withdraw' ? 'Novo saque' : 'Nova transferência'}
             </h3>
             <p className="text-sm text-ink-300 mb-5">
-              {tab === 'transfer' ? 'Envie para conta Bravus ou registre uma ordem PIX/TED externa.' : 'Operação em conta corrente.'}
+              {tab === 'transfer' ? 'Envie para conta Bravus ou registre PIX/TED pelo provedor Bravus.' : 'Operação em conta corrente.'}
             </p>
 
             <div className="space-y-4">
@@ -447,7 +468,7 @@ export default function UserDashboard() {
                         form.transferMode === 'external' && '!bg-white/15 !text-white'
                       )}
                     >
-                      <Send className="h-4 w-4" /> PIX/TED externo
+                      <Send className="h-4 w-4" /> PIX/TED Bravus
                     </button>
                   </div>
                 </div>
@@ -466,11 +487,11 @@ export default function UserDashboard() {
 
               {tab === 'transfer' && form.transferMode === 'internal' && (
                 <div>
-                  <label className="form-label">Conta Bravus de destino</label>
+                  <label className="form-label">Destino Bravus</label>
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="0000000000"
+                    placeholder="Conta, CPF, e-mail, usuário ou chave Pix"
                     value={form.destinationAccount}
                     onChange={(e) => setForm({ ...form, destinationAccount: e.target.value })}
                   />
@@ -634,7 +655,7 @@ export default function UserDashboard() {
 
               {tab === 'transfer' && externalOrders.length > 0 && (
                 <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-                  <div className="text-sm font-semibold text-white mb-3">Ordens externas recentes</div>
+                  <div className="text-sm font-semibold text-white mb-3">Ordens Bravus recentes</div>
                   <ul className="space-y-2">
                     {externalOrders.slice(0, 4).map((order) => (
                       <li key={order.id} className="flex items-center justify-between gap-3 text-sm">
