@@ -157,6 +157,12 @@ export const externalTransferService = {
   recent: (limit = 20) => api.get(`/admin/ledger/external-transfers?limit=${limit}`),
 };
 
+export const globalRailService = {
+  participants: () => api.get('/admin/global-rail/participants'),
+  createParticipant: (payload) => api.post('/admin/global-rail/participants', payload),
+  confirmTransfer: (orderId, payload) => api.post(`/admin/global-rail/transfers/${orderId}/confirm`, payload),
+};
+
 export const caymanRailService = {
   config: () => api.get('/admin/cayman-rail/config'),
   updateConfig: (payload) => api.put('/admin/cayman-rail/config', payload),

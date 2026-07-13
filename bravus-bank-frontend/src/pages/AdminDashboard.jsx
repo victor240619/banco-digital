@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   Users, Activity, Banknote, TrendingUp, Power, Trash2, CheckCircle2, AlertCircle,
   Search, Shield, BarChart3, ListChecks, Coins, Link2, Hash, Vault, PiggyBank,
-  Send, RefreshCw, ChevronDown, ChevronUp, Landmark,
+  Send, RefreshCw, ChevronDown, ChevronUp, Landmark, Globe2,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import {
   adminService, analysisService, caymanRailService,
-  externalTransferService, ledgerAdminService, unifiedSearchService,
+  externalTransferService, globalRailService, ledgerAdminService, unifiedSearchService,
 } from '../services/api';
 import { formatCurrency, formatDate, getTransactionTypeLabel } from '../utils/helpers';
 import { cn } from '../lib/cn';
@@ -58,6 +58,7 @@ export default function AdminDashboard() {
   const [chain, setChain] = useState(null);
   const [documentAnalyses, setDocumentAnalyses] = useState([]);
   const [externalTransfers, setExternalTransfers] = useState([]);
+  const [globalRailParticipants, setGlobalRailParticipants] = useState([]);
   const [caymanRail, setCaymanRail] = useState({
     config: null,
     readiness: null,
@@ -80,7 +81,7 @@ export default function AdminDashboard() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [d, u, t, bs, ch, en, da, et, crConfig, crReady, crParticipants, crInstructions] = await Promise.all([
+      const [d, u, t, bs, ch, en, da, et, grParticipants, crConfig, crReady, crParticipants, crInstructions] = await Promise.all([
         adminService.getDashboard().catch(() => ({ data: null })),
         adminService.getAllUsers().catch(() => ({ data: [] })),
         adminService.getAllTransactions().catch(() => ({ data: [] })),
@@ -89,6 +90,7 @@ export default function AdminDashboard() {
         ledgerAdminService.entries(0, 30).catch(() => ({ data: { content: [] } })),
         analysisService.recentDocuments(20).catch(() => ({ data: [] })),
         externalTransferService.recent(20).catch(() => ({ data: [] })),
+        globalRailService.participants().catch(() => ({ data: [] })),
         caymanRailService.config().catch(() => ({ data: null })),
         caymanRailService.readiness().catch(() => ({ data: null })),
         caymanRailService.participants().catch(() => ({ data: [] })),
@@ -102,6 +104,7 @@ export default function AdminDashboard() {
       setEntries(en.data?.content || en.data || []);
       setDocumentAnalyses(Array.isArray(da.data) ? da.data : []);
       setExternalTransfers(Array.isArray(et.data) ? et.data : []);
+      setGlobalRailParticipants(Array.isArray(grParticipants.data) ? grParticipants.data : []);
       setCaymanRail({
         config: crConfig.data,
         readiness: crReady.data,
@@ -198,6 +201,7 @@ export default function AdminDashboard() {
         <Tab id="analysis" label="Analise automatica" icon={Shield} />
         <Tab id="credit"  label="Emissão Escritural" icon={Coins} />
         <Tab id="external" label="Envio Bancario" icon={Send} />
+        <Tab id="globalRail" label="Trilho Global" icon={Globe2} />
         <Tab id="cayman" label="Trilho Cayman" icon={Landmark} />
         <Tab id="ledger"  label="Livro Razão"      icon={Link2} />
       </div>
@@ -240,6 +244,16 @@ export default function AdminDashboard() {
       {tab === 'external' && (
         <ExternalTransferView
           users={users}
+          transfers={externalTransfers}
+          participants={globalRailParticipants}
+          onSuccess={(msg) => { setSuccess(msg); loadAll(); }}
+          onError={setError}
+        />
+      )}
+
+      {tab === 'globalRail' && (
+        <GlobalRailView
+          participants={globalRailParticipants}
           transfers={externalTransfers}
           onSuccess={(msg) => { setSuccess(msg); loadAll(); }}
           onError={setError}
@@ -883,12 +897,13 @@ function CreditView({ users, bs, onSuccess, onError }) {
   );
 }
 
-function ExternalTransferView({ users, transfers, onSuccess, onError }) {
+function ExternalTransferView({ users, transfers, participants = [], onSuccess, onError }) {
   const [form, setForm] = useState({
     userId: '', amountReais: '', channel: 'PIX',
     beneficiaryName: '', beneficiaryDocument: '',
     pixKey: '', pixKeyType: 'CPF',
     bankCode: '', ispb: '', agency: '', accountNumber: '', accountDigit: '', accountType: 'CORRENTE',
+    destinationNetwork: 'PIX_BR', participantCode: '',
     description: '',
   });
   const [submitting, setSubmitting] = useState(false);
@@ -915,8 +930,10 @@ function ExternalTransferView({ users, transfers, onSuccess, onError }) {
         accountDigit: form.accountDigit || null,
         accountType: form.accountType || null,
         description: form.description || null,
+        destinationNetwork: form.destinationNetwork || null,
+        participantCode: form.participantCode || null,
       });
-      onSuccess(`Ordem de R$ ${form.amountReais} enviada ao gateway bancario.`);
+      onSuccess(`Ordem de R$ ${form.amountReais} registrada no trilho Bravus.`);
       setForm({ ...form, amountReais: '', description: '' });
     } catch (err) {
       onError(err?.response?.data?.message || err?.response?.data || 'Falha no envio bancario externo.');
@@ -954,9 +971,50 @@ function ExternalTransferView({ users, transfers, onSuccess, onError }) {
 
           <Field label="Canal">
             <select className="input-premium w-full" value={form.channel}
-                    onChange={(e) => setForm({ ...form, channel: e.target.value })}>
+                    onChange={(e) => {
+                      const channel = e.target.value;
+                      setForm({
+                        ...form,
+                        channel,
+                        destinationNetwork:
+                          channel === 'PIX' ? 'PIX_BR'
+                          : channel === 'TED' ? 'TED_BR'
+                          : channel,
+                      });
+                    }}>
               <option value="PIX">PIX</option>
               <option value="TED">TED</option>
+              <option value="SWIFT">SWIFT</option>
+              <option value="ACH">ACH</option>
+              <option value="SEPA">SEPA</option>
+              <option value="CAYMAN_RAIL">Cayman Rail</option>
+              <option value="GLOBAL">Global</option>
+            </select>
+          </Field>
+
+          <Field label="Rede destino">
+            <select className="input-premium w-full" value={form.destinationNetwork}
+                    onChange={(e) => setForm({ ...form, destinationNetwork: e.target.value })}>
+              <option value="PIX_BR">PIX_BR</option>
+              <option value="TED_BR">TED_BR</option>
+              <option value="SWIFT">SWIFT</option>
+              <option value="ACH">ACH</option>
+              <option value="SEPA">SEPA</option>
+              <option value="CAYMAN_RAIL">CAYMAN_RAIL</option>
+              <option value="GLOBAL">GLOBAL</option>
+              <option value="INTERNAL_BRAVUS">INTERNAL_BRAVUS</option>
+            </select>
+          </Field>
+
+          <Field label="Participante">
+            <select className="input-premium w-full" value={form.participantCode}
+                    onChange={(e) => setForm({ ...form, participantCode: e.target.value })}>
+              <option value="">resolver automaticamente</option>
+              {participants.map((p) => (
+                <option key={p.id || p.participantCode} value={p.participantCode}>
+                  {p.participantCode} - {p.legalName}
+                </option>
+              ))}
             </select>
           </Field>
 
@@ -1043,8 +1101,228 @@ function ExternalTransferView({ users, transfers, onSuccess, onError }) {
                 <span className="text-xs text-ink-300">{t.status}</span>
               </div>
               <div className="text-xs text-ink-400 mt-1">{brl(t.amountCentavos)} - {t.beneficiaryName}</div>
+              <div className="text-[11px] text-ink-400 mt-1">{t.destinationNetwork || 'GLOBAL'} - {t.settlementStatus || 'SEM_STATUS_DESTINO'}</div>
+              {t.destinationParticipantCode && (
+                <div className="text-[11px] text-ink-500 mt-1">Participante {t.destinationParticipantCode}</div>
+              )}
             </div>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GlobalRailView({ participants, transfers, onSuccess, onError }) {
+  const [form, setForm] = useState({
+    participantCode: 'BRAVUS-INTERNAL',
+    legalName: 'Bravus Premium Bank',
+    country: 'KY',
+    network: 'INTERNAL_BRAVUS',
+    bankCode: '999',
+    ispb: '99999999',
+    swiftBic: '',
+    routingCode: '',
+    endpointUrl: '',
+    authMode: 'NONE',
+    connectionMode: 'SELF_LEDGER',
+    settlementAccount: '',
+    supportsInstant: true,
+    status: 'ACTIVE',
+  });
+  const [confirmForm, setConfirmForm] = useState({
+    orderId: '',
+    confirmationId: '',
+    participantCode: '',
+    destinationNetwork: '',
+    message: '',
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  async function saveParticipant(e) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      await globalRailService.createParticipant({
+        ...form,
+        supportsInstant: Boolean(form.supportsInstant),
+      });
+      onSuccess(`Participante ${form.participantCode} salvo no Global Rail.`);
+    } catch (err) {
+      onError(err?.response?.data?.message || err?.response?.data || 'Falha ao salvar participante global.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function confirmSettlement(e) {
+    e.preventDefault();
+    if (!confirmForm.orderId) return onError('Informe a ordem para confirmar.');
+    setSubmitting(true);
+    try {
+      await globalRailService.confirmTransfer(confirmForm.orderId, {
+        confirmationId: confirmForm.confirmationId || null,
+        participantCode: confirmForm.participantCode || null,
+        destinationNetwork: confirmForm.destinationNetwork || null,
+        message: confirmForm.message || null,
+      });
+      onSuccess(`Liquidacao da ordem #${confirmForm.orderId} confirmada.`);
+      setConfirmForm({ orderId: '', confirmationId: '', participantCode: '', destinationNetwork: '', message: '' });
+    } catch (err) {
+      onError(err?.response?.data?.message || err?.response?.data || 'Falha ao confirmar liquidacao.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="grid xl:grid-cols-3 gap-6">
+      <form onSubmit={saveParticipant} className="card-premium p-6 xl:col-span-2 space-y-4">
+        <div className="flex items-center gap-2">
+          <Globe2 className="h-5 w-5 text-amber-300" />
+          <h3 className="font-display text-lg font-semibold">Participante Global Rail</h3>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <Field label="Codigo">
+            <input className="input-premium w-full" value={form.participantCode}
+                   onChange={(e) => setForm({ ...form, participantCode: e.target.value })} />
+          </Field>
+          <Field label="Nome legal">
+            <input className="input-premium w-full" value={form.legalName}
+                   onChange={(e) => setForm({ ...form, legalName: e.target.value })} />
+          </Field>
+          <Field label="Pais">
+            <input className="input-premium w-full" value={form.country}
+                   onChange={(e) => setForm({ ...form, country: e.target.value.toUpperCase().slice(0, 2) })} />
+          </Field>
+          <Field label="Rede">
+            <select className="input-premium w-full" value={form.network}
+                    onChange={(e) => setForm({ ...form, network: e.target.value })}>
+              <option value="INTERNAL_BRAVUS">INTERNAL_BRAVUS</option>
+              <option value="PIX_BR">PIX_BR</option>
+              <option value="TED_BR">TED_BR</option>
+              <option value="SWIFT">SWIFT</option>
+              <option value="ACH">ACH</option>
+              <option value="SEPA">SEPA</option>
+              <option value="CAYMAN_RAIL">CAYMAN_RAIL</option>
+              <option value="GLOBAL">GLOBAL</option>
+            </select>
+          </Field>
+          <Field label="Banco">
+            <input className="input-premium w-full" value={form.bankCode}
+                   onChange={(e) => setForm({ ...form, bankCode: e.target.value })} />
+          </Field>
+          <Field label="ISPB">
+            <input className="input-premium w-full" value={form.ispb}
+                   onChange={(e) => setForm({ ...form, ispb: e.target.value })} />
+          </Field>
+          <Field label="SWIFT/BIC">
+            <input className="input-premium w-full" value={form.swiftBic}
+                   onChange={(e) => setForm({ ...form, swiftBic: e.target.value.toUpperCase() })} />
+          </Field>
+          <Field label="Routing">
+            <input className="input-premium w-full" value={form.routingCode}
+                   onChange={(e) => setForm({ ...form, routingCode: e.target.value })} />
+          </Field>
+          <Field label="Modo">
+            <select className="input-premium w-full" value={form.connectionMode}
+                    onChange={(e) => setForm({ ...form, connectionMode: e.target.value })}>
+              <option value="SELF_LEDGER">SELF_LEDGER</option>
+              <option value="HTTP_CONNECTOR">HTTP_CONNECTOR</option>
+              <option value="FILE_EXPORT">FILE_EXPORT</option>
+              <option value="MANUAL_CONFIRMATION">MANUAL_CONFIRMATION</option>
+            </select>
+          </Field>
+          <Field label="Autenticacao">
+            <select className="input-premium w-full" value={form.authMode}
+                    onChange={(e) => setForm({ ...form, authMode: e.target.value })}>
+              <option value="NONE">NONE</option>
+              <option value="TOKEN">TOKEN</option>
+              <option value="MTLS">MTLS</option>
+              <option value="SIGNED_FILE">SIGNED_FILE</option>
+              <option value="MANUAL">MANUAL</option>
+            </select>
+          </Field>
+          <Field label="Endpoint" full>
+            <input className="input-premium w-full" value={form.endpointUrl}
+                   onChange={(e) => setForm({ ...form, endpointUrl: e.target.value })} />
+          </Field>
+          <Field label="Conta liquidacao">
+            <input className="input-premium w-full" value={form.settlementAccount}
+                   onChange={(e) => setForm({ ...form, settlementAccount: e.target.value })} />
+          </Field>
+          <Field label="Status">
+            <select className="input-premium w-full" value={form.status}
+                    onChange={(e) => setForm({ ...form, status: e.target.value })}>
+              <option value="DRAFT">DRAFT</option>
+              <option value="MISSING_CREDENTIALS">MISSING_CREDENTIALS</option>
+              <option value="READY">READY</option>
+              <option value="ACTIVE">ACTIVE</option>
+              <option value="SUSPENDED">SUSPENDED</option>
+              <option value="CLOSED">CLOSED</option>
+            </select>
+          </Field>
+          <label className="flex items-center gap-2 text-sm text-ink-200">
+            <input type="checkbox" checked={form.supportsInstant}
+                   onChange={(e) => setForm({ ...form, supportsInstant: e.target.checked })} />
+            Instantaneo
+          </label>
+        </div>
+
+        <button className="btn-primary w-full" disabled={submitting}>
+          {submitting ? 'Salvando...' : <><Globe2 className="h-4 w-4" /> Salvar participante</>}
+        </button>
+      </form>
+
+      <div className="space-y-6">
+        <form onSubmit={confirmSettlement} className="card-premium p-5 space-y-3">
+          <h4 className="text-xs uppercase tracking-widest text-ink-400">Confirmar liquidacao</h4>
+          <select className="input-premium w-full" value={confirmForm.orderId}
+                  onChange={(e) => {
+                    const order = transfers.find((item) => String(item.id) === e.target.value);
+                    setConfirmForm({
+                      ...confirmForm,
+                      orderId: e.target.value,
+                      participantCode: order?.destinationParticipantCode || '',
+                      destinationNetwork: order?.destinationNetwork || '',
+                    });
+                  }}>
+            <option value="">ordem</option>
+            {transfers.slice(0, 20).map((t) => (
+              <option key={t.id} value={t.id}>#{t.id} - {t.beneficiaryName} - {t.settlementStatus || t.status}</option>
+            ))}
+          </select>
+          <input className="input-premium w-full" placeholder="ID confirmacao"
+                 value={confirmForm.confirmationId}
+                 onChange={(e) => setConfirmForm({ ...confirmForm, confirmationId: e.target.value })} />
+          <input className="input-premium w-full" placeholder="Participante"
+                 value={confirmForm.participantCode}
+                 onChange={(e) => setConfirmForm({ ...confirmForm, participantCode: e.target.value })} />
+          <input className="input-premium w-full" placeholder="Rede"
+                 value={confirmForm.destinationNetwork}
+                 onChange={(e) => setConfirmForm({ ...confirmForm, destinationNetwork: e.target.value })} />
+          <input className="input-premium w-full" placeholder="Mensagem"
+                 value={confirmForm.message}
+                 onChange={(e) => setConfirmForm({ ...confirmForm, message: e.target.value })} />
+          <button className="btn-secondary w-full" disabled={submitting}>Confirmar</button>
+        </form>
+
+        <div className="card-premium p-5">
+          <h4 className="text-xs uppercase tracking-widest text-ink-400 mb-3">Participantes</h4>
+          <div className="space-y-2">
+            {participants.length === 0 && <div className="text-sm text-ink-400">Nenhum participante global.</div>}
+            {participants.slice(0, 10).map((p) => (
+              <div key={p.id || p.participantCode} className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">{p.participantCode}</span>
+                  <span className="text-xs text-ink-300">{p.status}</span>
+                </div>
+                <div className="text-xs text-ink-400 mt-1">{p.network} - {p.legalName}</div>
+                <div className="text-[11px] text-ink-500 mt-1">{p.connectionMode} - {p.bankCode || p.swiftBic || p.routingCode || '-'}</div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

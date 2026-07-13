@@ -5,6 +5,7 @@ import com.bravus.bank.db.entity.TransactionEntity;
 import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.TransactionRepository;
 import com.bravus.bank.db.repo.UserRepository;
+import com.bravus.bank.globalrail.GlobalRailService;
 import com.bravus.bank.ledger.repo.CreditGrantRepository;
 import com.bravus.bank.ledger.service.CreditService;
 import org.springframework.data.domain.PageRequest;
@@ -24,6 +25,7 @@ public class ExternalTransferService {
     private final CreditService creditService;
     private final BankingTransferProvider bankingProvider;
     private final DocumentAnalysisService documentAnalysisService;
+    private final GlobalRailService globalRailService;
 
     public ExternalTransferService(ExternalTransferRepository transferRepo,
                                    UserRepository userRepo,
@@ -31,7 +33,8 @@ public class ExternalTransferService {
                                    CreditGrantRepository grantRepo,
                                    CreditService creditService,
                                    BankingTransferProvider bankingProvider,
-                                   DocumentAnalysisService documentAnalysisService) {
+                                   DocumentAnalysisService documentAnalysisService,
+                                   GlobalRailService globalRailService) {
         this.transferRepo = transferRepo;
         this.userRepo = userRepo;
         this.transactionRepo = transactionRepo;
@@ -39,6 +42,7 @@ public class ExternalTransferService {
         this.creditService = creditService;
         this.bankingProvider = bankingProvider;
         this.documentAnalysisService = documentAnalysisService;
+        this.globalRailService = globalRailService;
     }
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
@@ -48,14 +52,17 @@ public class ExternalTransferService {
         }
 
         String channel = upper(cmd.channel);
-        if (!"PIX".equals(channel) && !"TED".equals(channel)) {
-            throw new IllegalArgumentException("Canal deve ser PIX ou TED.");
+        if (!allowedChannel(channel)) {
+            throw new IllegalArgumentException("Canal deve ser PIX, TED, SWIFT, ACH, SEPA, CAYMAN_RAIL ou GLOBAL.");
         }
         if ("PIX".equals(channel) && blank(cmd.pixKey)) {
             throw new IllegalArgumentException("Informe a chave PIX para transferencia PIX.");
         }
         if ("TED".equals(channel) && (blank(cmd.bankCode) || blank(cmd.agency) || blank(cmd.accountNumber))) {
             throw new IllegalArgumentException("Informe banco, agencia e conta para TED.");
+        }
+        if (!"PIX".equals(channel) && !"TED".equals(channel) && blank(cmd.accountNumber)) {
+            throw new IllegalArgumentException("Informe a conta beneficiaria para o canal selecionado.");
         }
 
         UserEntity user = userRepo.findById(cmd.userId)
@@ -89,6 +96,8 @@ public class ExternalTransferService {
         } else {
             providerResult = pendingProviderResult();
         }
+        GlobalRailService.SettlementDecision settlement = globalRailService.settlementFor(
+                cmd, channel, providerConfigured, providerResult, idempotencyKey);
 
         TransactionEntity tx = new TransactionEntity();
         tx.setUser(user);
@@ -135,6 +144,13 @@ public class ExternalTransferService {
         order.setProviderTransferId(providerResult.providerTransferId);
         order.setIdempotencyKey(idempotencyKey);
         order.setStatus(providerResult.status != null ? providerResult.status : "PROCESSING");
+        order.setSettlementStatus(settlement.settlementStatus);
+        order.setReceiptKind(settlement.receiptKind);
+        order.setDestinationNetwork(settlement.destinationNetwork);
+        order.setDestinationParticipantCode(settlement.destinationParticipantCode);
+        order.setDestinationConfirmationId(settlement.destinationConfirmationId);
+        order.setDestinationConfirmedAt(settlement.destinationConfirmedAt);
+        order.setSettlementMessage(settlement.settlementMessage);
         if (!providerConfigured) {
             order.setErrorMessage("Configure BRAVUS_BANKING_PROVIDER_URL/TOKEN para liquidar esta ordem fora do Bravus.");
         }
@@ -205,6 +221,10 @@ public class ExternalTransferService {
         return value == null || value.isBlank();
     }
 
+    private boolean allowedChannel(String channel) {
+        return List.of("PIX", "TED", "SWIFT", "ACH", "SEPA", "CAYMAN_RAIL", "GLOBAL").contains(channel);
+    }
+
     public static class ExternalTransferCommand {
         public Long userId;
         public Long amountCentavos;
@@ -219,6 +239,8 @@ public class ExternalTransferService {
         public String accountType;
         public String pixKey;
         public String pixKeyType;
+        public String destinationNetwork;
+        public String participantCode;
         public String description;
     }
 

@@ -39,6 +39,8 @@ public class ExternalTransferController {
         cmd.accountType = request.accountType();
         cmd.pixKey = request.pixKey();
         cmd.pixKeyType = request.pixKeyType();
+        cmd.destinationNetwork = request.destinationNetwork();
+        cmd.participantCode = request.participantCode();
         cmd.description = request.description();
         return ResponseEntity.ok(transferService.submit(cmd, auth.getName()));
     }
@@ -63,6 +65,8 @@ public class ExternalTransferController {
             String accountType,
             String pixKey,
             String pixKeyType,
+            String destinationNetwork,
+            String participantCode,
             String description
     ) {}
 }

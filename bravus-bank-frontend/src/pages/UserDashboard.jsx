@@ -4,6 +4,8 @@ import {
   ArrowDownToLine, ArrowUpFromLine, ArrowRightLeft, Wallet, Eye, EyeOff,
   TrendingUp, TrendingDown, Activity, Receipt, CheckCircle2, AlertCircle,
   Send, Landmark, CreditCard, Percent,
+  FileText, Barcode, CalendarDays, LineChart, UserCheck, UsersRound,
+  ClipboardCheck, ShieldCheck, Smartphone, Building2, List, Grid3X3,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -51,6 +53,7 @@ const EMPTY_FORM = {
   accountNumber: '',
   accountDigit: '',
   accountType: 'CORRENTE',
+  destinationNetwork: 'PIX_BR',
   pixKey: '',
   pixKeyType: 'CPF',
 };
@@ -68,6 +71,8 @@ export default function UserDashboard() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showBalance, setShowBalance] = useState(true);
+  const [portalView, setPortalView] = useState('icons');
+  const [activeModule, setActiveModule] = useState('balances');
 
   const [tab, setTab] = useState('overview');
   const [form, setForm] = useState(EMPTY_FORM);
@@ -123,6 +128,9 @@ export default function UserDashboard() {
         return setError('Informe banco, agência e conta para TED.');
       }
     }
+      if (kind === 'transfer' && form.transferMode === 'external' && !['PIX', 'TED'].includes(form.channel) && !form.accountNumber) {
+        return setError('Informe a conta beneficiaria para o canal selecionado.');
+      }
     setSubmitting(true);
     try {
       const amountCentavos = cents(form.amount);
@@ -147,6 +155,7 @@ export default function UserDashboard() {
           accountNumber: form.accountNumber,
           accountDigit: form.accountDigit,
           accountType: form.accountType,
+          destinationNetwork: form.destinationNetwork,
           pixKey: form.pixKey,
           pixKeyType: form.pixKeyType,
           description: form.description,
@@ -154,6 +163,11 @@ export default function UserDashboard() {
         message = data?.status === 'PENDING_PROVIDER'
           ? 'Ordem registrada. Aguardando configuração do provedor Bravus.'
           : 'Transferência aceita pelo provedor Bravus e valor debitado.';
+        if (data?.status !== 'PENDING_PROVIDER') {
+          message = data?.settlementStatus === 'LIQUIDADA_CONFIRMADA'
+            ? 'Transferencia liquidada no destino confirmado.'
+            : 'Transferencia debitada no Bravus. Aguardando confirmacao do destino.';
+        }
         if (data?.id) {
           const receiptRes = await userService.getExternalTransferReceipt(data.id).catch(() => ({ data: null }));
           if (receiptRes?.data) setSelectedReceipt(receiptRes.data);
@@ -240,6 +254,48 @@ export default function UserDashboard() {
   const creditDebt = creditSummary?.dividaTotalCentavos ?? (creditDebtPrincipal + interestAccrued);
   const annualInterestRate = Number(creditSummary?.taxaJurosAnualMedia ?? 0);
   const monthlyInterestRate = Number(creditSummary?.taxaJurosMensalEquivalente ?? 0);
+
+  const openTransferMode = (transferMode = 'internal', channel = 'PIX') => {
+    setForm({
+      ...EMPTY_FORM,
+      transferMode,
+      channel,
+      destinationNetwork:
+        channel === 'PIX' ? 'PIX_BR'
+        : channel === 'TED' ? 'TED_BR'
+        : channel,
+    });
+    setTab('transfer');
+  };
+
+  const bankingModules = [
+    { id: 'balances', label: 'Saldos e Extratos', Icon: FileText, badge: `${transactions.length} movs` },
+    { id: 'payments', label: 'Pagamentos', Icon: Barcode, badge: 'PIX e contas', accent: true },
+    { id: 'transfers', label: 'Transferencias', Icon: ArrowRightLeft, badge: 'Bravus e bancos' },
+    { id: 'dda', label: 'DDA Boletos Registrados', Icon: ClipboardCheck, badge: '0 pendentes' },
+    { id: 'cards', label: 'Cartoes', Icon: CreditCard, badge: 'Conta ativa' },
+    { id: 'credit', label: 'Emprestimos e Recebiveis', Icon: Landmark, badge: showBalance ? formatCurrency(creditAvailable) : 'R$ ******', accent: true },
+    { id: 'deposit-check', label: 'Deposito de Cheque', Icon: ArrowDownToLine, badge: 'Digital' },
+    { id: 'checks', label: 'Cheques', Icon: FileText, badge: '0 folhas' },
+    { id: 'schedules', label: 'Agendamentos', Icon: CalendarDays, badge: '0 hoje' },
+    { id: 'investments', label: 'Investimentos', Icon: LineChart, badge: 'Carteira' },
+    { id: 'pending', label: 'Pendencias', Icon: UserCheck, badge: me?.conta?.statusKyc || 'Conta' },
+    { id: 'beneficiaries', label: 'Favorecidos', Icon: UsersRound, badge: `${externalOrders.length} recentes` },
+    { id: 'pix', label: 'Pix', Icon: Send, badge: me?.dadosBancarios?.tipoChavePix || 'Chave' },
+    { id: 'receipts', label: 'Comprovantes', Icon: Receipt, badge: `${externalOrders.length} ordens` },
+    { id: 'limits', label: 'Limites', Icon: Smartphone, badge: showBalance ? formatCurrency(me?.saldos?.limitePixDiarioCentavos ?? 0) : 'R$ ******' },
+    { id: 'security', label: 'Seguranca', Icon: ShieldCheck, badge: 'Ativa' },
+  ];
+
+  const handleModuleClick = (moduleId) => {
+    setActiveModule(moduleId);
+    if (moduleId === 'balances') setTab('overview');
+    if (moduleId === 'payments' || moduleId === 'pix') openTransferMode('external', 'PIX');
+    if (moduleId === 'transfers') openTransferMode('internal', 'PIX');
+    if (moduleId === 'deposit-check') setTab('deposit');
+    if (moduleId === 'credit') openTransferMode('external', 'PIX');
+    if (moduleId === 'receipts') setTab('overview');
+  };
 
   const Tab = ({ id, label, icon: Icon }) => (
     <button
@@ -367,6 +423,25 @@ export default function UserDashboard() {
           </div>
         </div>
       </div>
+
+      <BankingAccessPanel
+        user={user}
+        me={me}
+        profile={profile}
+        modules={bankingModules}
+        view={portalView}
+        setView={setPortalView}
+        activeModule={activeModule}
+        onModuleClick={handleModuleClick}
+        transactions={transactions}
+        externalOrders={externalOrders}
+        creditSummary={creditSummary}
+        showBalance={showBalance}
+        openReceipt={openReceipt}
+        receiptLoading={receiptLoading}
+        openTransferMode={openTransferMode}
+        setTab={setTab}
+      />
 
       {/* Alerts */}
       <AnimatePresence>
@@ -526,10 +601,42 @@ export default function UserDashboard() {
                       <select
                         className="form-input"
                         value={form.channel}
-                        onChange={(e) => setForm({ ...form, channel: e.target.value })}
+                        onChange={(e) => {
+                          const channel = e.target.value;
+                          setForm({
+                            ...form,
+                            channel,
+                            destinationNetwork:
+                              channel === 'PIX' ? 'PIX_BR'
+                              : channel === 'TED' ? 'TED_BR'
+                              : channel,
+                          });
+                        }}
                       >
                         <option value="PIX">PIX</option>
                         <option value="TED">TED</option>
+                        <option value="SWIFT">SWIFT</option>
+                        <option value="ACH">ACH</option>
+                        <option value="SEPA">SEPA</option>
+                        <option value="CAYMAN_RAIL">Cayman Rail</option>
+                        <option value="GLOBAL">Global</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Rede destino</label>
+                      <select
+                        className="form-input"
+                        value={form.destinationNetwork}
+                        onChange={(e) => setForm({ ...form, destinationNetwork: e.target.value })}
+                      >
+                        <option value="PIX_BR">PIX_BR</option>
+                        <option value="TED_BR">TED_BR</option>
+                        <option value="SWIFT">SWIFT</option>
+                        <option value="ACH">ACH</option>
+                        <option value="SEPA">SEPA</option>
+                        <option value="CAYMAN_RAIL">CAYMAN_RAIL</option>
+                        <option value="GLOBAL">GLOBAL</option>
+                        <option value="INTERNAL_BRAVUS">INTERNAL_BRAVUS</option>
                       </select>
                     </div>
                     <div>
@@ -682,7 +789,7 @@ export default function UserDashboard() {
                         <span className="min-w-0 truncate text-ink-200">
                           {order.channel} · {order.beneficiaryName}
                         </span>
-                        <span className="shrink-0 text-ink-300">{formatCurrency(order.amountCentavos)} · {order.status}</span>
+                        <span className="shrink-0 text-ink-300">{formatCurrency(order.amountCentavos)} - {order.settlementStatus || order.status}</span>
                         <button
                           type="button"
                           className="btn-secondary !py-1.5 !px-2.5"
@@ -739,9 +846,15 @@ export default function UserDashboard() {
 
               <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
                 <ReceiptLine label="Comprovante" value={selectedReceipt.receiptId} />
+                <ReceiptLine label="Tipo" value={selectedReceipt.receiptKind} />
                 <ReceiptLine label="Transação" value={selectedReceipt.transactionId} />
                 <ReceiptLine label="Provedor" value={selectedReceipt.provider} />
                 <ReceiptLine label="ID provedor" value={selectedReceipt.providerTransferId} />
+                <ReceiptLine label="Rede destino" value={selectedReceipt.destinationNetwork} />
+                <ReceiptLine label="Participante" value={selectedReceipt.destinationParticipantCode} />
+                <ReceiptLine label="Confirmacao destino" value={selectedReceipt.destinationConfirmationId} />
+                <ReceiptLine label="Confirmado em" value={formatDate(selectedReceipt.destinationConfirmedAt)} />
+                <ReceiptLine label="Liquidacao" value={selectedReceipt.settlementMessage} />
                 <ReceiptLine label="Idempotência" value={selectedReceipt.idempotencyKey} />
                 <ReceiptLine label="Data" value={formatDate(selectedReceipt.createdAt)} />
                 <ReceiptLine label="Descrição" value={selectedReceipt.description || 'Transferência Bravus'} />
@@ -751,6 +864,264 @@ export default function UserDashboard() {
         )}
       </AnimatePresence>
     </main>
+  );
+}
+
+function BankingAccessPanel({
+  user, me, profile, modules, view, setView, activeModule, onModuleClick,
+  transactions, externalOrders, creditSummary, showBalance, openReceipt,
+  receiptLoading, openTransferMode, setTab,
+}) {
+  const active = modules.find((module) => module.id === activeModule) || modules[0];
+  const account = me?.dadosBancarios || {};
+  const companyName = profile?.fullName || user?.fullName || user?.username || 'Cliente Bravus';
+  const document = profile?.cpf || user?.cpf || me?.cpf;
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
+      <div className="grid lg:grid-cols-[1fr_auto] gap-4 border-b border-white/10 bg-white/[0.06] px-5 py-5">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.24em] text-amber-300/80">
+            <Building2 className="h-4 w-4" />
+            Acesso bancario
+          </div>
+          <div className="mt-3 text-2xl font-display font-semibold">
+            Ola, <span className="text-amber-200">{companyName}</span>
+          </div>
+          <div className="mt-3 grid gap-1 text-sm text-ink-300 sm:grid-cols-2 lg:grid-cols-4">
+            <span>Banco {account.codigoBanco || profile?.codigoBanco || '999'}</span>
+            <span>Agencia {account.agencia || profile?.agencia || '0001'}</span>
+            <span>Conta {account.contaFormatada || account.conta || profile?.accountNumber || '-'}</span>
+            <span>CPF/CNPJ {document || '-'}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-start rounded-xl border border-white/10 bg-black/20 p-1">
+          <button
+            type="button"
+            className={cn('inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm transition',
+              view === 'list' ? 'bg-white/12 text-white' : 'text-ink-300 hover:text-white')}
+            onClick={() => setView('list')}
+          >
+            <List className="h-4 w-4" />
+            Lista
+          </button>
+          <button
+            type="button"
+            className={cn('inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm transition',
+              view === 'icons' ? 'bg-gradient-gold text-[#05122f]' : 'text-ink-300 hover:text-white')}
+            onClick={() => setView('icons')}
+          >
+            <Grid3X3 className="h-4 w-4" />
+            Icones
+          </button>
+        </div>
+      </div>
+
+      <div className="p-5">
+        {view === 'icons' ? (
+          <div className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 lg:grid-cols-8">
+            {modules.map((module) => (
+              <ModuleIconButton
+                key={module.id}
+                module={module}
+                active={module.id === activeModule}
+                onClick={() => onModuleClick(module.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            {modules.map((module) => (
+              <ModuleListButton
+                key={module.id}
+                module={module}
+                active={module.id === activeModule}
+                onClick={() => onModuleClick(module.id)}
+              />
+            ))}
+          </div>
+        )}
+
+        <PortalModuleDetail
+          module={active}
+          activeModule={activeModule}
+          transactions={transactions}
+          externalOrders={externalOrders}
+          creditSummary={creditSummary}
+          showBalance={showBalance}
+          openReceipt={openReceipt}
+          receiptLoading={receiptLoading}
+          openTransferMode={openTransferMode}
+          setTab={setTab}
+          me={me}
+        />
+      </div>
+    </section>
+  );
+}
+
+function ModuleIconButton({ module, active, onClick }) {
+  const Icon = module.Icon;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex min-h-[138px] flex-col items-center text-center"
+    >
+      <span className={cn(
+        'inline-flex h-16 w-16 items-center justify-center rounded-full border shadow-lg transition',
+        active || module.accent
+          ? 'border-amber-300/40 bg-gradient-gold text-[#05122f] shadow-amber-500/20'
+          : 'border-white/10 bg-white/[0.07] text-amber-200 group-hover:bg-white/[0.12]'
+      )}>
+        <Icon className="h-7 w-7" />
+      </span>
+      <span className="mt-3 flex min-h-[34px] max-w-[104px] items-center justify-center text-xs font-semibold leading-tight text-ink-100">
+        {module.label}
+      </span>
+      <span className="mt-1 max-w-[112px] truncate text-[11px] text-ink-400">{module.badge}</span>
+    </button>
+  );
+}
+
+function ModuleListButton({ module, active, onClick }) {
+  const Icon = module.Icon;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex min-h-[68px] items-center gap-3 rounded-xl border px-3 text-left transition',
+        active
+          ? 'border-amber-300/40 bg-amber-300/12'
+          : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'
+      )}
+    >
+      <span className={cn(
+        'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full',
+        active || module.accent ? 'bg-gradient-gold text-[#05122f]' : 'bg-white/[0.08] text-amber-200'
+      )}>
+        <Icon className="h-5 w-5" />
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-semibold text-ink-100">{module.label}</span>
+        <span className="block truncate text-xs text-ink-400">{module.badge}</span>
+      </span>
+    </button>
+  );
+}
+
+function PortalModuleDetail({
+  module, activeModule, transactions, externalOrders, creditSummary, showBalance,
+  openReceipt, receiptLoading, openTransferMode, setTab, me,
+}) {
+  const latestTx = transactions.slice(0, 4);
+  const latestOrders = externalOrders.slice(0, 4);
+
+  return (
+    <div className="mt-6 rounded-xl border border-white/10 bg-black/20 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-xs uppercase tracking-widest text-ink-400">Modulo selecionado</div>
+          <div className="mt-1 text-lg font-display font-semibold text-white">{module?.label}</div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {(activeModule === 'payments' || activeModule === 'pix') && (
+            <button type="button" className="btn-primary !py-2 !px-3" onClick={() => openTransferMode('external', 'PIX')}>
+              <Send className="h-4 w-4" />
+              Pagar
+            </button>
+          )}
+          {activeModule === 'transfers' && (
+            <>
+              <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => openTransferMode('internal', 'PIX')}>Bravus</button>
+              <button type="button" className="btn-primary !py-2 !px-3" onClick={() => openTransferMode('external', 'PIX')}>Outros bancos</button>
+            </>
+          )}
+          {activeModule === 'deposit-check' && (
+            <button type="button" className="btn-primary !py-2 !px-3" onClick={() => setTab('deposit')}>
+              <ArrowDownToLine className="h-4 w-4" />
+              Depositar
+            </button>
+          )}
+        </div>
+      </div>
+
+      {activeModule === 'balances' && (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="text-xs text-ink-400">Ultimas movimentacoes</div>
+            <div className="mt-3 space-y-2">
+              {latestTx.length === 0 && <div className="text-sm text-ink-400">Sem movimentacoes recentes.</div>}
+              {latestTx.map((tx) => (
+                <div key={tx.id} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="min-w-0 truncate text-ink-200">{getTransactionTypeLabel(tx.type)}</span>
+                  <span className={cn('shrink-0 font-mono', txSignClass(tx.type))}>
+                    {txSign(tx.type)} {showBalance ? formatCurrency(tx.amount) : 'R$ ******'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="text-xs text-ink-400">Conta</div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+              <ReceiptLine label="Banco" value={me?.dadosBancarios?.nomeBanco || 'Bravus Premium Bank'} />
+              <ReceiptLine label="Agencia" value={me?.dadosBancarios?.agencia} />
+              <ReceiptLine label="Conta" value={me?.dadosBancarios?.contaFormatada || me?.accountNumber} />
+              <ReceiptLine label="Tipo" value={me?.dadosBancarios?.tipoConta || me?.accountType} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeModule === 'credit' && (
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <Metric label="Credito disponivel" value={showBalance ? formatCurrency(creditSummary?.creditoDisponivelCentavos ?? 0) : 'R$ ******'} />
+          <Metric label="Divida total" value={showBalance ? formatCurrency(creditSummary?.dividaTotalCentavos ?? 0) : 'R$ ******'} />
+          <Metric label="Taxa anual" value={`${Number(creditSummary?.taxaJurosAnualMedia ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`} />
+        </div>
+      )}
+
+      {activeModule === 'receipts' && (
+        <div className="mt-4 space-y-2">
+          {latestOrders.length === 0 && <div className="text-sm text-ink-400">Nenhum comprovante externo recente.</div>}
+          {latestOrders.map((order) => (
+            <div key={order.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm">
+              <span className="min-w-0 truncate text-ink-200">#{order.id} {order.channel} - {order.beneficiaryName}</span>
+              <span className="text-xs text-ink-400">{order.settlementStatus || order.status}</span>
+              <button
+                type="button"
+                className="btn-secondary !py-1.5 !px-2.5"
+                disabled={receiptLoading === order.id}
+                onClick={() => openReceipt(order.id)}
+              >
+                <Receipt className="h-4 w-4" />
+                Abrir
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!['balances', 'credit', 'receipts'].includes(activeModule) && (
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <Metric label="Status" value={module?.badge || 'Ativo'} />
+          <Metric label="Conta" value={me?.dadosBancarios?.contaFormatada || me?.accountNumber || '-'} />
+          <Metric label="Ultima atualizacao" value={formatDate(new Date().toISOString())} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Metric({ label, value }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+      <div className="text-xs uppercase tracking-widest text-ink-400">{label}</div>
+      <div className="mt-2 truncate font-display text-lg font-semibold text-white">{value || '-'}</div>
+    </div>
   );
 }
 

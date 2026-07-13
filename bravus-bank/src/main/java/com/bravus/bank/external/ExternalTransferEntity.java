@@ -76,6 +76,27 @@ public class ExternalTransferEntity {
     @Column(nullable = false)
     private String status = "PENDING";
 
+    @Column(name = "settlement_status")
+    private String settlementStatus = "DEBITADA_NO_BRAVUS_AGUARDANDO_CONEXAO_DESTINO";
+
+    @Column(name = "receipt_kind")
+    private String receiptKind = "COMPROVANTE_SAIDA_BRAVUS";
+
+    @Column(name = "destination_network")
+    private String destinationNetwork;
+
+    @Column(name = "destination_participant_code")
+    private String destinationParticipantCode;
+
+    @Column(name = "destination_confirmation_id")
+    private String destinationConfirmationId;
+
+    @Column(name = "destination_confirmed_at")
+    private OffsetDateTime destinationConfirmedAt;
+
+    @Column(name = "settlement_message", columnDefinition = "TEXT")
+    private String settlementMessage;
+
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
 
@@ -142,6 +163,26 @@ public class ExternalTransferEntity {
     public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getSettlementStatus() {
+        return settlementStatus == null
+                ? "DEBITADA_NO_BRAVUS_AGUARDANDO_CONEXAO_DESTINO"
+                : settlementStatus;
+    }
+    public void setSettlementStatus(String settlementStatus) { this.settlementStatus = settlementStatus; }
+    public String getReceiptKind() {
+        return receiptKind == null ? "COMPROVANTE_SAIDA_BRAVUS" : receiptKind;
+    }
+    public void setReceiptKind(String receiptKind) { this.receiptKind = receiptKind; }
+    public String getDestinationNetwork() { return destinationNetwork; }
+    public void setDestinationNetwork(String destinationNetwork) { this.destinationNetwork = destinationNetwork; }
+    public String getDestinationParticipantCode() { return destinationParticipantCode; }
+    public void setDestinationParticipantCode(String destinationParticipantCode) { this.destinationParticipantCode = destinationParticipantCode; }
+    public String getDestinationConfirmationId() { return destinationConfirmationId; }
+    public void setDestinationConfirmationId(String destinationConfirmationId) { this.destinationConfirmationId = destinationConfirmationId; }
+    public OffsetDateTime getDestinationConfirmedAt() { return destinationConfirmedAt; }
+    public void setDestinationConfirmedAt(OffsetDateTime destinationConfirmedAt) { this.destinationConfirmedAt = destinationConfirmedAt; }
+    public String getSettlementMessage() { return settlementMessage; }
+    public void setSettlementMessage(String settlementMessage) { this.settlementMessage = settlementMessage; }
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
     public String getRawResponse() { return rawResponse; }

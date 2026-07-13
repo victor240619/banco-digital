@@ -43,6 +43,8 @@ public class UserExternalTransferController {
         cmd.accountType = request.accountType();
         cmd.pixKey = request.pixKey();
         cmd.pixKeyType = request.pixKeyType();
+        cmd.destinationNetwork = request.destinationNetwork();
+        cmd.participantCode = request.participantCode();
         cmd.description = request.description();
         return ResponseEntity.ok(transferService.submit(cmd, auth.getName()));
     }
@@ -76,9 +78,13 @@ public class UserExternalTransferController {
                 order.getProviderTransferId(),
                 order.getIdempotencyKey(),
                 order.getStatus(),
-                "COMPLETED".equals(order.getStatus())
-                        ? "CONCLUIDA_NO_LEDGER_BRAVUS"
-                        : "EM_PROCESSAMENTO_NO_LEDGER_BRAVUS",
+                order.getSettlementStatus(),
+                order.getReceiptKind(),
+                order.getDestinationNetwork(),
+                order.getDestinationParticipantCode(),
+                order.getDestinationConfirmationId(),
+                order.getDestinationConfirmedAt() == null ? null : order.getDestinationConfirmedAt().toString(),
+                order.getSettlementMessage(),
                 order.getCreatedAt() == null ? null : order.getCreatedAt().toString(),
                 order.getAmountCentavos(),
                 order.getCurrency(),
@@ -126,6 +132,8 @@ public class UserExternalTransferController {
             String accountType,
             String pixKey,
             String pixKeyType,
+            String destinationNetwork,
+            String participantCode,
             String description
     ) {}
 
@@ -152,6 +160,12 @@ public class UserExternalTransferController {
             String idempotencyKey,
             String status,
             String settlementStatus,
+            String receiptKind,
+            String destinationNetwork,
+            String destinationParticipantCode,
+            String destinationConfirmationId,
+            String destinationConfirmedAt,
+            String settlementMessage,
             String createdAt,
             Long amountCentavos,
             String currency,

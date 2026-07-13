@@ -53,7 +53,7 @@ for (const file of await walk(distDir)) {
 }
 files["/"] = files["/index.html"];
 
-const entrypoint = `const buildTarget = "bravus-sites-api-v6";
+const entrypoint = `const buildTarget = "bravus-sites-api-v7";
 const files = ${JSON.stringify(files)};
 const now = () => new Date().toISOString();
 const joaoCreditGrant = {
@@ -97,6 +97,25 @@ const state = globalThis.__bravusState || (globalThis.__bravusState = {
   users: { joao, admin },
   transactions: [],
   externalTransfers: [],
+  globalRailParticipants: [{
+    id: 1,
+    participantCode: "BRAVUS-INTERNAL",
+    legalName: "Bravus Premium Bank",
+    country: "KY",
+    network: "INTERNAL_BRAVUS",
+    bankCode: "999",
+    ispb: "99999999",
+    swiftBic: "",
+    routingCode: "",
+    endpointUrl: "",
+    authMode: "NONE",
+    connectionMode: "SELF_LEDGER",
+    settlementAccount: "BRAVUS-LEDGER",
+    supportsInstant: true,
+    status: "ACTIVE",
+    createdAt: now(),
+    updatedAt: now(),
+  }],
 });
 
 function bytesFromBase64(value) {
@@ -213,6 +232,71 @@ function consumeCreditIfAvailable(user, amount) {
   return used;
 }
 
+function inferNetwork(body) {
+  if (body.destinationNetwork) return String(body.destinationNetwork).toUpperCase();
+  const channel = String(body.channel || "GLOBAL").toUpperCase();
+  if (channel === "PIX") return "PIX_BR";
+  if (channel === "TED") return "TED_BR";
+  return channel;
+}
+
+function isBravusOwned(participant) {
+  if (!participant) return false;
+  return String(participant.participantCode || "").startsWith("BRAVUS")
+    || participant.bankCode === "999"
+    || participant.network === "INTERNAL_BRAVUS";
+}
+
+function resolveGlobalParticipant(body, network) {
+  const explicit = String(body.participantCode || "").trim().toUpperCase();
+  if (explicit) return state.globalRailParticipants.find((p) => p.participantCode === explicit) || null;
+  return state.globalRailParticipants.find((p) =>
+    p.network === network
+    && ((body.bankCode && p.bankCode === body.bankCode) || (body.ispb && p.ispb === body.ispb))
+  ) || null;
+}
+
+function settlementFor(body, idempotencyKey) {
+  const destinationNetwork = inferNetwork(body);
+  const participant = resolveGlobalParticipant(body, destinationNetwork);
+  if (!participant) {
+    return {
+      destinationNetwork,
+      destinationParticipantCode: null,
+      settlementStatus: "DEBITADA_NO_BRAVUS_AGUARDANDO_CONEXAO_DESTINO",
+      receiptKind: "COMPROVANTE_SAIDA_BRAVUS",
+      settlementMessage: "Saida concluida no ledger Bravus. Destino aguarda participante/conector ativo para confirmar liquidacao.",
+    };
+  }
+  if (participant.status !== "ACTIVE") {
+    return {
+      destinationNetwork,
+      destinationParticipantCode: participant.participantCode,
+      settlementStatus: "DEBITADA_NO_BRAVUS_PARTICIPANTE_INATIVO",
+      receiptKind: "COMPROVANTE_SAIDA_BRAVUS",
+      settlementMessage: "Saida concluida no ledger Bravus. Participante destino nao esta ativo.",
+    };
+  }
+  if (participant.connectionMode === "SELF_LEDGER" && isBravusOwned(participant)) {
+    return {
+      destinationNetwork,
+      destinationParticipantCode: participant.participantCode,
+      destinationConfirmationId: "global-self-" + idempotencyKey,
+      destinationConfirmedAt: now(),
+      settlementStatus: "LIQUIDADA_CONFIRMADA",
+      receiptKind: "COMPROVANTE_LIQUIDACAO_CONFIRMADA",
+      settlementMessage: "Liquidacao confirmada em participante controlado pelo Bravus.",
+    };
+  }
+  return {
+    destinationNetwork,
+    destinationParticipantCode: participant.participantCode,
+    settlementStatus: participant.connectionMode === "MANUAL_CONFIRMATION" ? "AGUARDANDO_CONFIRMACAO_MANUAL" : "ENVIADA_A_CONECTOR",
+    receiptKind: "COMPROVANTE_SAIDA_BRAVUS",
+    settlementMessage: "Saida concluida no ledger Bravus. Aguardando confirmacao do participante destino.",
+  };
+}
+
 function bankMe(user) {
   return {
     ...userSummary(user),
@@ -260,7 +344,13 @@ function receiptForOrder(order, user) {
     providerTransferId: order.providerTransferId,
     idempotencyKey: order.idempotencyKey,
     status: order.status,
-    settlementStatus: order.status === "COMPLETED" ? "CONCLUIDA_NO_LEDGER_BRAVUS" : "EM_PROCESSAMENTO_NO_LEDGER_BRAVUS",
+    settlementStatus: order.settlementStatus,
+    receiptKind: order.receiptKind,
+    destinationNetwork: order.destinationNetwork,
+    destinationParticipantCode: order.destinationParticipantCode,
+    destinationConfirmationId: order.destinationConfirmationId,
+    destinationConfirmedAt: order.destinationConfirmedAt,
+    settlementMessage: order.settlementMessage,
     createdAt: order.createdAt,
     amountCentavos: order.amountCentavos,
     currency: order.currency,
@@ -388,6 +478,8 @@ async function handleApi(request) {
       createdAt: now(),
     };
     state.transactions.unshift(tx);
+    const idempotencyKey = "sites-" + Date.now();
+    const settlement = settlementFor(body, idempotencyKey);
     const order = {
       id: state.externalTransfers.length + 1,
       username: user.username,
@@ -408,8 +500,15 @@ async function handleApi(request) {
       description: body.description || null,
       provider: "BRAVUS_SELF_PROVIDER",
       providerTransferId: "bravus-self-sites-" + Date.now(),
-      idempotencyKey: "sites-" + Date.now(),
+      idempotencyKey,
       status: "COMPLETED",
+      settlementStatus: settlement.settlementStatus,
+      receiptKind: settlement.receiptKind,
+      destinationNetwork: settlement.destinationNetwork,
+      destinationParticipantCode: settlement.destinationParticipantCode || null,
+      destinationConfirmationId: settlement.destinationConfirmationId || null,
+      destinationConfirmedAt: settlement.destinationConfirmedAt || null,
+      settlementMessage: settlement.settlementMessage,
       errorMessage: null,
       rawResponse: "{\\"provider\\":\\"BRAVUS_SELF_PROVIDER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
       createdAt: now(),
@@ -482,6 +581,113 @@ async function handleApi(request) {
   if (request.method === "GET" && path.startsWith("/admin/analysis/document")) return json([]);
   if (request.method === "POST" && path === "/admin/analysis/document") return json({ status: "ANALISADO_AUTOMATICAMENTE", provider: "BRAVUS_SITES" });
   if (request.method === "GET" && path.startsWith("/admin/ledger/external-transfers")) return json(state.externalTransfers);
+  if (request.method === "POST" && path === "/admin/ledger/external-transfers") {
+    const body = await request.json().catch(() => ({}));
+    const origin = Object.values(state.users).find((item) => item.id === Number(body.userId));
+    if (!origin) return json("Usuario nao encontrado.", { status: 400 });
+    const amount = Number(body.amountCentavos || 0);
+    if (!amount || amount <= 0) return json("Digite um valor valido.", { status: 400 });
+    if (availableCreditFor(origin) < amount) return json("Saldo escritural liberado insuficiente.", { status: 400 });
+    if (origin.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });
+    origin.balance -= amount;
+    consumeCreditIfAvailable(origin, amount);
+    const tx = {
+      id: state.transactions.length + 1,
+      username: origin.username,
+      type: "TRANSFER_EXTERNAL",
+      amount,
+      description: body.description || "Transferencia via admin Bravus",
+      destinationAccount: body.pixKey || [body.bankCode, body.agency, body.accountNumber].filter(Boolean).join(" "),
+      status: "COMPLETED",
+      createdAt: now(),
+    };
+    state.transactions.unshift(tx);
+    const idempotencyKey = "sites-admin-" + Date.now();
+    const settlement = settlementFor(body, idempotencyKey);
+    const order = {
+      id: state.externalTransfers.length + 1,
+      username: origin.username,
+      transactionId: tx.id,
+      amountCentavos: amount,
+      channel: body.channel || "PIX",
+      currency: "BRL",
+      beneficiaryName: body.beneficiaryName || "Beneficiario externo",
+      beneficiaryDocument: String(body.beneficiaryDocument || "").replace(/\\D/g, ""),
+      bankCode: body.bankCode || null,
+      ispb: body.ispb || null,
+      agency: body.agency || null,
+      accountNumber: body.accountNumber || null,
+      accountDigit: body.accountDigit || null,
+      accountType: body.accountType || null,
+      pixKey: body.pixKey || null,
+      pixKeyType: body.pixKeyType || null,
+      description: body.description || null,
+      provider: "BRAVUS_SELF_PROVIDER",
+      providerTransferId: "bravus-self-sites-admin-" + Date.now(),
+      idempotencyKey,
+      status: "COMPLETED",
+      settlementStatus: settlement.settlementStatus,
+      receiptKind: settlement.receiptKind,
+      destinationNetwork: settlement.destinationNetwork,
+      destinationParticipantCode: settlement.destinationParticipantCode || null,
+      destinationConfirmationId: settlement.destinationConfirmationId || null,
+      destinationConfirmedAt: settlement.destinationConfirmedAt || null,
+      settlementMessage: settlement.settlementMessage,
+      errorMessage: null,
+      rawResponse: "{\\"provider\\":\\"BRAVUS_SELF_PROVIDER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
+      createdAt: now(),
+    };
+    state.externalTransfers.unshift(order);
+    return json(order);
+  }
+  if (request.method === "GET" && path === "/admin/global-rail/participants") return json(state.globalRailParticipants);
+  if (request.method === "POST" && path === "/admin/global-rail/participants") {
+    const body = await request.json().catch(() => ({}));
+    const participantCode = String(body.participantCode || "").trim().toUpperCase();
+    if (!participantCode || !body.legalName) return json("Codigo e nome legal sao obrigatorios.", { status: 400 });
+    const network = String(body.network || "GLOBAL").trim().toUpperCase();
+    const connectionMode = String(body.connectionMode || "MANUAL_CONFIRMATION").trim().toUpperCase();
+    if (connectionMode === "SELF_LEDGER" && !participantCode.startsWith("BRAVUS") && body.bankCode !== "999" && network !== "INTERNAL_BRAVUS") {
+      return json("SELF_LEDGER so pode ser usado em participante controlado pelo Bravus.", { status: 400 });
+    }
+    let participant = state.globalRailParticipants.find((item) => item.participantCode === participantCode);
+    if (!participant) {
+      participant = { id: state.globalRailParticipants.length + 1, createdAt: now() };
+      state.globalRailParticipants.unshift(participant);
+    }
+    Object.assign(participant, {
+      participantCode,
+      legalName: String(body.legalName),
+      country: String(body.country || "KY").toUpperCase().slice(0, 2),
+      network,
+      bankCode: body.bankCode || null,
+      ispb: body.ispb || null,
+      swiftBic: body.swiftBic || null,
+      routingCode: body.routingCode || null,
+      endpointUrl: body.endpointUrl || null,
+      authMode: String(body.authMode || "NONE").toUpperCase(),
+      connectionMode,
+      settlementAccount: body.settlementAccount || null,
+      supportsInstant: Boolean(body.supportsInstant),
+      status: String(body.status || "DRAFT").toUpperCase(),
+      updatedAt: now(),
+    });
+    return json(participant);
+  }
+  const confirmMatch = path.match(/^\\/admin\\/global-rail\\/transfers\\/(\\d+)\\/confirm$/);
+  if (request.method === "POST" && confirmMatch) {
+    const body = await request.json().catch(() => ({}));
+    const order = state.externalTransfers.find((item) => item.id === Number(confirmMatch[1]));
+    if (!order) return json("Transferencia nao encontrada.", { status: 404 });
+    order.settlementStatus = "LIQUIDADA_CONFIRMADA";
+    order.receiptKind = "COMPROVANTE_LIQUIDACAO_CONFIRMADA";
+    order.destinationConfirmationId = body.confirmationId || ("global-confirm-" + Date.now());
+    order.destinationNetwork = body.destinationNetwork || order.destinationNetwork;
+    order.destinationParticipantCode = body.participantCode || order.destinationParticipantCode;
+    order.destinationConfirmedAt = now();
+    order.settlementMessage = body.message || "Liquidacao externa confirmada por participante/conector.";
+    return json(order);
+  }
   if (request.method === "GET" && path === "/admin/cayman-rail/config") return json({ enabled: false, jurisdiction: "Cayman Islands" });
   if (request.method === "GET" && path === "/admin/cayman-rail/readiness") return json({ ready: false, message: "Conector real nao configurado no ChatGPT Sites." });
   if (request.method === "GET" && path === "/admin/cayman-rail/participants") return json([]);
