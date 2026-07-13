@@ -1,8 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const rootDir = fileURLToPath(new URL(".", import.meta.url));
+const rootDir = ".";
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
