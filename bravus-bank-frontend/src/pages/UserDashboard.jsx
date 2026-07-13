@@ -419,6 +419,7 @@ const buildStatementDocument = ({ months, transactions, me, profile, user }) => 
 
 // ============ Component ============
 export default function UserDashboard() {
+  const initialRouteState = routeStateForPath(typeof window !== 'undefined' ? window.location.pathname : '/dashboard');
   const [profile, setProfile] = useState(null);
   const [me, setMe] = useState(null);
   const [transactions, setTransactions] = useState([]);
@@ -431,9 +432,9 @@ export default function UserDashboard() {
   const [success, setSuccess] = useState('');
   const [showBalance, setShowBalance] = useState(true);
   const [portalView, setPortalView] = useState('icons');
-  const [activeModule, setActiveModule] = useState('balances');
+  const [activeModule, setActiveModule] = useState(initialRouteState.activeModule);
 
-  const [tab, setTab] = useState('overview');
+  const [tab, setTab] = useState(initialRouteState.tab);
   const [form, setForm] = useState(EMPTY_FORM);
   const [resolvedRecipient, setResolvedRecipient] = useState(null);
   const [resolveLoading, setResolveLoading] = useState(false);
