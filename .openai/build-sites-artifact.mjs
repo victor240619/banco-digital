@@ -46,15 +46,40 @@ function tar(args) {
   });
 }
 
+function command(file, args) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(file, args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("exit", (code) => {
+      if (code === 0) resolvePromise(stdout.trim());
+      else reject(new Error(`${file} ${args.join(" ")} exited with ${code}: ${stderr}`));
+    });
+  });
+}
+
+const sourceCommitSha = await command("git", ["rev-parse", "HEAD"]);
+const rawPublicUrl = `https://raw.githubusercontent.com/victor240619/banco-digital/${sourceCommitSha}/bravus-bank-frontend/public`;
+
 const files = {};
 for (const file of await walk(distDir)) {
   const route = `/${relative(distDir, file).replaceAll("\\", "/")}`;
   const type = contentTypes[extname(file).toLowerCase()] || "application/octet-stream";
+  if (extname(file).toLowerCase() === ".apk") {
+    files[route] = { type, redirect: `${rawPublicUrl}${route}` };
+    continue;
+  }
   files[route] = { type, body: (await readFile(file)).toString("base64") };
 }
 files["/"] = files["/index.html"];
 
-const entrypoint = `const buildTarget = "bravus-sites-api-v8";
+const entrypoint = `const buildTarget = "bravus-sites-api-v9";
 const files = ${JSON.stringify(files)};
 const now = () => new Date().toISOString();
 const joaoCreditGrant = {
@@ -951,6 +976,7 @@ export default {
     if (new URL(request.url).pathname.startsWith("/api/")) return handleApi(request);
     const file = files[routePath(request.url)];
     if (!file) return new Response("Not found", { status: 404 });
+    if (file.redirect) return Response.redirect(file.redirect, 302);
     return new Response(bytesFromBase64(file.body), { headers: { "content-type": file.type } });
   },
 };
@@ -967,5 +993,6 @@ console.log(JSON.stringify({
   archive: archivePath,
   archiveName: basename(archivePath),
   files: Object.keys(files).length,
+  redirects: Object.values(files).filter((file) => file.redirect).length,
   bytes: archive.size,
 }, null, 2));
