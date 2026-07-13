@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:9000/api';
+const localApiHost = typeof window !== 'undefined' && window.location.hostname === '127.0.0.1'
+  ? '127.0.0.1'
+  : 'localhost';
+const API_URL = import.meta.env.VITE_API_URL || `http://${localApiHost}:9000/api`;
 
 const api = axios.create({
   baseURL: API_URL,
@@ -128,6 +131,32 @@ export const ledgerAdminService = {
     api.get(`/admin/ledger/entries?page=${page}&size=${size}`),
   grantsByUser: (userId) => api.get(`/admin/ledger/credit/by-user/${userId}`),
   grantCredit: (payload) => api.post('/admin/ledger/credit/grant', payload),
+  issueCredit: (payload) => api.post('/admin/ledger/credit/issue', payload),
+  releaseCredit: (grantId) => api.post(`/admin/ledger/credit/${grantId}/release`),
+};
+
+export const analysisService = {
+  analyzeDocument: (payload) => api.post('/admin/analysis/document', payload),
+  recentDocuments: (limit = 20) => api.get(`/admin/analysis/document?limit=${limit}`),
+};
+
+export const externalTransferService = {
+  submit: (payload) => api.post('/admin/ledger/external-transfers', payload),
+  recent: (limit = 20) => api.get(`/admin/ledger/external-transfers?limit=${limit}`),
+};
+
+export const caymanRailService = {
+  config: () => api.get('/admin/cayman-rail/config'),
+  updateConfig: (payload) => api.put('/admin/cayman-rail/config', payload),
+  readiness: () => api.get('/admin/cayman-rail/readiness'),
+  participants: () => api.get('/admin/cayman-rail/participants'),
+  createParticipant: (payload) => api.post('/admin/cayman-rail/participants', payload),
+  instructions: (limit = 20) => api.get(`/admin/cayman-rail/instructions?limit=${limit}`),
+  submitInstruction: (payload) => api.post('/admin/cayman-rail/instructions', payload),
+};
+
+export const unifiedSearchService = {
+  search: (payload) => api.post('/admin/search/unified', payload),
 };
 
 export default api;

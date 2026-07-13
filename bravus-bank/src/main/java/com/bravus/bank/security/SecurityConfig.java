@@ -78,7 +78,9 @@ public class SecurityConfig {
         // Defaults locais sempre incluídos
         List<String> defaults = Arrays.asList(
                 "http://localhost:3000",
-                "http://localhost:5173"
+                "http://localhost:5173",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:5173"
         );
 
         // Parse da env var (CSV)

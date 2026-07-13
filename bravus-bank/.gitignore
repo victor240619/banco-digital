@@ -19,6 +19,7 @@ bin/
 # Local env
 .env
 .env.local
+data/
 
 # Logs
 *.log

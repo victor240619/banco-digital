@@ -1,0 +1,29 @@
+server:
+  port: 9000
+
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/bravus-local;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  h2:
+    console:
+      enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: false
+    open-in-view: false
+  flyway:
+    enabled: false
+
+jwt:
+  secret: DEV_ONLY_local_profile_change_me_64_bytes_minimum_aaaaaaaaaaaaaaaaaaaaaaaa
+
+logging:
+  level:
+    root: INFO
+    com.bravus.bank: INFO

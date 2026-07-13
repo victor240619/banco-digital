@@ -3,19 +3,32 @@ import { motion } from 'framer-motion';
 import {
   Users, Activity, Banknote, TrendingUp, Power, Trash2, CheckCircle2, AlertCircle,
   Search, Shield, BarChart3, ListChecks, Coins, Link2, Hash, Vault, PiggyBank,
-  Send, RefreshCw, ChevronDown, ChevronUp,
+  Send, RefreshCw, ChevronDown, ChevronUp, Landmark,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
-import { adminService, ledgerAdminService } from '../services/api';
+import {
+  adminService, analysisService, caymanRailService,
+  externalTransferService, ledgerAdminService, unifiedSearchService,
+} from '../services/api';
 import { formatCurrency, formatDate, getTransactionTypeLabel } from '../utils/helpers';
 import { cn } from '../lib/cn';
 
 // ============ Helpers ============
 const brl = (cents) => formatCurrency(cents ?? 0);
 const pct = (n) => `${(n ?? 0).toFixed(1)}%`;
+const apiError = (err, fallback) => {
+  if (err?.code === 'ERR_NETWORK' || err?.message === 'Network Error') {
+    return 'API local nao esta respondendo em http://localhost:9000. Inicie o backend e tente novamente.';
+  }
+  if (err?.response?.status === 401 || err?.response?.status === 403) {
+    return 'Sessao administrativa expirada ou token invalido. Entre novamente como admin.';
+  }
+  const data = err?.response?.data;
+  return data?.message || data || fallback;
+};
 
 const KpiCard = ({ icon: Icon, label, value, accent, hint }) => (
   <div className="card-premium p-5">
@@ -43,6 +56,14 @@ export default function AdminDashboard() {
   const [balanceSheet, setBalanceSheet] = useState(null);
   const [entries, setEntries] = useState([]);
   const [chain, setChain] = useState(null);
+  const [documentAnalyses, setDocumentAnalyses] = useState([]);
+  const [externalTransfers, setExternalTransfers] = useState([]);
+  const [caymanRail, setCaymanRail] = useState({
+    config: null,
+    readiness: null,
+    participants: [],
+    instructions: [],
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -59,13 +80,19 @@ export default function AdminDashboard() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [d, u, t, bs, ch, en] = await Promise.all([
+      const [d, u, t, bs, ch, en, da, et, crConfig, crReady, crParticipants, crInstructions] = await Promise.all([
         adminService.getDashboard().catch(() => ({ data: null })),
         adminService.getAllUsers().catch(() => ({ data: [] })),
         adminService.getAllTransactions().catch(() => ({ data: [] })),
         ledgerAdminService.balanceSheet().catch(() => ({ data: null })),
         ledgerAdminService.validateChain().catch(() => ({ data: null })),
         ledgerAdminService.entries(0, 30).catch(() => ({ data: { content: [] } })),
+        analysisService.recentDocuments(20).catch(() => ({ data: [] })),
+        externalTransferService.recent(20).catch(() => ({ data: [] })),
+        caymanRailService.config().catch(() => ({ data: null })),
+        caymanRailService.readiness().catch(() => ({ data: null })),
+        caymanRailService.participants().catch(() => ({ data: [] })),
+        caymanRailService.instructions(20).catch(() => ({ data: [] })),
       ]);
       setStats(d.data);
       setUsers(Array.isArray(u.data) ? u.data : []);
@@ -73,6 +100,14 @@ export default function AdminDashboard() {
       setBalanceSheet(bs.data);
       setChain(ch.data);
       setEntries(en.data?.content || en.data || []);
+      setDocumentAnalyses(Array.isArray(da.data) ? da.data : []);
+      setExternalTransfers(Array.isArray(et.data) ? et.data : []);
+      setCaymanRail({
+        config: crConfig.data,
+        readiness: crReady.data,
+        participants: Array.isArray(crParticipants.data) ? crParticipants.data : [],
+        instructions: Array.isArray(crInstructions.data) ? crInstructions.data : [],
+      });
     } catch (e) {
       setError('Erro ao carregar dados administrativos.');
     } finally {
@@ -159,7 +194,11 @@ export default function AdminDashboard() {
       <div className="flex flex-wrap gap-2">
         <Tab id="bank"    label="Balanço do Banco" icon={Vault} />
         <Tab id="users"   label="Usuários"         icon={Users} />
+        <Tab id="unifiedSearch" label="Consulta Geral" icon={Search} />
+        <Tab id="analysis" label="Analise automatica" icon={Shield} />
         <Tab id="credit"  label="Emissão Escritural" icon={Coins} />
+        <Tab id="external" label="Envio Bancario" icon={Send} />
+        <Tab id="cayman" label="Trilho Cayman" icon={Landmark} />
         <Tab id="ledger"  label="Livro Razão"      icon={Link2} />
       </div>
 
@@ -176,11 +215,41 @@ export default function AdminDashboard() {
         />
       )}
 
+      {tab === 'unifiedSearch' && (
+        <UnifiedSearchView onError={setError} />
+      )}
+
+      {tab === 'analysis' && (
+        <DocumentAnalysisView
+          analyses={documentAnalyses}
+          onSuccess={(msg) => { setSuccess(msg); loadAll(); }}
+          onError={setError}
+        />
+      )}
+
       {/* ===== TAB 3: CRÉDITO ===== */}
       {tab === 'credit' && (
         <CreditView
           users={users}
           bs={balanceSheet}
+          onSuccess={(msg) => { setSuccess(msg); loadAll(); }}
+          onError={setError}
+        />
+      )}
+
+      {tab === 'external' && (
+        <ExternalTransferView
+          users={users}
+          transfers={externalTransfers}
+          onSuccess={(msg) => { setSuccess(msg); loadAll(); }}
+          onError={setError}
+        />
+      )}
+
+      {tab === 'cayman' && (
+        <CaymanRailView
+          rail={caymanRail}
+          users={users}
           onSuccess={(msg) => { setSuccess(msg); loadAll(); }}
           onError={setError}
         />
@@ -407,18 +476,252 @@ function UsersView({ users, search, setSearch, onToggle, onDelete }) {
   );
 }
 
+function UnifiedSearchView({ onError }) {
+  const [form, setForm] = useState({ query: '', type: 'AUTO', limit: 50 });
+  const [loading, setLoading] = useState(false);
+  const [response, setResponse] = useState(null);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!form.query.trim()) return onError('Informe CPF, placa, nome, conta, e-mail, telefone ou termo.');
+    setLoading(true);
+    try {
+      const { data } = await unifiedSearchService.search({
+        query: form.query,
+        type: form.type,
+        limit: Number(form.limit) || 50,
+      });
+      setResponse(data);
+    } catch (err) {
+      onError(apiError(err, 'Falha na consulta geral.'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const results = response?.results || [];
+  const summary = response?.summary || {};
+
+  return (
+    <div className="space-y-6">
+      <form onSubmit={submit} className="card-premium p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <Search className="h-5 w-5 text-amber-300" />
+          <h3 className="font-display text-lg font-semibold">Consulta Geral Administrativa</h3>
+        </div>
+
+        <div className="grid md:grid-cols-[1fr_180px_120px] gap-4">
+          <Field label="Buscar por CPF, placa, nome, conta, email, telefone, transacao">
+            <input
+              className="input-premium w-full"
+              value={form.query}
+              onChange={(e) => setForm({ ...form, query: e.target.value })}
+              placeholder="Ex.: 05569161155, ABC1D23, Maria, conta, email"
+            />
+          </Field>
+          <Field label="Tipo">
+            <select
+              className="input-premium w-full"
+              value={form.type}
+              onChange={(e) => setForm({ ...form, type: e.target.value })}
+            >
+              <option value="AUTO">AUTO</option>
+              <option value="CPF">CPF</option>
+              <option value="CNPJ">CNPJ</option>
+              <option value="NOME">NOME</option>
+              <option value="PLACA">PLACA</option>
+              <option value="EMAIL">EMAIL</option>
+              <option value="TELEFONE">TELEFONE</option>
+              <option value="CONTA">CONTA</option>
+              <option value="TRANSACAO">TRANSACAO</option>
+              <option value="GERAL">GERAL</option>
+            </select>
+          </Field>
+          <Field label="Limite">
+            <input
+              className="input-premium w-full"
+              type="number"
+              min="1"
+              max="100"
+              value={form.limit}
+              onChange={(e) => setForm({ ...form, limit: e.target.value })}
+            />
+          </Field>
+        </div>
+
+        <button className="btn-primary w-full" disabled={loading}>
+          {loading ? 'Consultando...' : <><Search className="h-4 w-4" /> Consultar tudo</>}
+        </button>
+      </form>
+
+      {response && (
+        <div className="grid md:grid-cols-4 gap-4">
+          <KpiCard icon={ListChecks} label="Resultados" value={response.resultCount || 0}
+                   accent="bg-amber-400/15 text-amber-300" hint={response.queryType} />
+          <KpiCard icon={Users} label="Usuarios" value={summary.USERS || 0}
+                   accent="bg-blue-400/15 text-blue-300" />
+          <KpiCard icon={Send} label="Operacoes" value={(summary.TRANSACTIONS || 0) + (summary.EXTERNAL_TRANSFERS || 0)}
+                   accent="bg-emerald-400/15 text-emerald-300" />
+          <KpiCard icon={Landmark} label="Cayman/Outros" value={(summary.CAYMAN_RAIL || 0) + (summary.VEHICLE_PROVIDER || 0)}
+                   accent="bg-purple-400/15 text-purple-300" />
+        </div>
+      )}
+
+      {response?.warnings?.length > 0 && (
+        <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
+          {response.warnings.map((w, i) => <div key={i}>{w}</div>)}
+        </div>
+      )}
+
+      {response && (
+        <div className="grid xl:grid-cols-2 gap-4">
+          {results.length === 0 && (
+            <div className="card-premium p-6 text-sm text-ink-400">Nenhum dado encontrado para esta consulta.</div>
+          )}
+          {results.map((r, index) => (
+            <div key={`${r.source}-${r.id}-${index}`} className="card-premium p-5 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs uppercase tracking-widest text-ink-400">{r.source} · {r.kind}</div>
+                  <div className="mt-1 font-semibold text-ink-50 truncate">{r.title || r.id}</div>
+                  {r.subtitle && <div className="text-sm text-ink-300 truncate">{r.subtitle}</div>}
+                </div>
+                <span className={cn(
+                  'text-xs px-2 py-1 rounded-full shrink-0',
+                  r.status?.includes?.('ATIVO') || r.status?.includes?.('COMPLETED') || r.status?.includes?.('ANALISADO')
+                    ? 'bg-emerald-400/15 text-emerald-300'
+                    : r.status?.includes?.('NECESSARIO') || r.status?.includes?.('PENDING')
+                      ? 'bg-amber-400/15 text-amber-300'
+                      : 'bg-white/10 text-ink-300'
+                )}>{r.status || 'INFO'}</span>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-2">
+                {Object.entries(r.fields || {}).slice(0, 12).map(([key, value]) => (
+                  <Info key={key} label={key} value={String(value)} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DocumentAnalysisView({ analyses, onSuccess, onError }) {
+  const [form, setForm] = useState({ type: 'CPF', document: '' });
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+
+  async function submit(e) {
+    e.preventDefault();
+    setLoading(true);
+    setResult(null);
+    try {
+      const { data } = await analysisService.analyzeDocument(form);
+      setResult(data);
+      onSuccess(`Analise automatica ${data.documentType} concluida: ${data.status}.`);
+    } catch (err) {
+      onError(apiError(err, 'Falha na analise documental.'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="grid lg:grid-cols-3 gap-6">
+      <form onSubmit={submit} className="card-premium p-6 lg:col-span-2 space-y-4">
+        <div className="flex items-center gap-2">
+          <Shield className="h-5 w-5 text-amber-300" />
+          <h3 className="font-display text-lg font-semibold">Analise automatica CPF/CNPJ</h3>
+        </div>
+
+        <div className="grid md:grid-cols-[160px_1fr] gap-4">
+          <Field label="Tipo">
+            <select className="input-premium w-full" value={form.type}
+                    onChange={(e) => setForm({ ...form, type: e.target.value })}>
+              <option value="CPF">CPF</option>
+              <option value="CNPJ">CNPJ</option>
+            </select>
+          </Field>
+          <Field label="Documento">
+            <input className="input-premium w-full" value={form.document}
+                   onChange={(e) => setForm({ ...form, document: e.target.value })}
+                   placeholder={form.type === 'CPF' ? '000.000.000-00' : '00.000.000/0000-00'} />
+          </Field>
+        </div>
+
+        <button className="btn-primary w-full" disabled={loading}>
+          {loading ? 'Analisando...' : <><Search className="h-4 w-4" /> Analisar documento</>}
+        </button>
+
+        {result && (
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Info label="Status" value={result.status} />
+              <Info label="Risco" value={`${result.riskLevel} (${result.riskScore})`} />
+              <Info label="Provedor" value={result.provider} />
+              <Info label="Nome/Razao" value={result.subjectName || 'Nao retornado'} />
+              <Info label="Situacao" value={result.registrationStatus || 'Nao retornada'} />
+            </div>
+            {result.errorMessage && <div className="mt-3 text-red-200">{result.errorMessage}</div>}
+          </div>
+        )}
+      </form>
+
+      <div className="card-premium p-5">
+        <h4 className="text-xs uppercase tracking-widest text-ink-400 mb-3">Ultimas consultas</h4>
+        <div className="space-y-2">
+          {analyses.length === 0 && <div className="text-sm text-ink-400">Nenhuma analise ainda.</div>}
+          {analyses.slice(0, 8).map((a) => (
+            <div key={a.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono">{a.documentType} {a.documentNumber}</span>
+                <span className={cn(
+                  'text-xs px-2 py-0.5 rounded-full',
+                  a.riskLevel === 'BAIXO' ? 'bg-emerald-400/15 text-emerald-300' :
+                  a.riskLevel === 'MEDIO' || a.riskLevel === 'BLOQUEADO' ? 'bg-amber-400/15 text-amber-300' :
+                  'bg-red-400/15 text-red-300'
+                )}>{a.riskLevel}</span>
+              </div>
+              <div className="text-xs text-ink-400 mt-1 truncate">{a.subjectName || a.status}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ===========================================================
 // 3) Emissão de Crédito (escritural)
 // ===========================================================
 function CreditView({ users, bs, onSuccess, onError }) {
   const [form, setForm] = useState({
-    userId: '', reservaCodigo: 'RES-PERSONAL', valorReais: '', motivo: '',
-    regraElegibilidade: '', taxaJurosAnual: '', observacoes: '',
+    userId: '', reservaCodigo: 'CREDITO_PESSOAL', valorReais: '', motivo: '',
+    regraElegibilidade: '', taxaJurosAnual: '', observacoes: '', liberarAgora: false,
   });
   const [submitting, setSubmitting] = useState(false);
+  const [grants, setGrants] = useState([]);
 
   const reservas = bs?.reservasInternas || [];
   const userOptions = users.filter((u) => !u.roles?.some?.((r) => r.includes?.('ADMIN')));
+
+  useEffect(() => {
+    if (reservas.length > 0 && !reservas.some((r) => r.codigo === form.reservaCodigo)) {
+      setForm((current) => ({ ...current, reservaCodigo: reservas[0].codigo }));
+    }
+  }, [reservas, form.reservaCodigo]);
+
+  useEffect(() => {
+    if (!form.userId) {
+      setGrants([]);
+      return;
+    }
+    ledgerAdminService.grantsByUser(form.userId)
+      .then(({ data }) => setGrants(Array.isArray(data) ? data : []))
+      .catch(() => setGrants([]));
+  }, [form.userId]);
 
   async function submit(e) {
     e.preventDefault();
@@ -427,7 +730,7 @@ function CreditView({ users, bs, onSuccess, onError }) {
     if (!form.motivo) return onError('Informe o motivo da concessão.');
     setSubmitting(true);
     try {
-      await ledgerAdminService.grantCredit({
+      await ledgerAdminService.issueCredit({
         userId: parseInt(form.userId),
         reservaCodigo: form.reservaCodigo,
         valorCentavos: Math.round(parseFloat(form.valorReais) * 100),
@@ -435,11 +738,28 @@ function CreditView({ users, bs, onSuccess, onError }) {
         regraElegibilidade: form.regraElegibilidade || null,
         taxaJurosAnual: form.taxaJurosAnual ? parseFloat(form.taxaJurosAnual) : 0,
         observacoes: form.observacoes || null,
+        liberarAgora: form.liberarAgora,
       });
-      onSuccess(`Crédito de R$ ${form.valorReais} concedido com sucesso.`);
+      onSuccess(form.liberarAgora
+        ? `Credito de R$ ${form.valorReais} emitido e liberado.`
+        : `Credito de R$ ${form.valorReais} emitido como pendente.`);
       setForm({ ...form, valorReais: '', motivo: '', observacoes: '' });
+      const { data } = await ledgerAdminService.grantsByUser(form.userId);
+      setGrants(Array.isArray(data) ? data : []);
     } catch (err) {
       onError(err?.response?.data?.message || err?.response?.data || 'Falha na concessão.');
+    } finally { setSubmitting(false); }
+  }
+
+  async function releaseGrant(id) {
+    setSubmitting(true);
+    try {
+      await ledgerAdminService.releaseCredit(id);
+      onSuccess(`Credito escritural #${id} liberado.`);
+      const { data } = await ledgerAdminService.grantsByUser(form.userId);
+      setGrants(Array.isArray(data) ? data : []);
+    } catch (err) {
+      onError(err?.response?.data?.message || err?.response?.data || 'Falha ao liberar credito.');
     } finally { setSubmitting(false); }
   }
 
@@ -448,7 +768,7 @@ function CreditView({ users, bs, onSuccess, onError }) {
       <form onSubmit={submit} className="card-premium p-6 lg:col-span-2 space-y-4">
         <div className="flex items-center gap-2 mb-2">
           <Coins className="h-5 w-5 text-amber-300" />
-          <h3 className="font-display text-lg font-semibold">Conceder Crédito Escritural</h3>
+          <h3 className="font-display text-lg font-semibold">Emitir credito escritural</h3>
         </div>
 
         <div className="grid md:grid-cols-2 gap-4">
@@ -497,29 +817,60 @@ function CreditView({ users, bs, onSuccess, onError }) {
           <Field label="Regra de elegibilidade" full>
             <input className="input-premium w-full" value={form.regraElegibilidade}
                    onChange={(e) => setForm({ ...form, regraElegibilidade: e.target.value })}
-                   placeholder="Ex.: KYC verificado + nível PREMIUM" />
+                   placeholder="Ex.: KYC automatico aprovado + nivel PREMIUM" />
           </Field>
 
           <Field label="Observações" full>
             <textarea rows="2" className="input-premium w-full" value={form.observacoes}
                       onChange={(e) => setForm({ ...form, observacoes: e.target.value })} />
           </Field>
+
+          <label className="md:col-span-2 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-ink-200">
+            <input
+              type="checkbox"
+              checked={form.liberarAgora}
+              onChange={(e) => setForm({ ...form, liberarAgora: e.target.checked })}
+            />
+            Liberar imediatamente para o saldo do cliente
+          </label>
         </div>
 
         <button type="submit" disabled={submitting} className="btn-primary w-full">
-          {submitting ? 'Emitindo…' : <><Send className="h-4 w-4" /> Conceder crédito</>}
+          {submitting ? 'Emitindo...' : <><Send className="h-4 w-4" /> Emitir credito escritural</>}
         </button>
       </form>
 
       <div className="space-y-4">
         <div className="card-premium p-5">
+          <h4 className="text-xs uppercase tracking-widest text-ink-400 mb-3">Creditos do usuario</h4>
+          <div className="space-y-2">
+            {grants.length === 0 && <div className="text-sm text-ink-400">Selecione um usuario para ver emissoes.</div>}
+            {grants.slice(0, 6).map((g) => (
+              <div key={g.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-medium">#{g.id} · {g.status}</div>
+                    <div className="text-xs text-ink-400">{brl(g.valorConcedido)} · disp. {brl(g.valorDisponivel)}</div>
+                  </div>
+                  {g.status === 'PENDENTE' && (
+                    <button type="button" className="btn-secondary !py-1.5 !px-2.5" onClick={() => releaseGrant(g.id)} disabled={submitting}>
+                      Liberar
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="card-premium p-5">
           <h4 className="text-xs uppercase tracking-widest text-ink-400 mb-3">Regras de emissão</h4>
           <ul className="text-sm text-ink-200 space-y-2">
-            <li>• Gera <b>LedgerEntry</b> com hash encadeado SHA-256</li>
-            <li>• Débito 1.2.1 / Crédito 2.1.1 (partidas dobradas)</li>
-            <li>• Bloqueia se a reserva escolhida não tiver saldo</li>
+            <li>• Emissao pendente nao altera saldo do cliente</li>
+            <li>• Liberacao gera <b>LedgerEntry</b> com hash SHA-256</li>
+            <li>• Debito 1.2.1 / Credito 2.1.1 (partidas dobradas)</li>
+            <li>• Bloqueia se a reserva escolhida nao tiver saldo</li>
             <li>• Limita pela capacidade total (10× capital base)</li>
-            <li>• Cria <b>CreditGrant</b> rastreável por usuário</li>
+            <li>• Cria <b>CreditGrant</b> rastreavel por usuario</li>
           </ul>
         </div>
         <div className="card-premium p-5">
@@ -528,6 +879,516 @@ function CreditView({ users, bs, onSuccess, onError }) {
           <div className="text-xs text-ink-400 mt-1">disponível para nova emissão</div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ExternalTransferView({ users, transfers, onSuccess, onError }) {
+  const [form, setForm] = useState({
+    userId: '', amountReais: '', channel: 'PIX',
+    beneficiaryName: '', beneficiaryDocument: '',
+    pixKey: '', pixKeyType: 'CPF',
+    bankCode: '', ispb: '', agency: '', accountNumber: '', accountDigit: '', accountType: 'CORRENTE',
+    description: '',
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const userOptions = users.filter((u) => !u.roles?.some?.((r) => r.includes?.('ADMIN')));
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!form.userId) return onError('Selecione o cliente de origem.');
+    if (!form.amountReais || parseFloat(form.amountReais) <= 0) return onError('Informe um valor valido.');
+    setSubmitting(true);
+    try {
+      await externalTransferService.submit({
+        userId: parseInt(form.userId),
+        amountCentavos: Math.round(parseFloat(form.amountReais) * 100),
+        channel: form.channel,
+        beneficiaryName: form.beneficiaryName,
+        beneficiaryDocument: form.beneficiaryDocument,
+        pixKey: form.pixKey || null,
+        pixKeyType: form.pixKeyType || null,
+        bankCode: form.bankCode || null,
+        ispb: form.ispb || null,
+        agency: form.agency || null,
+        accountNumber: form.accountNumber || null,
+        accountDigit: form.accountDigit || null,
+        accountType: form.accountType || null,
+        description: form.description || null,
+      });
+      onSuccess(`Ordem de R$ ${form.amountReais} enviada ao gateway bancario.`);
+      setForm({ ...form, amountReais: '', description: '' });
+    } catch (err) {
+      onError(err?.response?.data?.message || err?.response?.data || 'Falha no envio bancario externo.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="grid lg:grid-cols-3 gap-6">
+      <form onSubmit={submit} className="card-premium p-6 lg:col-span-2 space-y-4">
+        <div className="flex items-center gap-2">
+          <Send className="h-5 w-5 text-amber-300" />
+          <h3 className="font-display text-lg font-semibold">Enviar saldo para conta bancaria</h3>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <Field label="Cliente de origem">
+            <select className="input-premium w-full" value={form.userId}
+                    onChange={(e) => setForm({ ...form, userId: e.target.value })}>
+              <option value="">selecionar</option>
+              {userOptions.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.fullName || u.username} - saldo {brl(u.balance)}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Valor (R$)">
+            <input className="input-premium w-full" type="number" min="0.01" step="0.01"
+                   value={form.amountReais}
+                   onChange={(e) => setForm({ ...form, amountReais: e.target.value })} />
+          </Field>
+
+          <Field label="Canal">
+            <select className="input-premium w-full" value={form.channel}
+                    onChange={(e) => setForm({ ...form, channel: e.target.value })}>
+              <option value="PIX">PIX</option>
+              <option value="TED">TED</option>
+            </select>
+          </Field>
+
+          <Field label="Documento favorecido">
+            <input className="input-premium w-full" value={form.beneficiaryDocument}
+                   onChange={(e) => setForm({ ...form, beneficiaryDocument: e.target.value })}
+                   placeholder="CPF ou CNPJ" />
+          </Field>
+
+          <Field label="Nome favorecido" full>
+            <input className="input-premium w-full" value={form.beneficiaryName}
+                   onChange={(e) => setForm({ ...form, beneficiaryName: e.target.value })} />
+          </Field>
+
+          {form.channel === 'PIX' ? (
+            <>
+              <Field label="Tipo chave PIX">
+                <select className="input-premium w-full" value={form.pixKeyType}
+                        onChange={(e) => setForm({ ...form, pixKeyType: e.target.value })}>
+                  <option value="CPF">CPF</option>
+                  <option value="CNPJ">CNPJ</option>
+                  <option value="EMAIL">Email</option>
+                  <option value="PHONE">Telefone</option>
+                  <option value="EVP">Aleatoria</option>
+                </select>
+              </Field>
+              <Field label="Chave PIX">
+                <input className="input-premium w-full" value={form.pixKey}
+                       onChange={(e) => setForm({ ...form, pixKey: e.target.value })} />
+              </Field>
+            </>
+          ) : (
+            <>
+              <Field label="Banco">
+                <input className="input-premium w-full" value={form.bankCode}
+                       onChange={(e) => setForm({ ...form, bankCode: e.target.value })} placeholder="001" />
+              </Field>
+              <Field label="ISPB">
+                <input className="input-premium w-full" value={form.ispb}
+                       onChange={(e) => setForm({ ...form, ispb: e.target.value })} />
+              </Field>
+              <Field label="Agencia">
+                <input className="input-premium w-full" value={form.agency}
+                       onChange={(e) => setForm({ ...form, agency: e.target.value })} />
+              </Field>
+              <Field label="Conta">
+                <input className="input-premium w-full" value={form.accountNumber}
+                       onChange={(e) => setForm({ ...form, accountNumber: e.target.value })} />
+              </Field>
+              <Field label="Digito">
+                <input className="input-premium w-full" value={form.accountDigit}
+                       onChange={(e) => setForm({ ...form, accountDigit: e.target.value })} />
+              </Field>
+              <Field label="Tipo conta">
+                <select className="input-premium w-full" value={form.accountType}
+                        onChange={(e) => setForm({ ...form, accountType: e.target.value })}>
+                  <option value="CORRENTE">Corrente</option>
+                  <option value="POUPANCA">Poupanca</option>
+                  <option value="PAGAMENTO">Pagamento</option>
+                </select>
+              </Field>
+            </>
+          )}
+
+          <Field label="Descricao" full>
+            <input className="input-premium w-full" value={form.description}
+                   onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          </Field>
+        </div>
+
+        <button className="btn-primary w-full" disabled={submitting}>
+          {submitting ? 'Enviando...' : <><Send className="h-4 w-4" /> Enviar via gateway proprio</>}
+        </button>
+      </form>
+
+      <div className="card-premium p-5">
+        <h4 className="text-xs uppercase tracking-widest text-ink-400 mb-3">Ultimas ordens</h4>
+        <div className="space-y-2">
+          {transfers.length === 0 && <div className="text-sm text-ink-400">Nenhuma ordem externa ainda.</div>}
+          {transfers.slice(0, 8).map((t) => (
+            <div key={t.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">#{t.id} {t.channel}</span>
+                <span className="text-xs text-ink-300">{t.status}</span>
+              </div>
+              <div className="text-xs text-ink-400 mt-1">{brl(t.amountCentavos)} - {t.beneficiaryName}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CaymanRailView({ rail, users, onSuccess, onError }) {
+  const cfg = rail?.config || {};
+  const ready = rail?.readiness || {};
+  const participants = rail?.participants || [];
+  const instructions = rail?.instructions || [];
+  const userOptions = users.filter((u) => !u.roles?.some?.((r) => r.includes?.('ADMIN')));
+
+  const [configForm, setConfigForm] = useState({
+    legalEntityName: 'Bravus Bank Cayman Ltd.',
+    jurisdiction: 'Cayman Islands',
+    registryNumber: '',
+    cimaLicenseNumber: '',
+    licenseClass: '',
+    regulatoryStatus: 'DRAFT',
+    settlementMode: 'INTERNAL_ONLY',
+    amlPolicyVersion: '',
+    productionEnabled: false,
+  });
+  const [participantForm, setParticipantForm] = useState({
+    participantCode: '', legalName: '', institutionType: 'INTERNAL', country: 'KY',
+    swiftBic: '', localRoutingCode: '', settlementAccount: '', directParticipant: false, status: 'PENDING',
+  });
+  const [instructionForm, setInstructionForm] = useState({
+    userId: '', participantId: '', amount: '', currency: 'KYD',
+    beneficiaryName: '', beneficiaryDocument: '', beneficiaryAccount: '', description: '',
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!cfg?.id) return;
+    setConfigForm({
+      legalEntityName: cfg.legalEntityName || 'Bravus Bank Cayman Ltd.',
+      jurisdiction: cfg.jurisdiction || 'Cayman Islands',
+      registryNumber: cfg.registryNumber || '',
+      cimaLicenseNumber: cfg.cimaLicenseNumber || '',
+      licenseClass: cfg.licenseClass || '',
+      regulatoryStatus: cfg.regulatoryStatus || 'DRAFT',
+      settlementMode: cfg.settlementMode || 'INTERNAL_ONLY',
+      amlPolicyVersion: cfg.amlPolicyVersion || '',
+      productionEnabled: !!cfg.productionEnabled,
+    });
+  }, [
+    cfg?.id, cfg?.legalEntityName, cfg?.jurisdiction, cfg?.registryNumber,
+    cfg?.cimaLicenseNumber, cfg?.licenseClass, cfg?.regulatoryStatus,
+    cfg?.settlementMode, cfg?.amlPolicyVersion, cfg?.productionEnabled,
+  ]);
+
+  async function saveConfig(e) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const { data } = await caymanRailService.updateConfig(configForm);
+      onSuccess(`Trilho Cayman atualizado: ${data.regulatoryStatus}.`);
+    } catch (err) {
+      onError(err?.response?.data?.message || err?.response?.data || 'Falha ao salvar configuracao Cayman.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function createParticipant(e) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const { data } = await caymanRailService.createParticipant(participantForm);
+      onSuccess(`Participante ${data.participantCode} criado.`);
+      setParticipantForm({
+        participantCode: '', legalName: '', institutionType: 'INTERNAL', country: 'KY',
+        swiftBic: '', localRoutingCode: '', settlementAccount: '', directParticipant: false, status: 'PENDING',
+      });
+    } catch (err) {
+      onError(err?.response?.data?.message || err?.response?.data || 'Falha ao criar participante.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitInstruction(e) {
+    e.preventDefault();
+    if (!instructionForm.amount || parseFloat(instructionForm.amount) <= 0) return onError('Informe um valor positivo.');
+    setSubmitting(true);
+    try {
+      const { data } = await caymanRailService.submitInstruction({
+        userId: instructionForm.userId ? parseInt(instructionForm.userId) : null,
+        participantId: instructionForm.participantId ? parseInt(instructionForm.participantId) : null,
+        amountMinor: Math.round(parseFloat(instructionForm.amount) * 100),
+        currency: instructionForm.currency,
+        channel: 'CAYMAN_RAIL',
+        beneficiaryName: instructionForm.beneficiaryName,
+        beneficiaryDocument: instructionForm.beneficiaryDocument || null,
+        beneficiaryAccount: instructionForm.beneficiaryAccount,
+        description: instructionForm.description || null,
+      });
+      onSuccess(`Ordem Cayman #${data.id} criada: ${data.status}.`);
+      setInstructionForm({ ...instructionForm, amount: '', beneficiaryName: '', beneficiaryDocument: '', beneficiaryAccount: '', description: '' });
+    } catch (err) {
+      onError(err?.response?.data?.message || err?.response?.data || 'Falha ao criar ordem Cayman.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const moneyMinor = (amount, currency) => {
+    const value = ((amount || 0) / 100).toLocaleString('en-KY', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return `${currency || 'KYD'} ${value}`;
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid md:grid-cols-4 gap-4">
+        <KpiCard icon={Landmark} label="Gate" value={ready.gate || 'LICENSE_REQUIRED'}
+                 accent={ready.productionReady ? 'bg-emerald-400/15 text-emerald-300' : 'bg-amber-400/15 text-amber-300'}
+                 hint={ready.productionReady ? 'live' : 'bloqueado'} />
+        <KpiCard icon={Shield} label="CIMA" value={ready.cimaLicensed ? 'LICENSED' : 'PENDING'}
+                 accent="bg-blue-400/15 text-blue-300" hint={cfg.cimaLicenseNumber || 'sem licenca'} />
+        <KpiCard icon={Users} label="Participantes" value={ready.activeParticipants ?? 0}
+                 accent="bg-purple-400/15 text-purple-300" hint="ativos" />
+        <KpiCard icon={AlertCircle} label="Bloqueios" value={ready.blockedInstructions ?? 0}
+                 accent="bg-red-400/15 text-red-300" hint="license gate" />
+      </div>
+
+      <div className="grid xl:grid-cols-3 gap-6">
+        <form onSubmit={saveConfig} className="card-premium p-6 space-y-4 xl:col-span-2">
+          <div className="flex items-center gap-2">
+            <Landmark className="h-5 w-5 text-amber-300" />
+            <h3 className="font-display text-lg font-semibold">Trilho Cayman</h3>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            <Field label="Entidade legal">
+              <input className="input-premium w-full" value={configForm.legalEntityName}
+                     onChange={(e) => setConfigForm({ ...configForm, legalEntityName: e.target.value })} />
+            </Field>
+            <Field label="Jurisdicao">
+              <input className="input-premium w-full" value={configForm.jurisdiction}
+                     onChange={(e) => setConfigForm({ ...configForm, jurisdiction: e.target.value })} />
+            </Field>
+            <Field label="Registro Cayman">
+              <input className="input-premium w-full" value={configForm.registryNumber}
+                     onChange={(e) => setConfigForm({ ...configForm, registryNumber: e.target.value })} />
+            </Field>
+            <Field label="Licenca CIMA">
+              <input className="input-premium w-full" value={configForm.cimaLicenseNumber}
+                     onChange={(e) => setConfigForm({ ...configForm, cimaLicenseNumber: e.target.value })} />
+            </Field>
+            <Field label="Classe">
+              <input className="input-premium w-full" value={configForm.licenseClass}
+                     onChange={(e) => setConfigForm({ ...configForm, licenseClass: e.target.value })} />
+            </Field>
+            <Field label="Status">
+              <select className="input-premium w-full" value={configForm.regulatoryStatus}
+                      onChange={(e) => setConfigForm({ ...configForm, regulatoryStatus: e.target.value })}>
+                <option value="DRAFT">DRAFT</option>
+                <option value="COMPANY_REGISTERED">COMPANY_REGISTERED</option>
+                <option value="CIMA_APPLICATION">CIMA_APPLICATION</option>
+                <option value="LICENSED">LICENSED</option>
+                <option value="SUSPENDED">SUSPENDED</option>
+              </select>
+            </Field>
+            <Field label="Liquidacao">
+              <select className="input-premium w-full" value={configForm.settlementMode}
+                      onChange={(e) => setConfigForm({ ...configForm, settlementMode: e.target.value })}>
+                <option value="INTERNAL_ONLY">INTERNAL_ONLY</option>
+                <option value="LIVE_LICENSED">LIVE_LICENSED</option>
+              </select>
+            </Field>
+            <Field label="Politica AML">
+              <input className="input-premium w-full" value={configForm.amlPolicyVersion}
+                     onChange={(e) => setConfigForm({ ...configForm, amlPolicyVersion: e.target.value })}
+                     placeholder="AML-2026-001" />
+            </Field>
+            <label className="md:col-span-2 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-ink-200">
+              <input type="checkbox" checked={configForm.productionEnabled}
+                     onChange={(e) => setConfigForm({ ...configForm, productionEnabled: e.target.checked })} />
+              Produção habilitada
+            </label>
+          </div>
+          <button className="btn-primary w-full" disabled={submitting}>
+            {submitting ? 'Salvando...' : <><CheckCircle2 className="h-4 w-4" /> Salvar gate regulatorio</>}
+          </button>
+        </form>
+
+        <form onSubmit={createParticipant} className="card-premium p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Users className="h-5 w-5 text-amber-300" />
+            <h3 className="font-display text-lg font-semibold">Participante</h3>
+          </div>
+          <Field label="Codigo">
+            <input className="input-premium w-full" value={participantForm.participantCode}
+                   onChange={(e) => setParticipantForm({ ...participantForm, participantCode: e.target.value })} />
+          </Field>
+          <Field label="Nome legal">
+            <input className="input-premium w-full" value={participantForm.legalName}
+                   onChange={(e) => setParticipantForm({ ...participantForm, legalName: e.target.value })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Tipo">
+              <select className="input-premium w-full" value={participantForm.institutionType}
+                      onChange={(e) => setParticipantForm({ ...participantForm, institutionType: e.target.value })}>
+                <option value="INTERNAL">INTERNAL</option>
+                <option value="BANK">BANK</option>
+                <option value="MSB">MSB</option>
+                <option value="CORRESPONDENT">CORRESPONDENT</option>
+                <option value="TEST">TEST</option>
+              </select>
+            </Field>
+            <Field label="Pais">
+              <input className="input-premium w-full" value={participantForm.country}
+                     onChange={(e) => setParticipantForm({ ...participantForm, country: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="BIC/SWIFT">
+            <input className="input-premium w-full" value={participantForm.swiftBic}
+                   onChange={(e) => setParticipantForm({ ...participantForm, swiftBic: e.target.value })} />
+          </Field>
+          <Field label="Conta settlement">
+            <input className="input-premium w-full" value={participantForm.settlementAccount}
+                   onChange={(e) => setParticipantForm({ ...participantForm, settlementAccount: e.target.value })} />
+          </Field>
+          <Field label="Status">
+            <select className="input-premium w-full" value={participantForm.status}
+                    onChange={(e) => setParticipantForm({ ...participantForm, status: e.target.value })}>
+              <option value="PENDING">PENDING</option>
+              <option value="ACTIVE">ACTIVE</option>
+              <option value="SUSPENDED">SUSPENDED</option>
+              <option value="CLOSED">CLOSED</option>
+            </select>
+          </Field>
+          <button className="btn-secondary w-full" disabled={submitting}>
+            <Users className="h-4 w-4" /> Criar participante
+          </button>
+        </form>
+      </div>
+
+      <div className="grid xl:grid-cols-3 gap-6">
+        <form onSubmit={submitInstruction} className="card-premium p-6 space-y-4 xl:col-span-2">
+          <div className="flex items-center gap-2">
+            <Send className="h-5 w-5 text-amber-300" />
+            <h3 className="font-display text-lg font-semibold">Ordem Cayman Rail</h3>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            <Field label="Cliente origem">
+              <select className="input-premium w-full" value={instructionForm.userId}
+                      onChange={(e) => setInstructionForm({ ...instructionForm, userId: e.target.value })}>
+                <option value="">sem cliente</option>
+                {userOptions.map((u) => (
+                  <option key={u.id} value={u.id}>{u.fullName || u.username}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Participante">
+              <select className="input-premium w-full" value={instructionForm.participantId}
+                      onChange={(e) => setInstructionForm({ ...instructionForm, participantId: e.target.value })}>
+                <option value="">sem participante</option>
+                {participants.map((p) => (
+                  <option key={p.id} value={p.id}>{p.participantCode} - {p.legalName}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Valor">
+              <input className="input-premium w-full" type="number" step="0.01" min="0.01"
+                     value={instructionForm.amount}
+                     onChange={(e) => setInstructionForm({ ...instructionForm, amount: e.target.value })} />
+            </Field>
+            <Field label="Moeda">
+              <select className="input-premium w-full" value={instructionForm.currency}
+                      onChange={(e) => setInstructionForm({ ...instructionForm, currency: e.target.value })}>
+                <option value="KYD">KYD</option>
+                <option value="USD">USD</option>
+                <option value="BRL">BRL</option>
+              </select>
+            </Field>
+            <Field label="Beneficiario">
+              <input className="input-premium w-full" value={instructionForm.beneficiaryName}
+                     onChange={(e) => setInstructionForm({ ...instructionForm, beneficiaryName: e.target.value })} />
+            </Field>
+            <Field label="Documento">
+              <input className="input-premium w-full" value={instructionForm.beneficiaryDocument}
+                     onChange={(e) => setInstructionForm({ ...instructionForm, beneficiaryDocument: e.target.value })} />
+            </Field>
+            <Field label="Conta destino" full>
+              <input className="input-premium w-full" value={instructionForm.beneficiaryAccount}
+                     onChange={(e) => setInstructionForm({ ...instructionForm, beneficiaryAccount: e.target.value })} />
+            </Field>
+            <Field label="Descricao" full>
+              <input className="input-premium w-full" value={instructionForm.description}
+                     onChange={(e) => setInstructionForm({ ...instructionForm, description: e.target.value })} />
+            </Field>
+          </div>
+          <button className="btn-primary w-full" disabled={submitting}>
+            {submitting ? 'Criando...' : <><Send className="h-4 w-4" /> Criar ordem license-gated</>}
+          </button>
+        </form>
+
+        <div className="card-premium p-5">
+          <h4 className="text-xs uppercase tracking-widest text-ink-400 mb-3">Participantes</h4>
+          <div className="space-y-2">
+            {participants.length === 0 && <div className="text-sm text-ink-400">Nenhum participante.</div>}
+            {participants.slice(0, 8).map((p) => (
+              <div key={p.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-3 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono">{p.participantCode}</span>
+                  <span className="text-xs text-ink-300">{p.status}</span>
+                </div>
+                <div className="text-xs text-ink-400 mt-1 truncate">{p.legalName}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="card-premium p-5">
+        <h4 className="text-xs uppercase tracking-widest text-ink-400 mb-3">Ordens Cayman Rail</h4>
+        <div className="grid lg:grid-cols-2 gap-3">
+          {instructions.length === 0 && <div className="text-sm text-ink-400">Nenhuma ordem.</div>}
+          {instructions.slice(0, 10).map((i) => (
+            <div key={i.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">#{i.id} {i.status}</span>
+                <span className="text-xs text-ink-300">{i.regulatoryGate}</span>
+              </div>
+              <div className="text-xs text-ink-400 mt-1">{moneyMinor(i.amountMinor, i.currency)} - {i.beneficiaryName}</div>
+              <div className="text-xs text-ink-500 mt-1 truncate">{i.complianceResult || i.errorMessage}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Info({ label, value }) {
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wider text-ink-400">{label}</div>
+      <div className="mt-1 text-sm text-white break-words">{value}</div>
     </div>
   );
 }

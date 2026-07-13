@@ -82,20 +82,28 @@ public class LedgerAdminController {
     @PostMapping("/credit/grant")
     public ResponseEntity<CreditGrantEntity> grantCredit(@Valid @RequestBody GrantRequest req,
                                                          Authentication auth) {
+        CreditGrantEntity grant = creditService.grantCredit(toGrantCommand(req, auth));
+        return ResponseEntity.ok(grant);
+    }
+
+    /** Emite credito escritural pendente, sem liberar saldo ao usuario. */
+    @PostMapping("/credit/issue")
+    public ResponseEntity<CreditGrantEntity> issueCredit(@Valid @RequestBody GrantRequest req,
+                                                         Authentication auth) {
+        CreditGrantEntity grant = creditService.issuePendingCredit(toGrantCommand(req, auth));
+        if (Boolean.TRUE.equals(req.liberarAgora)) {
+            UserEntity admin = userRepo.findByUsername(auth.getName()).orElse(null);
+            grant = creditService.releaseCredit(grant.getId(), admin != null ? admin.getId() : null);
+        }
+        return ResponseEntity.ok(grant);
+    }
+
+    /** Libera credito escritural pendente para saldo utilizavel. */
+    @PostMapping("/credit/{grantId}/release")
+    public ResponseEntity<CreditGrantEntity> releaseCredit(@PathVariable Long grantId,
+                                                           Authentication auth) {
         UserEntity admin = userRepo.findByUsername(auth.getName()).orElse(null);
-
-        CreditService.GrantCommand cmd = new CreditService.GrantCommand();
-        cmd.userId = req.userId;
-        cmd.aprovadoPorId = admin != null ? admin.getId() : null;
-        cmd.reservaCodigo = req.reservaCodigo;
-        cmd.valor = req.valorCentavos;
-        cmd.motivo = req.motivo;
-        cmd.regraElegibilidade = req.regraElegibilidade;
-        cmd.taxaJurosAnual = req.taxaJurosAnual != null ? req.taxaJurosAnual : BigDecimal.ZERO;
-        cmd.dataVencimento = req.dataVencimento;
-        cmd.observacoes = req.observacoes;
-
-        CreditGrantEntity grant = creditService.grantCredit(cmd);
+        CreditGrantEntity grant = creditService.releaseCredit(grantId, admin != null ? admin.getId() : null);
         return ResponseEntity.ok(grant);
     }
 
@@ -115,5 +123,22 @@ public class LedgerAdminController {
         public BigDecimal taxaJurosAnual;
         public OffsetDateTime dataVencimento;
         public String observacoes;
+        public Boolean liberarAgora;
+    }
+
+    private CreditService.GrantCommand toGrantCommand(GrantRequest req, Authentication auth) {
+        UserEntity admin = userRepo.findByUsername(auth.getName()).orElse(null);
+
+        CreditService.GrantCommand cmd = new CreditService.GrantCommand();
+        cmd.userId = req.userId;
+        cmd.aprovadoPorId = admin != null ? admin.getId() : null;
+        cmd.reservaCodigo = req.reservaCodigo;
+        cmd.valor = req.valorCentavos;
+        cmd.motivo = req.motivo;
+        cmd.regraElegibilidade = req.regraElegibilidade;
+        cmd.taxaJurosAnual = req.taxaJurosAnual != null ? req.taxaJurosAnual : BigDecimal.ZERO;
+        cmd.dataVencimento = req.dataVencimento;
+        cmd.observacoes = req.observacoes;
+        return cmd;
     }
 }

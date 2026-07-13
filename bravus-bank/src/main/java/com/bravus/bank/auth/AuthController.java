@@ -1,5 +1,7 @@
 package com.bravus.bank.auth;
 
+import com.bravus.bank.compliance.DocumentAnalysisEntity;
+import com.bravus.bank.compliance.DocumentAnalysisService;
 import com.bravus.bank.db.entity.RoleEntity;
 import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.RoleRepository;
@@ -33,6 +35,7 @@ public class AuthController {
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
     private final UserDetailsService userDetailsService;
+    private final DocumentAnalysisService documentAnalysisService;
     private final SecureRandom secureRandom = new SecureRandom();
     
     public AuthController(
@@ -41,13 +44,15 @@ public class AuthController {
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             AuthenticationManager authenticationManager,
-            UserDetailsService userDetailsService) {
+            UserDetailsService userDetailsService,
+            DocumentAnalysisService documentAnalysisService) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.authenticationManager = authenticationManager;
         this.userDetailsService = userDetailsService;
+        this.documentAnalysisService = documentAnalysisService;
     }
     
     public record LoginRequest(
@@ -85,6 +90,7 @@ public class AuthController {
             String token = jwtService.generateToken(userDetails);
             
             UserEntity user = userRepository.findByUsername(request.username())
+                    .or(() -> userRepository.findByEmail(request.username()))
                     .orElseThrow(() -> new RuntimeException("User not found"));
             
             Set<String> roles = user.getRoles().stream()
@@ -107,6 +113,8 @@ public class AuthController {
     
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody @Valid RegisterRequest request) {
+        String normalizedCpf = normalizeDocument(request.cpf());
+
         // Validate password strength
         if (!PasswordValidator.isValid(request.password())) {
             return ResponseEntity.badRequest().body(PasswordValidator.getRequirements());
@@ -119,7 +127,8 @@ public class AuthController {
         if (userRepository.existsByEmail(request.email())) {
             return ResponseEntity.badRequest().body("Email already exists");
         }
-        if (request.cpf() != null && userRepository.existsByCpf(request.cpf())) {
+        if (normalizedCpf != null
+                && (userRepository.existsByCpf(normalizedCpf) || userRepository.existsByCpf(request.cpf()))) {
             return ResponseEntity.badRequest().body("CPF already registered");
         }
         
@@ -132,7 +141,7 @@ public class AuthController {
         user.setEmail(request.email());
         user.setPassword(passwordEncoder.encode(request.password()));
         user.setFullName(request.fullName());
-        user.setCpf(request.cpf());
+        user.setCpf(normalizedCpf);
         user.setPhone(request.phone());
         user.setAccountNumber(accountNumber);
         user.setBalance(0L);
@@ -145,7 +154,11 @@ public class AuthController {
         roles.add(userRole);
         user.setRoles(roles);
         
-        userRepository.save(user);
+        user = userRepository.save(user);
+
+        DocumentAnalysisEntity analysis = documentAnalysisService.analyzeForUser(user);
+        user.setStatusKyc(documentAnalysisService.kycStatusFor(analysis));
+        user = userRepository.save(user);
         
         // Generate token
         UserDetails userDetails = userDetailsService.loadUserByUsername(user.getUsername());
@@ -174,5 +187,11 @@ public class AuthController {
             accountNumber = String.format("%010d", randomNumber);
         } while (userRepository.existsByAccountNumber(accountNumber));
         return accountNumber;
+    }
+
+    private String normalizeDocument(String value) {
+        if (value == null || value.isBlank()) return null;
+        String digits = value.replaceAll("\\D", "");
+        return digits.isBlank() ? null : digits;
     }
 }
