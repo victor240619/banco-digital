@@ -152,7 +152,7 @@ public class ExternalTransferService {
         order.setDestinationConfirmedAt(settlement.destinationConfirmedAt);
         order.setSettlementMessage(settlement.settlementMessage);
         if (!providerConfigured) {
-            order.setErrorMessage("Configure BRAVUS_BANKING_PROVIDER_URL/TOKEN para liquidar esta ordem fora do Bravus.");
+            order.setErrorMessage("Configure BRAVUS_BANKING_PROVIDER_URL/TOKEN ou BRAVUS_BANKING_PROVIDER_MODE=CELCOIN com credenciais Celcoin para liquidar fora do Bravus.");
         }
         order.setRawResponse(providerResult.rawResponse);
         return transferRepo.save(order);

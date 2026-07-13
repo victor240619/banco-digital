@@ -11,6 +11,7 @@ const archivePath = join(tmpdir(), `bravus-bank-sites-${Date.now()}.tar.gz`);
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
+  ".apk": "application/vnd.android.package-archive",
   ".ico": "image/x-icon",
   ".js": "application/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
@@ -421,6 +422,9 @@ async function handleApi(request) {
 
   if (request.method === "POST" && path === "/auth/register") {
     const body = await request.json().catch(() => ({}));
+    if (request.headers.get("x-bravus-client") !== "android-apk" || body.clientChannel !== "ANDROID_APK") {
+      return json("A abertura de conta esta disponivel somente no APK Bravus Bank.", { status: 403 });
+    }
     if (String(body.cpf || "").replace(/\\D/g, "").length !== 11) {
       return json("Informe CPF com 11 digitos para abertura de conta.", { status: 400 });
     }

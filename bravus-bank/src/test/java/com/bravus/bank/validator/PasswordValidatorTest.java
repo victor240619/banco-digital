@@ -37,9 +37,9 @@ class PasswordValidatorTest {
     void testGetRequirements() {
         String requirements = PasswordValidator.getRequirements();
         assertNotNull(requirements);
-        assertTrue(requirements.contains("8 characters"));
-        assertTrue(requirements.contains("uppercase"));
-        assertTrue(requirements.contains("lowercase"));
-        assertTrue(requirements.contains("number"));
+        assertTrue(requirements.contains("8 caracteres"));
+        assertTrue(requirements.contains("maiuscula"));
+        assertTrue(requirements.contains("minuscula"));
+        assertTrue(requirements.contains("numero"));
     }
 }

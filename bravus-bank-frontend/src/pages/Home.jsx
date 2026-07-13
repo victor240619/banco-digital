@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ShieldCheck, Zap, Globe2, Banknote, LineChart, Lock,
-  ArrowRight, Sparkles, Smartphone, Award
+  ArrowRight, Download, Sparkles, Smartphone, Award
 } from 'lucide-react';
 import { authService } from '../services/api';
+import { APK_DOWNLOAD_URL } from '../lib/appChannel';
 
 const FeatureCard = ({ icon: Icon, title, desc, accent }) => (
   <motion.div
@@ -78,9 +79,9 @@ export default function Home() {
             >
               {!isAuthenticated ? (
                 <>
-                  <Link to="/register" className="btn-primary text-base !py-3 !px-6">
-                    Abrir minha conta <ArrowRight className="h-4 w-4" />
-                  </Link>
+                  <a href={APK_DOWNLOAD_URL} download className="btn-primary text-base !py-3 !px-6">
+                    Baixar APK e abrir conta <Download className="h-4 w-4" />
+                  </a>
                   <Link to="/login" className="btn-secondary text-base !py-3 !px-6">
                     Já sou cliente
                   </Link>
@@ -227,9 +228,9 @@ export default function Home() {
             Abra sua conta em menos de 2 minutos. 100% digital, com a confiança que você espera de um banco premium.
           </p>
           {!isAuthenticated && (
-            <Link to="/register" className="btn-primary mt-7 text-base !py-3 !px-8">
-              Abrir conta grátis <ArrowRight className="h-4 w-4" />
-            </Link>
+            <a href={APK_DOWNLOAD_URL} download className="btn-primary mt-7 text-base !py-3 !px-8">
+              Baixar APK <Download className="h-4 w-4" />
+            </a>
           )}
         </div>
       </section>

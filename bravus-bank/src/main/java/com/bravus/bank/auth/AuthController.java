@@ -74,7 +74,8 @@ public class AuthController {
             String documentFrontImage,
             String documentBackImage,
             String faceImage,
-            String biometricChallenge
+            String biometricChallenge,
+            String clientChannel
     ) {}
     
     public record AuthResponse(
@@ -124,7 +125,12 @@ public class AuthController {
     }
     
     @PostMapping("/register")
-    public ResponseEntity<?> register(@RequestBody @Valid RegisterRequest request) {
+    public ResponseEntity<?> register(@RequestBody @Valid RegisterRequest request,
+                                      @RequestHeader(value = "X-Bravus-Client", required = false) String bravusClient) {
+        if (!isAndroidApkRegistration(request, bravusClient)) {
+            return ResponseEntity.status(403)
+                    .body("A abertura de conta esta disponivel somente no APK Bravus Bank.");
+        }
         String normalizedCpf = normalizeDocument(request.cpf());
         if (normalizedCpf == null || normalizedCpf.length() != 11) {
             return ResponseEntity.badRequest().body("Informe CPF com 11 digitos para abertura de conta.");
@@ -228,5 +234,10 @@ public class AuthController {
         if ("BAIXO".equals(analysis.getRiskLevel())) return "VERIFICADO";
         if ("MEDIO".equals(analysis.getRiskLevel())) return "EM_ANALISE_BIOMETRIA";
         return "BLOQUEADO_ANALISE";
+    }
+
+    private boolean isAndroidApkRegistration(RegisterRequest request, String bravusClient) {
+        return "android-apk".equalsIgnoreCase(bravusClient)
+                && "ANDROID_APK".equalsIgnoreCase(request.clientChannel());
     }
 }

@@ -2,9 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, Camera, CheckCircle2, FileText, Loader2, RotateCcw, ShieldCheck, UserPlus,
+  ArrowRight, Camera, CheckCircle2, Download, FileText, Loader2, RotateCcw,
+  ShieldCheck, Smartphone, UserPlus,
 } from 'lucide-react';
 import { authService } from '../services/api';
+import { APK_DOWNLOAD_URL, isAndroidApk } from '../lib/appChannel';
 
 const PASSWORD_MESSAGE = 'Use no mínimo 8 caracteres, com letra maiúscula, minúscula e número.';
 const STRONG_PASSWORD = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
@@ -88,6 +90,46 @@ function EvidenceBadge({ ready, label }) {
   );
 }
 
+function DownloadAppGate() {
+  return (
+    <main className="container-app py-12 sm:py-16">
+      <motion.div
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45 }}
+        className="mx-auto max-w-3xl"
+      >
+        <div className="card-premium p-8 sm:p-10 text-center">
+          <div className="mx-auto mb-5 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-gold text-[#05122f]">
+            <Smartphone className="h-8 w-8" />
+          </div>
+          <div className="pill-gold mx-auto mb-4 w-fit">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Cadastro protegido no APK
+          </div>
+          <h1 className="title-md">Abra sua conta pelo app Bravus Bank</h1>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink-300">
+            Por seguranca, a criacao de conta com documento e biometria facial fica disponivel somente no aplicativo Android.
+            Baixe o APK, instale no celular e conclua a abertura por la.
+          </p>
+          <div className="mt-7 flex flex-wrap justify-center gap-3">
+            <a href={APK_DOWNLOAD_URL} download className="btn-primary !py-3 !px-6">
+              <Download className="h-4 w-4" />
+              Baixar APK
+            </a>
+            <a href="/login" className="btn-secondary !py-3 !px-6">
+              Ja sou cliente
+            </a>
+          </div>
+          <p className="mt-5 text-xs text-ink-500">
+            Se o Android bloquear a instalacao, libere temporariamente a origem do arquivo nas configuracoes do aparelho.
+          </p>
+        </div>
+      </motion.div>
+    </main>
+  );
+}
+
 export default function Register() {
   const navigate = useNavigate();
   const videoRef = useRef(null);
@@ -111,16 +153,21 @@ export default function Register() {
   const [cameraError, setCameraError] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const nativeApk = isAndroidApk();
 
   useEffect(() => () => stopCamera(), []);
 
-  const stopCamera = () => {
+  if (!nativeApk) {
+    return <DownloadAppGate />;
+  }
+
+  function stopCamera() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
     setCameraActive(false);
-  };
+  }
 
   const startCamera = async () => {
     setCameraError('');
