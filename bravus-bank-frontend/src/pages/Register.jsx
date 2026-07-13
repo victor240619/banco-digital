@@ -172,6 +172,10 @@ export default function Register() {
   const startCamera = async () => {
     setCameraError('');
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError('Camera direta indisponivel neste aparelho. Use a captura de selfie pelo seletor abaixo.');
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
@@ -397,6 +401,19 @@ export default function Register() {
                       <Camera className="h-4 w-4" />
                       Capturar biometria
                     </button>
+                    <label className="btn-secondary w-full cursor-pointer justify-center">
+                      <Camera className="h-4 w-4" />
+                      Enviar selfie
+                      <input
+                        name="faceImage"
+                        type="file"
+                        accept="image/jpeg,image/png,image/*"
+                        capture="user"
+                        className="hidden"
+                        onChange={handleFileChange}
+                        disabled={loading}
+                      />
+                    </label>
                     <button type="button" className="btn-secondary w-full" onClick={stopCamera} disabled={!cameraActive || loading}>
                       Encerrar câmera
                     </button>

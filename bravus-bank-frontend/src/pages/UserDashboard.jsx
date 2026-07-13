@@ -64,6 +64,45 @@ const operationErrorMessage = (err, fallback = 'Falha na operacao.') => {
   return data?.message || fallback;
 };
 
+const isCreditTransaction = (type) => ['DEPOSIT', 'TRANSFER_IN'].includes(type);
+
+const receiptIdForTransaction = (tx) =>
+  tx?.receiptOrderId || tx?.externalOrderId || tx?.orderId || tx?.transferOrderId || null;
+
+const transactionCounterparty = (tx) => {
+  const credit = isCreditTransaction(tx?.type);
+  const label = credit ? 'De' : 'Para';
+  const name =
+    (credit ? tx?.senderName : tx?.receiverName)
+    || tx?.counterpartyName
+    || tx?.beneficiaryName
+    || tx?.payerName
+    || '';
+  const document =
+    (credit ? tx?.senderDocument : tx?.receiverDocument)
+    || tx?.counterpartyDocument
+    || tx?.beneficiaryDocument
+    || tx?.payerDocument
+    || '';
+  const account =
+    (credit ? tx?.senderAccountNumber : tx?.receiverAccountNumber)
+    || (credit ? tx?.senderAccount : tx?.receiverAccount)
+    || tx?.counterpartyAccount
+    || tx?.destinationAccount
+    || '';
+  const bank =
+    (credit ? tx?.senderBankName : tx?.receiverBankName)
+    || tx?.counterpartyBankName
+    || tx?.bankName
+    || '';
+  const detail = [
+    document && `Doc ${document}`,
+    account && `Conta ${account}`,
+    bank,
+  ].filter(Boolean).join(' | ');
+  return { label, name, document, account, bank, detail };
+};
+
 // ============ Component ============
 export default function UserDashboard() {
   const [profile, setProfile] = useState(null);
@@ -82,6 +121,8 @@ export default function UserDashboard() {
 
   const [tab, setTab] = useState('overview');
   const [form, setForm] = useState(EMPTY_FORM);
+  const [resolvedRecipient, setResolvedRecipient] = useState(null);
+  const [resolveLoading, setResolveLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const user = authService.getCurrentUser();
@@ -93,6 +134,31 @@ export default function UserDashboard() {
       return () => clearTimeout(t);
     }
   }, [success, error]);
+
+  useEffect(() => {
+    const destination = form.destinationAccount.trim();
+    if (tab !== 'transfer' || form.transferMode !== 'internal' || destination.length < 3) {
+      setResolvedRecipient(null);
+      setResolveLoading(false);
+      return undefined;
+    }
+    let active = true;
+    setResolveLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const { data } = await userService.resolveTransferDestination(destination);
+        if (active) setResolvedRecipient(data);
+      } catch {
+        if (active) setResolvedRecipient(null);
+      } finally {
+        if (active) setResolveLoading(false);
+      }
+    }, 350);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [tab, form.transferMode, form.destinationAccount]);
 
   const loadData = async () => {
     try {
@@ -155,10 +221,11 @@ export default function UserDashboard() {
           message = data?.settlementStatus === 'LIQUIDADA_CONFIRMADA'
             ? 'Pagamento liquidado pelo provedor Bravus.'
             : 'Pagamento debitado no Bravus. Aguardando confirmacao do destino.';
-          if (data?.id) {
-            const receiptRes = await userService.getExternalTransferReceipt(data.id).catch(() => ({ data: null }));
-            if (receiptRes?.data) setSelectedReceipt(receiptRes.data);
-          }
+        }
+        const receiptOrderId = data?.receiptOrderId || data?.externalOrderId || data?.orderId || data?.id;
+        if (receiptOrderId) {
+          const receiptRes = await userService.getExternalTransferReceipt(receiptOrderId).catch(() => ({ data: null }));
+          if (receiptRes?.data) setSelectedReceipt(receiptRes.data);
         }
       }
       if (kind === 'transfer' && form.transferMode === 'external') {
@@ -186,14 +253,16 @@ export default function UserDashboard() {
             ? 'Transferencia liquidada no destino confirmado.'
             : 'Transferencia debitada no Bravus. Aguardando confirmacao do destino.';
         }
-        if (data?.id) {
-          const receiptRes = await userService.getExternalTransferReceipt(data.id).catch(() => ({ data: null }));
+        const receiptOrderId = data?.receiptOrderId || data?.externalOrderId || data?.orderId || data?.id;
+        if (receiptOrderId) {
+          const receiptRes = await userService.getExternalTransferReceipt(receiptOrderId).catch(() => ({ data: null }));
           if (receiptRes?.data) setSelectedReceipt(receiptRes.data);
         }
       }
 
       setSuccess(message);
       setForm(EMPTY_FORM);
+      setResolvedRecipient(null);
       await loadData();
       setTab('overview');
     } catch (err) {
@@ -524,20 +593,13 @@ export default function UserDashboard() {
               ) : (
                 <ul className="space-y-3">
                   {transactions.slice(0, 8).map((t, idx) => {
-                    const { Icon, color, bg } = txIcon(t.type);
                     return (
-                      <li key={t.id || idx} className="flex items-center gap-3">
-                        <div className={cn('h-9 w-9 rounded-lg inline-flex items-center justify-center', bg)}>
-                          <Icon className={cn('h-4 w-4', color)} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-white truncate">{getTransactionTypeLabel(t.type)}</div>
-                          <div className="text-xs text-ink-400">{formatDate(t.createdAt || t.date)}</div>
-                        </div>
-                        <div className={cn('text-sm font-medium tabular-nums', txSignClass(t.type))}>
-                          {txSign(t.type)} {formatCurrency(t.amount)}
-                        </div>
-                      </li>
+                      <TransactionListItem
+                        key={t.id || idx}
+                        tx={t}
+                        openReceipt={openReceipt}
+                        receiptLoading={receiptLoading}
+                      />
                     );
                   })}
                 </ul>
@@ -784,6 +846,14 @@ export default function UserDashboard() {
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
                 />
               </div>
+
+              {tab === 'transfer' && (
+                <TransferRecipientPreview
+                  form={form}
+                  resolvedRecipient={resolvedRecipient}
+                  resolveLoading={resolveLoading}
+                />
+              )}
 
               <button
                 disabled={submitting}
@@ -1071,12 +1141,13 @@ function PortalModuleDetail({
             <div className="mt-3 space-y-2">
               {latestTx.length === 0 && <div className="text-sm text-ink-400">Sem movimentacoes recentes.</div>}
               {latestTx.map((tx) => (
-                <div key={tx.id} className="flex items-center justify-between gap-3 text-sm">
-                  <span className="min-w-0 truncate text-ink-200">{getTransactionTypeLabel(tx.type)}</span>
-                  <span className={cn('shrink-0 font-mono', txSignClass(tx.type))}>
-                    {txSign(tx.type)} {showBalance ? formatCurrency(tx.amount) : 'R$ ******'}
-                  </span>
-                </div>
+                <TransactionCompactLine
+                  key={tx.id}
+                  tx={tx}
+                  showBalance={showBalance}
+                  openReceipt={openReceipt}
+                  receiptLoading={receiptLoading}
+                />
               ))}
             </div>
           </div>
@@ -1128,6 +1199,137 @@ function PortalModuleDetail({
           <Metric label="Ultima atualizacao" value={formatDate(new Date().toISOString())} />
         </div>
       )}
+    </div>
+  );
+}
+
+function TransactionListItem({ tx, openReceipt, receiptLoading }) {
+  const { Icon, color, bg } = txIcon(tx.type);
+  const counterparty = transactionCounterparty(tx);
+  const receiptOrderId = receiptIdForTransaction(tx);
+
+  return (
+    <li className="flex items-start gap-3 rounded-xl border border-white/5 bg-white/[0.02] p-3">
+      <div className={cn('mt-0.5 h-9 w-9 shrink-0 rounded-lg inline-flex items-center justify-center', bg)}>
+        <Icon className={cn('h-4 w-4', color)} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium text-white">{getTransactionTypeLabel(tx.type)}</div>
+            {counterparty.name && (
+              <div className="truncate text-xs text-ink-200">
+                {counterparty.label}: {counterparty.name}
+              </div>
+            )}
+            {counterparty.detail && (
+              <div className="truncate text-[11px] text-ink-400">{counterparty.detail}</div>
+            )}
+            <div className="text-[11px] text-ink-500">{formatDate(tx.createdAt || tx.date)}</div>
+          </div>
+          <div className={cn('shrink-0 text-sm font-medium tabular-nums', txSignClass(tx.type))}>
+            {txSign(tx.type)} {formatCurrency(tx.amount)}
+          </div>
+        </div>
+        {receiptOrderId && (
+          <button
+            type="button"
+            className="btn-secondary mt-2 !py-1.5 !px-2.5 text-xs"
+            disabled={receiptLoading === receiptOrderId}
+            onClick={() => openReceipt(receiptOrderId)}
+          >
+            <Receipt className="h-3.5 w-3.5" />
+            Comprovante
+          </button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function TransactionCompactLine({ tx, showBalance, openReceipt, receiptLoading }) {
+  const counterparty = transactionCounterparty(tx);
+  const receiptOrderId = receiptIdForTransaction(tx);
+
+  return (
+    <div className="rounded-lg border border-white/5 bg-black/15 p-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-ink-100">{getTransactionTypeLabel(tx.type)}</div>
+          {counterparty.name && (
+            <div className="truncate text-xs text-ink-300">{counterparty.label}: {counterparty.name}</div>
+          )}
+          {counterparty.detail && (
+            <div className="truncate text-[11px] text-ink-500">{counterparty.detail}</div>
+          )}
+        </div>
+        <span className={cn('shrink-0 font-mono', txSignClass(tx.type))}>
+          {txSign(tx.type)} {showBalance ? formatCurrency(tx.amount) : 'R$ ******'}
+        </span>
+      </div>
+      {receiptOrderId && (
+        <button
+          type="button"
+          className="btn-secondary mt-2 !py-1 !px-2 text-xs"
+          disabled={receiptLoading === receiptOrderId}
+          onClick={() => openReceipt(receiptOrderId)}
+        >
+          <Receipt className="h-3.5 w-3.5" />
+          Comprovante
+        </button>
+      )}
+    </div>
+  );
+}
+
+function TransferRecipientPreview({ form, resolvedRecipient, resolveLoading }) {
+  if (form.transferMode === 'internal') {
+    const destination = form.destinationAccount.trim();
+    if (!destination) return null;
+    const name = resolvedRecipient?.name || resolvedRecipient?.fullName;
+    const detail = resolvedRecipient
+      ? [
+          resolvedRecipient.document && `Doc ${resolvedRecipient.document}`,
+          resolvedRecipient.accountNumber && `Conta ${resolvedRecipient.accountNumber}`,
+          resolvedRecipient.bankName || 'Bravus Premium Bank',
+        ].filter(Boolean).join(' | ')
+      : `Chave/conta informada: ${destination}`;
+
+    return (
+      <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.06] p-4 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="font-semibold text-white">Recebedor Bravus</div>
+            <div className="mt-1 text-ink-200">
+              {resolveLoading ? 'Consultando destinatario...' : name || 'Destinatario ainda nao localizado'}
+            </div>
+            <div className="mt-1 text-xs text-ink-400">{detail}</div>
+          </div>
+          <span className={resolvedRecipient ? 'pill-green' : 'pill-gold'}>
+            {resolvedRecipient ? 'Localizado' : 'Validar'}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const hasExternalData =
+    form.beneficiaryName || form.beneficiaryDocument || form.pixKey || form.accountNumber || form.bankCode;
+  if (!hasExternalData) return null;
+
+  const account = form.channel === 'PIX'
+    ? form.pixKey
+    : [form.bankCode, form.agency, form.accountNumber, form.accountDigit].filter(Boolean).join(' / ');
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
+      <div className="font-semibold text-white">Recebedor informado</div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <ReceiptLine label="Nome" value={form.beneficiaryName} />
+        <ReceiptLine label="Documento" value={form.beneficiaryDocument} />
+        <ReceiptLine label="Canal" value={form.channel} />
+        <ReceiptLine label="Destino" value={account} />
+      </div>
     </div>
   );
 }

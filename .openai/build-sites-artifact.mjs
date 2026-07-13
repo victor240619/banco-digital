@@ -79,7 +79,7 @@ for (const file of await walk(distDir)) {
 }
 files["/"] = files["/index.html"];
 
-const entrypoint = `const buildTarget = "bravus-sites-api-v10";
+const entrypoint = `const buildTarget = "bravus-sites-api-v11";
 const files = ${JSON.stringify(files)};
 const now = () => new Date().toISOString();
 const corsHeaders = {
@@ -141,6 +141,8 @@ const state = globalThis.__bravusState || (globalThis.__bravusState = {
   users: { joao, francisca, admin },
   transactions: [],
   externalTransfers: [],
+  documentAnalyses: [],
+  kycEvidence: {},
   globalRailParticipants: [{
     id: 1,
     participantCode: "BRAVUS-INTERNAL",
@@ -162,6 +164,8 @@ const state = globalThis.__bravusState || (globalThis.__bravusState = {
   }],
 });
 state.users.francisca = { ...francisca, ...(state.users.francisca || {}) };
+state.documentAnalyses = Array.isArray(state.documentAnalyses) ? state.documentAnalyses : [];
+state.kycEvidence = state.kycEvidence || {};
 
 function bytesFromBase64(value) {
   const binary = atob(value);
@@ -201,6 +205,7 @@ function userSummary(user) {
     accountNumber: user.accountNumber,
     accountType: user.accountType,
     balance: user.balance,
+    statusKyc: user.statusKyc || "APROVADO_AUTO",
     isActive: true,
     createdAt: "2026-07-12T00:00:00-03:00",
   };
@@ -214,6 +219,7 @@ function authResponse(user) {
     fullName: user.fullName,
     accountNumber: user.accountNumber,
     balance: user.balance,
+    statusKyc: user.statusKyc || "APROVADO_AUTO",
     roles: user.roles,
   };
 }
@@ -274,6 +280,175 @@ function findTransferDestination(value) {
     || (item.cpf && item.cpf === raw)
     || String(item.chavePix || "").toLowerCase() === rawLower
   ) || null;
+}
+
+function documentTypeFor(type, document) {
+  const explicit = String(type || "").trim().toUpperCase();
+  if (explicit === "CPF" || explicit === "CNPJ") return explicit;
+  return digits(document).length === 14 ? "CNPJ" : "CPF";
+}
+
+function validCpf(document) {
+  const cpf = digits(document);
+  if (cpf.length !== 11 || /^(\\d)\\1+$/.test(cpf)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i += 1) sum += Number(cpf[i]) * (10 - i);
+  let first = 11 - (sum % 11);
+  if (first >= 10) first = 0;
+  sum = 0;
+  for (let i = 0; i < 10; i += 1) sum += Number(cpf[i]) * (11 - i);
+  let second = 11 - (sum % 11);
+  if (second >= 10) second = 0;
+  return first === Number(cpf[9]) && second === Number(cpf[10]);
+}
+
+function validCnpj(document) {
+  const cnpj = digits(document);
+  if (cnpj.length !== 14 || /^(\\d)\\1+$/.test(cnpj)) return false;
+  const calc = (size) => {
+    const weights = size === 12
+      ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+      : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    const sum = weights.reduce((acc, weight, index) => acc + Number(cnpj[index]) * weight, 0);
+    const result = sum % 11;
+    return result < 2 ? 0 : 11 - result;
+  };
+  return calc(12) === Number(cnpj[12]) && calc(13) === Number(cnpj[13]);
+}
+
+function accountNumberForDocument(document) {
+  const clean = digits(document);
+  const base = clean || String(Date.now());
+  return base.slice(0, 10).padEnd(10, "0");
+}
+
+function partyForUser(user) {
+  return {
+    name: user.fullName,
+    document: user.cpf,
+    bankName: "Bravus Premium Bank",
+    bankCode: "999",
+    ispb: "99999999",
+    agency: "0001",
+    accountNumber: user.accountNumber,
+    accountDigit: null,
+    accountType: user.accountType,
+    pixKey: user.cpf || user.email,
+    pixKeyType: user.cpf ? "CPF" : "EMAIL",
+  };
+}
+
+function recipientViewForUser(user) {
+  const party = partyForUser(user);
+  return {
+    found: true,
+    username: user.username,
+    name: party.name,
+    document: party.document,
+    bankName: party.bankName,
+    bankCode: party.bankCode,
+    ispb: party.ispb,
+    agency: party.agency,
+    accountNumber: party.accountNumber,
+    accountDigit: party.accountDigit,
+    accountType: party.accountType,
+    pixKey: party.pixKey,
+    pixKeyType: party.pixKeyType,
+    statusKyc: user.statusKyc || "APROVADO_AUTO",
+  };
+}
+
+function partyForExternalBody(body) {
+  return {
+    name: body.beneficiaryName || "Beneficiario informado",
+    document: String(body.beneficiaryDocument || "").replace(/\\D/g, ""),
+    bankName: body.bankName || null,
+    bankCode: body.bankCode || null,
+    ispb: body.ispb || null,
+    agency: body.agency || null,
+    accountNumber: body.accountNumber || null,
+    accountDigit: body.accountDigit || null,
+    accountType: body.accountType || null,
+    pixKey: body.pixKey || null,
+    pixKeyType: body.pixKeyType || null,
+  };
+}
+
+function applyTransferParties(tx, payer, beneficiary, role, orderId) {
+  const counterparty = role === "PAYER" ? beneficiary : payer;
+  Object.assign(tx, {
+    senderName: payer.name,
+    senderDocument: payer.document,
+    senderBankName: payer.bankName,
+    senderBankCode: payer.bankCode,
+    senderIspb: payer.ispb,
+    senderAgency: payer.agency,
+    senderAccountNumber: payer.accountNumber,
+    senderAccountDigit: payer.accountDigit,
+    senderAccountType: payer.accountType,
+    receiverName: beneficiary.name,
+    receiverDocument: beneficiary.document,
+    receiverBankName: beneficiary.bankName,
+    receiverBankCode: beneficiary.bankCode,
+    receiverIspb: beneficiary.ispb,
+    receiverAgency: beneficiary.agency,
+    receiverAccountNumber: beneficiary.accountNumber,
+    receiverAccountDigit: beneficiary.accountDigit,
+    receiverAccountType: beneficiary.accountType,
+    counterpartyName: counterparty.name,
+    counterpartyDocument: counterparty.document,
+    counterpartyBankName: counterparty.bankName,
+    counterpartyAccount: counterparty.accountNumber || counterparty.pixKey,
+    counterpartyRole: role === "PAYER" ? "RECEBEDOR" : "PAGADOR",
+  });
+  if (orderId) {
+    tx.receiptOrderId = orderId;
+    tx.externalOrderId = orderId;
+    tx.receiptAvailable = true;
+  }
+  return tx;
+}
+
+function hydrateTransaction(tx, viewer) {
+  const next = { ...tx };
+  if (next.senderName && next.receiverName) return next;
+  if (next.type === "TRANSFER_IN") {
+    const payer = findTransferDestination(next.destinationAccount);
+    if (payer) return applyTransferParties(next, partyForUser(payer), partyForUser(viewer), "BENEFICIARY", next.receiptOrderId || next.externalOrderId);
+  }
+  if (next.type === "TRANSFER_OUT") {
+    const beneficiary = findTransferDestination(next.destinationAccount);
+    if (beneficiary) return applyTransferParties(next, partyForUser(viewer), partyForUser(beneficiary), "PAYER", next.receiptOrderId || next.externalOrderId);
+  }
+  if (next.type === "DEPOSIT" || next.type === "WITHDRAWAL") {
+    const bank = {
+      name: "Bravus Premium Bank",
+      document: "BRAVUS-LEDGER",
+      bankName: "Bravus Premium Bank",
+      bankCode: "999",
+      ispb: "99999999",
+      agency: "0001",
+      accountNumber: "BRAVUS-LEDGER",
+      accountDigit: null,
+      accountType: "RAIL",
+      pixKey: null,
+      pixKeyType: null,
+    };
+    return next.type === "DEPOSIT"
+      ? applyTransferParties(next, bank, partyForUser(viewer), "BENEFICIARY", null)
+      : applyTransferParties(next, partyForUser(viewer), bank, "PAYER", null);
+  }
+  return next;
+}
+
+function canReadOrderReceipt(order, user) {
+  if (!order || !user) return false;
+  if (order.username === user.username || order.payerUsername === user.username || order.beneficiaryUsername === user.username) return true;
+  if (order.beneficiaryDocument && digits(order.beneficiaryDocument) === user.cpf) return true;
+  if (order.accountNumber && order.accountNumber === user.accountNumber) return true;
+  if (order.pixKey && String(order.pixKey).toLowerCase() === String(user.email || "").toLowerCase()) return true;
+  if (order.pixKey && digits(order.pixKey) === user.cpf) return true;
+  return false;
 }
 
 function resolveBravusTransferDestination(body) {
@@ -388,7 +563,7 @@ function bankMe(user) {
     },
     conta: {
       nivel: "PREMIUM",
-      statusKyc: "APROVADO_AUTO",
+      statusKyc: user.statusKyc || "APROVADO_AUTO",
       ativa: true,
       abertura: "2026-07-12T00:00:00-03:00",
     },
@@ -400,6 +575,21 @@ function bankMe(user) {
 }
 
 function receiptForOrder(order, user) {
+  const payerUser = state.users[order.payerUsername || order.username] || user;
+  const payer = order.payer || partyForUser(payerUser);
+  const beneficiary = order.beneficiary || {
+    name: order.beneficiaryName,
+    document: order.beneficiaryDocument,
+    bankName: order.beneficiaryBankName || null,
+    bankCode: order.bankCode,
+    ispb: order.ispb,
+    agency: order.agency,
+    accountNumber: order.accountNumber,
+    accountDigit: order.accountDigit,
+    accountType: order.accountType,
+    pixKey: order.pixKey,
+    pixKeyType: order.pixKeyType,
+  };
   return {
     receiptId: "BRAVUS-" + order.idempotencyKey,
     orderId: order.id,
@@ -420,32 +610,8 @@ function receiptForOrder(order, user) {
     currency: order.currency,
     channel: order.channel,
     description: order.description,
-    payer: {
-      name: user.fullName,
-      document: user.cpf,
-      bankName: "Bravus Premium Bank",
-      bankCode: "999",
-      ispb: "99999999",
-      agency: "0001",
-      accountNumber: user.accountNumber,
-      accountDigit: null,
-      accountType: user.accountType,
-      pixKey: user.cpf || user.email,
-      pixKeyType: user.cpf ? "CPF" : "EMAIL",
-    },
-    beneficiary: {
-      name: order.beneficiaryName,
-      document: order.beneficiaryDocument,
-      bankName: null,
-      bankCode: order.bankCode,
-      ispb: order.ispb,
-      agency: order.agency,
-      accountNumber: order.accountNumber,
-      accountDigit: order.accountDigit,
-      accountType: order.accountType,
-      pixKey: order.pixKey,
-      pixKeyType: order.pixKeyType,
-    },
+    payer,
+    beneficiary,
   };
 }
 
@@ -463,8 +629,82 @@ function publicLoginMatches(user, username) {
     || (user.cpf && normalized === user.cpf);
 }
 
-function hasKycEvidence(body) {
-  return Boolean(body.documentFrontImage && body.documentBackImage && body.faceImage);
+function imageEvidence(value, label, minBytes) {
+  const raw = String(value || "");
+  const match = raw.match(/^data:(image\\/(jpeg|png));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return { label, ok: false, present: Boolean(raw), message: label + " deve ser imagem JPEG ou PNG em base64." };
+  const base64 = match[3];
+  const bytes = Math.floor((base64.length * 3) / 4);
+  return {
+    label,
+    ok: bytes >= minBytes,
+    present: true,
+    mime: match[1],
+    bytes,
+    fingerprint: match[1] + ":" + bytes + ":" + base64.slice(0, 24),
+    message: bytes >= minBytes ? null : label + " esta muito pequena para analise.",
+  };
+}
+
+function buildKycAnalysis(body, user) {
+  const documentNumber = digits(body.cpf || body.document || user?.cpf);
+  const documentType = documentTypeFor(body.type, documentNumber);
+  const front = imageEvidence(body.documentFrontImage, "Frente do documento", 3500);
+  const back = imageEvidence(body.documentBackImage, "Verso do documento", 3500);
+  const face = imageEvidence(body.faceImage, "Biometria facial", 2500);
+  const duplicateEvidence =
+    front.fingerprint
+    && (front.fingerprint === back.fingerprint || front.fingerprint === face.fingerprint || back.fingerprint === face.fingerprint);
+  const checks = [front, back, face];
+  const messages = checks.filter((item) => !item.ok).map((item) => item.message);
+  if (duplicateEvidence) messages.push("As imagens de documento e face devem ser capturas diferentes.");
+  const evidenceOk = messages.length === 0;
+  const documentChecksumOk = documentType === "CNPJ" ? validCnpj(documentNumber) : validCpf(documentNumber);
+  return {
+    id: state.documentAnalyses.length + 1,
+    documentType,
+    documentNumber,
+    status: evidenceOk ? "APROVADO_AUTO" : "REJEITADO_EVIDENCIA_INSUFICIENTE",
+    riskLevel: evidenceOk ? "BAIXO" : "ALTO",
+    riskScore: evidenceOk ? (documentChecksumOk ? 7 : 18) : 92,
+    provider: "BRAVUS_SELF_KYC_SITES",
+    subjectName: body.fullName || user?.fullName || "Titular informado",
+    registrationStatus: documentChecksumOk ? "DOCUMENTO_COM_EVIDENCIA_KYC" : "DOCUMENTO_COM_EVIDENCIA_PENDENTE_VALIDACAO_OFICIAL",
+    biometricStatus: face.ok ? "FACE_CAPTURADA" : "FACE_AUSENTE",
+    biometricChallenge: body.biometricChallenge || "FACE_CAMERA_CAPTURE_V1",
+    evidence: {
+      documentFront: { present: front.present, mime: front.mime || null, bytes: front.bytes || 0 },
+      documentBack: { present: back.present, mime: back.mime || null, bytes: back.bytes || 0 },
+      face: { present: face.present, mime: face.mime || null, bytes: face.bytes || 0 },
+    },
+    errorMessage: evidenceOk ? null : messages.join(" "),
+    createdAt: now(),
+  };
+}
+
+function analyzeDocumentRequest(body) {
+  const documentNumber = digits(body.document || body.cpf || "");
+  const documentType = documentTypeFor(body.type, documentNumber);
+  const knownUser = Object.values(state.users).find((item) => item.cpf === documentNumber) || null;
+  const existing = state.documentAnalyses.find((item) => item.documentNumber === documentNumber);
+  if (existing) return { ...existing, subjectName: knownUser?.fullName || existing.subjectName };
+  const checksumOk = documentType === "CNPJ" ? validCnpj(documentNumber) : validCpf(documentNumber);
+  const analysis = {
+    id: state.documentAnalyses.length + 1,
+    documentType,
+    documentNumber,
+    status: checksumOk ? "ANALISADO_AUTOMATICAMENTE" : "REVISAO_NECESSARIA",
+    riskLevel: checksumOk ? "BAIXO" : "MEDIO",
+    riskScore: checksumOk ? 12 : 55,
+    provider: "BRAVUS_SELF_KYC_SITES",
+    subjectName: knownUser?.fullName || null,
+    registrationStatus: knownUser ? (knownUser.statusKyc || "APROVADO_AUTO") : "DOCUMENTO_NAO_VINCULADO_A_CONTA_BRAVUS",
+    biometricStatus: knownUser ? "KYC_BRAVUS_LOCALIZADO" : "SEM_BIOMETRIA_BRAVUS",
+    errorMessage: checksumOk ? null : "Digito verificador nao passou na validacao local.",
+    createdAt: now(),
+  };
+  state.documentAnalyses.unshift(analysis);
+  return analysis;
 }
 
 async function handleApi(request) {
@@ -495,22 +735,44 @@ async function handleApi(request) {
     if (String(body.cpf || "").replace(/\\D/g, "").length !== 11) {
       return json("Informe CPF com 11 digitos para abertura de conta.", { status: 400 });
     }
-    if (!hasKycEvidence(body)) {
-      return json("Envie frente, verso do documento e capture a biometria facial.", { status: 400 });
+    const normalizedCpf = String(body.cpf || "").replace(/\\D/g, "");
+    const kycAnalysis = buildKycAnalysis({ ...body, cpf: normalizedCpf }, null);
+    if (kycAnalysis.status !== "APROVADO_AUTO") {
+      return json(kycAnalysis.errorMessage || "Envie frente, verso do documento e capture a biometria facial.", { status: 400 });
+    }
+    const username = String(body.username || "cliente." + normalizedCpf.slice(-4)).trim().toLowerCase();
+    const email = String(body.email || "").trim().toLowerCase();
+    if (Object.values(state.users).some((item) => item.cpf === normalizedCpf)) {
+      return json("CPF ja cadastrado no Bravus.", { status: 400 });
+    }
+    if (Object.values(state.users).some((item) => item.username.toLowerCase() === username || item.email.toLowerCase() === email)) {
+      return json("Usuario ou e-mail ja cadastrado no Bravus.", { status: 400 });
     }
     const user = {
       ...joao,
       id: Math.max(...Object.values(state.users).map((item) => item.id)) + 1,
-      username: body.username || "novo.cliente",
-      email: body.email || "cliente@bravusbank.com",
+      username,
+      email: email || ("cliente" + normalizedCpf.slice(-4) + "@bravusbank.com"),
       fullName: body.fullName || "Novo Cliente",
-      cpf: String(body.cpf || "").replace(/\\D/g, ""),
-      accountNumber: "1000000001",
+      cpf: normalizedCpf,
+      phone: String(body.phone || "").replace(/\\D/g, ""),
+      accountNumber: accountNumberForDocument(normalizedCpf),
       balance: 0,
       roles: ["ROLE_USER"],
-      statusKyc: "VERIFICADO",
+      statusKyc: "APROVADO_AUTO",
+      kycAnalysisId: kycAnalysis.id,
     };
+    kycAnalysis.subjectName = user.fullName;
     state.users[user.username] = user;
+    state.documentAnalyses.unshift(kycAnalysis);
+    state.kycEvidence[user.username] = {
+      analysisId: kycAnalysis.id,
+      documentType: kycAnalysis.documentType,
+      documentNumber: kycAnalysis.documentNumber,
+      biometricStatus: kycAnalysis.biometricStatus,
+      evidence: kycAnalysis.evidence,
+      createdAt: kycAnalysis.createdAt,
+    };
     return json(authResponse(user));
   }
 
@@ -520,16 +782,25 @@ async function handleApi(request) {
   if (request.method === "GET" && path === "/user/profile") return json(userSummary(user));
   if (request.method === "GET" && path === "/user/me") return json(bankMe(user));
   if (request.method === "GET" && path === "/user/balance") return json(user.balance);
-  if (request.method === "GET" && path === "/user/transactions") return json(state.transactions.filter((tx) => tx.username === user.username));
+  if (request.method === "GET" && path === "/user/transactions") {
+    return json(state.transactions.filter((tx) => tx.username === user.username).map((tx) => hydrateTransaction(tx, user)));
+  }
+  if (request.method === "GET" && path === "/user/transfer/resolve") {
+    const destination = url.searchParams.get("destination") || "";
+    const found = findTransferDestination(destination);
+    if (!found) return json({ found: false, message: "Destinatario Bravus nao localizado." }, { status: 404 });
+    if (found.username === user.username) return json({ found: false, message: "Nao e permitido transferir para a propria conta." }, { status: 400 });
+    return json(recipientViewForUser(found));
+  }
   if (request.method === "GET" && path === "/credit/summary") return json(creditSummary(user));
   if (request.method === "GET" && path.startsWith("/user/external-transfers")) {
     const receiptMatch = path.match(/^\\/user\\/external-transfers\\/(\\d+)\\/receipt$/);
     if (receiptMatch) {
-      const order = state.externalTransfers.find((tx) => tx.id === Number(receiptMatch[1]) && tx.username === user.username);
+      const order = state.externalTransfers.find((tx) => tx.id === Number(receiptMatch[1]) && canReadOrderReceipt(tx, user));
       if (!order) return json("Transferencia nao encontrada para este usuario.", { status: 404 });
       return json(receiptForOrder(order, user));
     }
-    return json(state.externalTransfers.filter((tx) => tx.username === user.username));
+    return json(state.externalTransfers.filter((tx) => canReadOrderReceipt(tx, user)));
   }
   if (request.method === "POST" && path === "/user/external-transfers") {
     const body = await request.json().catch(() => ({}));
@@ -554,9 +825,8 @@ async function handleApi(request) {
         status: "COMPLETED",
         createdAt: now(),
       };
-      state.transactions.unshift(tx);
-      state.transactions.unshift({
-        id: state.transactions.length + 1,
+      const incomingTx = {
+        id: state.transactions.length + 2,
         username: bravusDestination.username,
         type: "TRANSFER_IN",
         amount,
@@ -564,11 +834,17 @@ async function handleApi(request) {
         destinationAccount: user.accountNumber,
         status: "COMPLETED",
         createdAt: now(),
-      });
+      };
+      state.transactions.unshift(tx);
+      state.transactions.unshift(incomingTx);
       const idempotencyKey = "sites-bravus-internal-" + Date.now();
+      const payer = partyForUser(user);
+      const beneficiary = partyForUser(bravusDestination);
       const order = {
         id: state.externalTransfers.length + 1,
         username: user.username,
+        payerUsername: user.username,
+        beneficiaryUsername: bravusDestination.username,
         transactionId: tx.id,
         amountCentavos: amount,
         channel: body.channel || "PIX",
@@ -599,6 +875,10 @@ async function handleApi(request) {
         rawResponse: "{\\"provider\\":\\"BRAVUS_INTERNAL_LEDGER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
         createdAt: now(),
       };
+      order.payer = payer;
+      order.beneficiary = beneficiary;
+      applyTransferParties(tx, payer, beneficiary, "PAYER", order.id);
+      applyTransferParties(incomingTx, payer, beneficiary, "BENEFICIARY", order.id);
       state.externalTransfers.unshift(order);
       return json(order);
     }
@@ -619,9 +899,12 @@ async function handleApi(request) {
     state.transactions.unshift(tx);
     const idempotencyKey = "sites-" + Date.now();
     const settlement = settlementFor(body, idempotencyKey);
+    const payer = partyForUser(user);
+    const beneficiary = partyForExternalBody(body);
     const order = {
       id: state.externalTransfers.length + 1,
       username: user.username,
+      payerUsername: user.username,
       transactionId: tx.id,
       amountCentavos: amount,
       channel: body.channel || "PIX",
@@ -652,6 +935,9 @@ async function handleApi(request) {
       rawResponse: "{\\"provider\\":\\"BRAVUS_SELF_PROVIDER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
       createdAt: now(),
     };
+    order.payer = payer;
+    order.beneficiary = beneficiary;
+    applyTransferParties(tx, payer, beneficiary, "PAYER", order.id);
     state.externalTransfers.unshift(order);
     return json(order);
   }
@@ -705,9 +991,12 @@ async function handleApi(request) {
         state.transactions.unshift(tx);
         const idempotencyKey = "legacy-transfer-" + Date.now();
         const settlement = settlementFor(externalBody, idempotencyKey);
+        const payer = partyForUser(user);
+        const beneficiary = partyForExternalBody(externalBody);
         const order = {
           id: state.externalTransfers.length + 1,
           username: user.username,
+          payerUsername: user.username,
           transactionId: tx.id,
           amountCentavos: amount,
           channel: externalBody.channel,
@@ -738,6 +1027,9 @@ async function handleApi(request) {
           rawResponse: "{\\"provider\\":\\"BRAVUS_SELF_PROVIDER\\",\\"status\\":\\"COMPLETED\\",\\"legacyEndpoint\\":\\"/api/user/transfer\\"}",
           createdAt: now(),
         };
+        order.payer = payer;
+        order.beneficiary = beneficiary;
+        applyTransferParties(tx, payer, beneficiary, "PAYER", order.id);
         state.externalTransfers.unshift(order);
         return json(order);
       }
@@ -763,8 +1055,9 @@ async function handleApi(request) {
       createdAt: now(),
     };
     state.transactions.unshift(tx);
+    let order = null;
     if (destination) {
-      state.transactions.unshift({
+      const incomingTx = {
         id: state.transactions.length + 1,
         username: destination.username,
         type: "TRANSFER_IN",
@@ -773,7 +1066,51 @@ async function handleApi(request) {
         destinationAccount: user.accountNumber,
         status: "COMPLETED",
         createdAt: now(),
-      });
+      };
+      state.transactions.unshift(incomingTx);
+      const idempotencyKey = "sites-legacy-internal-" + Date.now();
+      const payer = partyForUser(user);
+      const beneficiary = partyForUser(destination);
+      order = {
+        id: state.externalTransfers.length + 1,
+        username: user.username,
+        payerUsername: user.username,
+        beneficiaryUsername: destination.username,
+        transactionId: tx.id,
+        amountCentavos: amount,
+        channel: body.channel || "PIX",
+        currency: "BRL",
+        beneficiaryName: destination.fullName,
+        beneficiaryDocument: destination.cpf,
+        bankCode: "999",
+        ispb: "99999999",
+        agency: "0001",
+        accountNumber: destination.accountNumber,
+        accountDigit: null,
+        accountType: destination.accountType,
+        pixKey: destination.cpf || destination.email,
+        pixKeyType: destination.cpf ? "CPF" : "EMAIL",
+        description: body.description || null,
+        provider: "BRAVUS_INTERNAL_LEDGER",
+        providerTransferId: idempotencyKey,
+        idempotencyKey,
+        status: "COMPLETED",
+        settlementStatus: "LIQUIDADA_CONFIRMADA",
+        receiptKind: "COMPROVANTE_LIQUIDACAO_CONFIRMADA",
+        destinationNetwork: "INTERNAL_BRAVUS",
+        destinationParticipantCode: "BRAVUS-INTERNAL",
+        destinationConfirmationId: idempotencyKey,
+        destinationConfirmedAt: now(),
+        settlementMessage: "Liquidacao interna confirmada no ledger Bravus.",
+        errorMessage: null,
+        rawResponse: "{\\"provider\\":\\"BRAVUS_INTERNAL_LEDGER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
+        createdAt: now(),
+      };
+      order.payer = payer;
+      order.beneficiary = beneficiary;
+      applyTransferParties(tx, payer, beneficiary, "PAYER", order.id);
+      applyTransferParties(incomingTx, payer, beneficiary, "BENEFICIARY", order.id);
+      state.externalTransfers.unshift(order);
     }
     return json({
       message: destination ? "Transferencia interna Bravus liquidada." : "Operacao realizada.",
@@ -783,6 +1120,9 @@ async function handleApi(request) {
       balanceCentavos: user.balance,
       transaction: tx,
       destination: destination ? userSummary(destination) : null,
+      receiptOrderId: order?.id || null,
+      externalOrderId: order?.id || null,
+      order,
     });
   }
 
@@ -795,12 +1135,17 @@ async function handleApi(request) {
     return json({ totalUsers: users.length, activeUsers: users.length, totalTransactions: state.transactions.length, totalBalance: users.reduce((sum, item) => sum + item.balance, 0) });
   }
   if (request.method === "GET" && path === "/admin/users") return json(Object.values(state.users).map(userSummary));
-  if (request.method === "GET" && path === "/admin/transactions") return json(state.transactions);
+  if (request.method === "GET" && path === "/admin/transactions") {
+    return json(state.transactions.map((tx) => hydrateTransaction(tx, state.users[tx.username] || user)));
+  }
   if (request.method === "GET" && path === "/admin/ledger/balance-sheet") return json({ totalAssets: 0, totalLiabilities: 0, equity: 0, reserves: [] });
   if (request.method === "GET" && path === "/admin/ledger/validate-chain") return json({ valid: true, message: "Ledger demonstrativo do ChatGPT Sites." });
   if (request.method === "GET" && path.startsWith("/admin/ledger/entries")) return json({ content: [] });
-  if (request.method === "GET" && path.startsWith("/admin/analysis/document")) return json([]);
-  if (request.method === "POST" && path === "/admin/analysis/document") return json({ status: "ANALISADO_AUTOMATICAMENTE", provider: "BRAVUS_SITES" });
+  if (request.method === "GET" && path.startsWith("/admin/analysis/document")) return json(state.documentAnalyses);
+  if (request.method === "POST" && path === "/admin/analysis/document") {
+    const body = await request.json().catch(() => ({}));
+    return json(analyzeDocumentRequest(body));
+  }
   if (request.method === "GET" && path.startsWith("/admin/ledger/external-transfers")) return json(state.externalTransfers);
   if (request.method === "POST" && path === "/admin/ledger/external-transfers") {
     const body = await request.json().catch(() => ({}));
@@ -827,9 +1172,8 @@ async function handleApi(request) {
         status: "COMPLETED",
         createdAt: now(),
       };
-      state.transactions.unshift(tx);
-      state.transactions.unshift({
-        id: state.transactions.length + 1,
+      const incomingTx = {
+        id: state.transactions.length + 2,
         username: bravusDestination.username,
         type: "TRANSFER_IN",
         amount,
@@ -837,11 +1181,17 @@ async function handleApi(request) {
         destinationAccount: origin.accountNumber,
         status: "COMPLETED",
         createdAt: now(),
-      });
+      };
+      state.transactions.unshift(tx);
+      state.transactions.unshift(incomingTx);
       const idempotencyKey = "sites-admin-bravus-internal-" + Date.now();
+      const payer = partyForUser(origin);
+      const beneficiary = partyForUser(bravusDestination);
       const order = {
         id: state.externalTransfers.length + 1,
         username: origin.username,
+        payerUsername: origin.username,
+        beneficiaryUsername: bravusDestination.username,
         transactionId: tx.id,
         amountCentavos: amount,
         channel: body.channel || "PIX",
@@ -872,6 +1222,10 @@ async function handleApi(request) {
         rawResponse: "{\\"provider\\":\\"BRAVUS_INTERNAL_LEDGER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
         createdAt: now(),
       };
+      order.payer = payer;
+      order.beneficiary = beneficiary;
+      applyTransferParties(tx, payer, beneficiary, "PAYER", order.id);
+      applyTransferParties(incomingTx, payer, beneficiary, "BENEFICIARY", order.id);
       state.externalTransfers.unshift(order);
       return json(order);
     }
@@ -892,9 +1246,12 @@ async function handleApi(request) {
     state.transactions.unshift(tx);
     const idempotencyKey = "sites-admin-" + Date.now();
     const settlement = settlementFor(body, idempotencyKey);
+    const payer = partyForUser(origin);
+    const beneficiary = partyForExternalBody(body);
     const order = {
       id: state.externalTransfers.length + 1,
       username: origin.username,
+      payerUsername: origin.username,
       transactionId: tx.id,
       amountCentavos: amount,
       channel: body.channel || "PIX",
@@ -925,6 +1282,9 @@ async function handleApi(request) {
       rawResponse: "{\\"provider\\":\\"BRAVUS_SELF_PROVIDER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
       createdAt: now(),
     };
+    order.payer = payer;
+    order.beneficiary = beneficiary;
+    applyTransferParties(tx, payer, beneficiary, "PAYER", order.id);
     state.externalTransfers.unshift(order);
     return json(order);
   }

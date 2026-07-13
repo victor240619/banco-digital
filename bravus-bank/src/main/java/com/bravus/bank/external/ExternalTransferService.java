@@ -180,10 +180,27 @@ public class ExternalTransferService {
     public ExternalTransferEntity findForUser(Long orderId, Long userId) {
         ExternalTransferEntity order = transferRepo.findById(orderId)
                 .orElseThrow(() -> new IllegalArgumentException("Transferencia nao encontrada."));
+        if (order.getUser() != null && order.getUser().getId().equals(userId)) {
+            return order;
+        }
+        UserEntity viewer = userRepo.findById(userId).orElse(null);
+        if (viewer != null && isBeneficiary(order, viewer)) {
+            return order;
+        }
         if (order.getUser() == null || !order.getUser().getId().equals(userId)) {
             throw new IllegalArgumentException("Transferencia nao encontrada para este usuario.");
         }
         return order;
+    }
+
+    private boolean isBeneficiary(ExternalTransferEntity order, UserEntity viewer) {
+        String viewerCpf = DocumentUtilsBridge.digits(viewer.getCpf());
+        String orderDocument = DocumentUtilsBridge.digits(order.getBeneficiaryDocument());
+        if (!viewerCpf.isBlank() && viewerCpf.equals(orderDocument)) return true;
+        if (order.getAccountNumber() != null && order.getAccountNumber().equals(viewer.getAccountNumber())) return true;
+        if (order.getPixKey() != null && order.getPixKey().equalsIgnoreCase(viewer.getEmail())) return true;
+        return !viewerCpf.isBlank() && order.getPixKey() != null
+                && viewerCpf.equals(DocumentUtilsBridge.digits(order.getPixKey()));
     }
 
     private BankingTransferProvider.ProviderTransferResult pendingProviderResult() {

@@ -70,6 +70,7 @@ public class UserExternalTransferController {
     }
 
     private ExternalTransferReceiptResponse toReceipt(ExternalTransferEntity order, UserEntity user) {
+        UserEntity payer = order.getUser() != null ? order.getUser() : user;
         return new ExternalTransferReceiptResponse(
                 "BRAVUS-" + order.getIdempotencyKey(),
                 order.getId(),
@@ -91,17 +92,17 @@ public class UserExternalTransferController {
                 order.getChannel(),
                 order.getDescription(),
                 new ReceiptParty(
-                        user.getFullName(),
-                        user.getCpf(),
-                        user.getNomeBanco(),
-                        user.getCodigoBanco(),
-                        user.getIspb(),
-                        user.getAgencia(),
-                        user.getAccountNumber(),
+                        payer.getFullName(),
+                        payer.getCpf(),
+                        payer.getNomeBanco(),
+                        payer.getCodigoBanco(),
+                        payer.getIspb(),
+                        payer.getAgencia(),
+                        payer.getAccountNumber(),
                         null,
-                        user.getAccountType(),
-                        user.getChavePix(),
-                        user.getTipoChavePix()
+                        payer.getAccountType(),
+                        payer.getChavePix(),
+                        payer.getTipoChavePix()
                 ),
                 new ReceiptParty(
                         order.getBeneficiaryName(),

@@ -4,6 +4,8 @@ import com.bravus.bank.db.entity.TransactionEntity;
 import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.TransactionRepository;
 import com.bravus.bank.db.repo.UserRepository;
+import com.bravus.bank.external.ExternalTransferEntity;
+import com.bravus.bank.external.ExternalTransferRepository;
 import com.bravus.bank.ledger.repo.CreditGrantRepository;
 import com.bravus.bank.ledger.service.CreditService;
 import jakarta.transaction.Transactional;
@@ -15,9 +17,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @RestController
@@ -26,15 +30,18 @@ public class UserController {
     
     private final UserRepository userRepository;
     private final TransactionRepository transactionRepository;
+    private final ExternalTransferRepository externalTransferRepository;
     private final CreditGrantRepository creditGrantRepository;
     private final CreditService creditService;
     
     public UserController(UserRepository userRepository,
                           TransactionRepository transactionRepository,
+                          ExternalTransferRepository externalTransferRepository,
                           CreditGrantRepository creditGrantRepository,
                           CreditService creditService) {
         this.userRepository = userRepository;
         this.transactionRepository = transactionRepository;
+        this.externalTransferRepository = externalTransferRepository;
         this.creditGrantRepository = creditGrantRepository;
         this.creditService = creditService;
     }
@@ -65,7 +72,50 @@ public class UserController {
             String description,
             String destinationAccount,
             String status,
-            String createdAt
+            String createdAt,
+            String senderName,
+            String senderDocument,
+            String senderBankName,
+            String senderBankCode,
+            String senderIspb,
+            String senderAgency,
+            String senderAccountNumber,
+            String senderAccountDigit,
+            String senderAccountType,
+            String receiverName,
+            String receiverDocument,
+            String receiverBankName,
+            String receiverBankCode,
+            String receiverIspb,
+            String receiverAgency,
+            String receiverAccountNumber,
+            String receiverAccountDigit,
+            String receiverAccountType,
+            String counterpartyName,
+            String counterpartyDocument,
+            String counterpartyBankName,
+            String counterpartyAccount,
+            String counterpartyRole,
+            Long receiptOrderId,
+            Long externalOrderId,
+            Boolean receiptAvailable
+    ) {}
+
+    public record TransferDestinationResponse(
+            boolean found,
+            String username,
+            String name,
+            String document,
+            String bankName,
+            String bankCode,
+            String ispb,
+            String agency,
+            String accountNumber,
+            String accountDigit,
+            String accountType,
+            String pixKey,
+            String pixKeyType,
+            String statusKyc
     ) {}
     
     @GetMapping("/profile")
@@ -105,18 +155,32 @@ public class UserController {
         List<TransactionResponse> transactions = transactionRepository
                 .findByUserOrderByCreatedAtDesc(user)
                 .stream()
-                .map(t -> new TransactionResponse(
-                        t.getId(),
-                        t.getType(),
-                        t.getAmount(),
-                        t.getDescription(),
-                        t.getDestinationAccount(),
-                        t.getStatus(),
-                        t.getCreatedAt().toString()
-                ))
+                .map(t -> toTransactionResponse(t, user))
                 .collect(Collectors.toList());
         
         return ResponseEntity.ok(transactions);
+    }
+
+    @GetMapping("/transfer/resolve")
+    public ResponseEntity<?> resolveTransferDestination(@RequestParam String destination) {
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        UserEntity currentUser = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        Optional<UserEntity> found = findTransferDestination(destination);
+        if (found.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of(
+                    "found", false,
+                    "message", "Destinatario Bravus nao localizado."
+            ));
+        }
+        UserEntity destinationUser = found.get();
+        if (destinationUser.getId().equals(currentUser.getId())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "found", false,
+                    "message", "Nao e permitido transferir para a propria conta."
+            ));
+        }
+        return ResponseEntity.ok(toDestinationResponse(destinationUser));
     }
     
     @PostMapping("/deposit")
@@ -235,6 +299,14 @@ public class UserController {
         inTransaction.setDestinationAccount(fromUser.getAccountNumber());
         inTransaction.setStatus("COMPLETED");
         transactionRepository.save(inTransaction);
+
+        ExternalTransferEntity order = createInternalReceiptOrder(
+                fromUser,
+                toUser,
+                outTransaction,
+                request.amount(),
+                request.description(),
+                username);
         
         return ResponseEntity.ok(Map.of(
                 "message", "Transferencia interna Bravus liquidada.",
@@ -243,9 +315,223 @@ public class UserController {
                 "settlementStatus", "LIQUIDADA_CONFIRMADA",
                 "balanceCentavos", fromUser.getBalance(),
                 "transactionId", outTransaction.getId(),
-                "destinationAccount", toUser.getAccountNumber()
+                "destinationAccount", toUser.getAccountNumber(),
+                "receiptOrderId", order.getId(),
+                "externalOrderId", order.getId()
         ));
     }
+
+    private TransactionResponse toTransactionResponse(TransactionEntity tx, UserEntity viewer) {
+        Optional<ExternalTransferEntity> order = receiptOrderFor(tx, viewer);
+        Party sender = null;
+        Party receiver = null;
+
+        if ("TRANSFER_IN".equals(tx.getType())) {
+            sender = findTransferDestination(tx.getDestinationAccount()).map(this::partyForUser).orElse(null);
+            receiver = partyForUser(viewer);
+        } else if ("TRANSFER_OUT".equals(tx.getType())) {
+            sender = partyForUser(viewer);
+            receiver = order.map(this::partyForOrderBeneficiary)
+                    .or(() -> findTransferDestination(tx.getDestinationAccount()).map(this::partyForUser))
+                    .orElse(null);
+        } else if ("TRANSFER_EXTERNAL".equals(tx.getType())) {
+            sender = partyForUser(viewer);
+            receiver = order.map(this::partyForOrderBeneficiary).orElse(null);
+        } else if ("DEPOSIT".equals(tx.getType())) {
+            sender = bankParty();
+            receiver = partyForUser(viewer);
+        } else if ("WITHDRAWAL".equals(tx.getType())) {
+            sender = partyForUser(viewer);
+            receiver = bankParty();
+        }
+
+        boolean incoming = "DEPOSIT".equals(tx.getType()) || "TRANSFER_IN".equals(tx.getType());
+        Party counterparty = incoming ? sender : receiver;
+        Long orderId = order.map(ExternalTransferEntity::getId).orElse(null);
+
+        return new TransactionResponse(
+                tx.getId(),
+                tx.getType(),
+                tx.getAmount(),
+                tx.getDescription(),
+                tx.getDestinationAccount(),
+                tx.getStatus(),
+                tx.getCreatedAt() == null ? null : tx.getCreatedAt().toString(),
+                value(sender, "name"),
+                value(sender, "document"),
+                value(sender, "bankName"),
+                value(sender, "bankCode"),
+                value(sender, "ispb"),
+                value(sender, "agency"),
+                value(sender, "accountNumber"),
+                value(sender, "accountDigit"),
+                value(sender, "accountType"),
+                value(receiver, "name"),
+                value(receiver, "document"),
+                value(receiver, "bankName"),
+                value(receiver, "bankCode"),
+                value(receiver, "ispb"),
+                value(receiver, "agency"),
+                value(receiver, "accountNumber"),
+                value(receiver, "accountDigit"),
+                value(receiver, "accountType"),
+                value(counterparty, "name"),
+                value(counterparty, "document"),
+                value(counterparty, "bankName"),
+                value(counterparty, "accountNumber"),
+                incoming ? "PAGADOR" : "RECEBEDOR",
+                orderId,
+                orderId,
+                orderId != null
+        );
+    }
+
+    private Optional<ExternalTransferEntity> receiptOrderFor(TransactionEntity tx, UserEntity viewer) {
+        Optional<ExternalTransferEntity> byTransaction = externalTransferRepository.findByTransactionId(tx.getId());
+        if (byTransaction.isPresent()) return byTransaction;
+        if ("TRANSFER_IN".equals(tx.getType())) {
+            return externalTransferRepository.findTopByBeneficiaryDocumentAndAccountNumberAndAmountCentavosOrderByCreatedAtDesc(
+                    digits(viewer.getCpf()),
+                    viewer.getAccountNumber(),
+                    tx.getAmount());
+        }
+        return Optional.empty();
+    }
+
+    private ExternalTransferEntity createInternalReceiptOrder(UserEntity fromUser,
+                                                             UserEntity toUser,
+                                                             TransactionEntity transaction,
+                                                             Long amount,
+                                                             String description,
+                                                             String requestedByUsername) {
+        UserEntity requestedBy = userRepository.findByUsername(requestedByUsername).orElse(fromUser);
+        String idempotencyKey = "bravus-internal-" + UUID.randomUUID();
+        ExternalTransferEntity order = new ExternalTransferEntity();
+        order.setUser(fromUser);
+        order.setRequestedBy(requestedBy);
+        order.setTransactionId(transaction.getId());
+        order.setAmountCentavos(amount);
+        order.setChannel("PIX");
+        order.setCurrency("BRL");
+        order.setBeneficiaryName(toUser.getFullName() != null ? toUser.getFullName() : toUser.getUsername());
+        order.setBeneficiaryDocument(digits(toUser.getCpf()));
+        order.setBankCode("999");
+        order.setIspb("99999999");
+        order.setAgency(toUser.getAgencia() != null ? toUser.getAgencia() : "0001");
+        order.setAccountNumber(toUser.getAccountNumber());
+        order.setAccountDigit(null);
+        order.setAccountType(toUser.getAccountType() != null ? toUser.getAccountType() : "CORRENTE");
+        order.setPixKey(toUser.getChavePix() != null ? toUser.getChavePix() : toUser.getCpf());
+        order.setPixKeyType(toUser.getTipoChavePix() != null ? toUser.getTipoChavePix() : "CPF");
+        order.setDescription(description);
+        order.setProvider("BRAVUS_INTERNAL_LEDGER");
+        order.setProviderTransferId(idempotencyKey);
+        order.setIdempotencyKey(idempotencyKey);
+        order.setStatus("COMPLETED");
+        order.setSettlementStatus("LIQUIDADA_CONFIRMADA");
+        order.setReceiptKind("COMPROVANTE_LIQUIDACAO_CONFIRMADA");
+        order.setDestinationNetwork("INTERNAL_BRAVUS");
+        order.setDestinationParticipantCode("BRAVUS-INTERNAL");
+        order.setDestinationConfirmationId(idempotencyKey);
+        order.setDestinationConfirmedAt(OffsetDateTime.now());
+        order.setSettlementMessage("Liquidacao interna confirmada no ledger Bravus.");
+        order.setErrorMessage(null);
+        order.setRawResponse("{\"provider\":\"BRAVUS_INTERNAL_LEDGER\",\"status\":\"COMPLETED\",\"settlement\":\"INTERNAL_LEDGER\"}");
+        return externalTransferRepository.save(order);
+    }
+
+    private TransferDestinationResponse toDestinationResponse(UserEntity user) {
+        return new TransferDestinationResponse(
+                true,
+                user.getUsername(),
+                user.getFullName(),
+                user.getCpf(),
+                user.getNomeBanco(),
+                user.getCodigoBanco(),
+                user.getIspb(),
+                user.getAgencia(),
+                user.getAccountNumber(),
+                null,
+                user.getAccountType(),
+                user.getChavePix() != null ? user.getChavePix() : user.getCpf(),
+                user.getTipoChavePix() != null ? user.getTipoChavePix() : "CPF",
+                user.getStatusKyc()
+        );
+    }
+
+    private Party partyForUser(UserEntity user) {
+        return new Party(
+                user.getFullName(),
+                user.getCpf(),
+                user.getNomeBanco(),
+                user.getCodigoBanco(),
+                user.getIspb(),
+                user.getAgencia(),
+                user.getAccountNumber(),
+                null,
+                user.getAccountType()
+        );
+    }
+
+    private Party partyForOrderBeneficiary(ExternalTransferEntity order) {
+        return new Party(
+                order.getBeneficiaryName(),
+                order.getBeneficiaryDocument(),
+                null,
+                order.getBankCode(),
+                order.getIspb(),
+                order.getAgency(),
+                order.getAccountNumber(),
+                order.getAccountDigit(),
+                order.getAccountType()
+        );
+    }
+
+    private Party bankParty() {
+        return new Party(
+                "Bravus Premium Bank",
+                "BRAVUS-LEDGER",
+                "Bravus Premium Bank",
+                "999",
+                "99999999",
+                "0001",
+                "BRAVUS-LEDGER",
+                null,
+                "RAIL"
+        );
+    }
+
+    private String value(Party party, String field) {
+        if (party == null) return null;
+        return switch (field) {
+            case "name" -> party.name();
+            case "document" -> party.document();
+            case "bankName" -> party.bankName();
+            case "bankCode" -> party.bankCode();
+            case "ispb" -> party.ispb();
+            case "agency" -> party.agency();
+            case "accountNumber" -> party.accountNumber();
+            case "accountDigit" -> party.accountDigit();
+            case "accountType" -> party.accountType();
+            default -> null;
+        };
+    }
+
+    private String digits(String value) {
+        return value == null ? "" : value.replaceAll("\\D", "");
+    }
+
+    private record Party(
+            String name,
+            String document,
+            String bankName,
+            String bankCode,
+            String ispb,
+            String agency,
+            String accountNumber,
+            String accountDigit,
+            String accountType
+    ) {}
 
     private ResponseEntity<Map<String, String>> transactionError(String message, String code) {
         return ResponseEntity.badRequest().body(Map.of(
