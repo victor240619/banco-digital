@@ -54,9 +54,63 @@ public class UserExternalTransferController {
         return ResponseEntity.ok(transferService.recentForUser(user.getId(), limit));
     }
 
+    @GetMapping("/{orderId}/receipt")
+    public ResponseEntity<ExternalTransferReceiptResponse> receipt(@PathVariable Long orderId,
+                                                                   Authentication auth) {
+        UserEntity user = authenticatedUser(auth);
+        ExternalTransferEntity order = transferService.findForUser(orderId, user.getId());
+        return ResponseEntity.ok(toReceipt(order, user));
+    }
+
     private UserEntity authenticatedUser(Authentication auth) {
         return userRepository.findByUsername(auth.getName())
                 .orElseThrow(() -> new IllegalStateException("Usuario autenticado nao encontrado."));
+    }
+
+    private ExternalTransferReceiptResponse toReceipt(ExternalTransferEntity order, UserEntity user) {
+        return new ExternalTransferReceiptResponse(
+                "BRAVUS-" + order.getIdempotencyKey(),
+                order.getId(),
+                order.getTransactionId(),
+                order.getProvider(),
+                order.getProviderTransferId(),
+                order.getIdempotencyKey(),
+                order.getStatus(),
+                "COMPLETED".equals(order.getStatus())
+                        ? "CONCLUIDA_NO_LEDGER_BRAVUS"
+                        : "EM_PROCESSAMENTO_NO_LEDGER_BRAVUS",
+                order.getCreatedAt() == null ? null : order.getCreatedAt().toString(),
+                order.getAmountCentavos(),
+                order.getCurrency(),
+                order.getChannel(),
+                order.getDescription(),
+                new ReceiptParty(
+                        user.getFullName(),
+                        user.getCpf(),
+                        user.getNomeBanco(),
+                        user.getCodigoBanco(),
+                        user.getIspb(),
+                        user.getAgencia(),
+                        user.getAccountNumber(),
+                        null,
+                        user.getAccountType(),
+                        user.getChavePix(),
+                        user.getTipoChavePix()
+                ),
+                new ReceiptParty(
+                        order.getBeneficiaryName(),
+                        order.getBeneficiaryDocument(),
+                        null,
+                        order.getBankCode(),
+                        order.getIspb(),
+                        order.getAgency(),
+                        order.getAccountNumber(),
+                        order.getAccountDigit(),
+                        order.getAccountType(),
+                        order.getPixKey(),
+                        order.getPixKeyType()
+                )
+        );
     }
 
     public record UserExternalTransferRequest(
@@ -73,5 +127,37 @@ public class UserExternalTransferController {
             String pixKey,
             String pixKeyType,
             String description
+    ) {}
+
+    public record ReceiptParty(
+            String name,
+            String document,
+            String bankName,
+            String bankCode,
+            String ispb,
+            String agency,
+            String accountNumber,
+            String accountDigit,
+            String accountType,
+            String pixKey,
+            String pixKeyType
+    ) {}
+
+    public record ExternalTransferReceiptResponse(
+            String receiptId,
+            Long orderId,
+            Long transactionId,
+            String provider,
+            String providerTransferId,
+            String idempotencyKey,
+            String status,
+            String settlementStatus,
+            String createdAt,
+            Long amountCentavos,
+            String currency,
+            String channel,
+            String description,
+            ReceiptParty payer,
+            ReceiptParty beneficiary
     ) {}
 }

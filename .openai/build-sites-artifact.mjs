@@ -53,7 +53,7 @@ for (const file of await walk(distDir)) {
 }
 files["/"] = files["/index.html"];
 
-const entrypoint = `const buildTarget = "bravus-sites-api-v5";
+const entrypoint = `const buildTarget = "bravus-sites-api-v6";
 const files = ${JSON.stringify(files)};
 const now = () => new Date().toISOString();
 const joaoCreditGrant = {
@@ -251,6 +251,50 @@ function bankMe(user) {
   };
 }
 
+function receiptForOrder(order, user) {
+  return {
+    receiptId: "BRAVUS-" + order.idempotencyKey,
+    orderId: order.id,
+    transactionId: order.transactionId,
+    provider: order.provider,
+    providerTransferId: order.providerTransferId,
+    idempotencyKey: order.idempotencyKey,
+    status: order.status,
+    settlementStatus: order.status === "COMPLETED" ? "CONCLUIDA_NO_LEDGER_BRAVUS" : "EM_PROCESSAMENTO_NO_LEDGER_BRAVUS",
+    createdAt: order.createdAt,
+    amountCentavos: order.amountCentavos,
+    currency: order.currency,
+    channel: order.channel,
+    description: order.description,
+    payer: {
+      name: user.fullName,
+      document: user.cpf,
+      bankName: "Bravus Premium Bank",
+      bankCode: "999",
+      ispb: "99999999",
+      agency: "0001",
+      accountNumber: user.accountNumber,
+      accountDigit: null,
+      accountType: user.accountType,
+      pixKey: user.cpf || user.email,
+      pixKeyType: user.cpf ? "CPF" : "EMAIL",
+    },
+    beneficiary: {
+      name: order.beneficiaryName,
+      document: order.beneficiaryDocument,
+      bankName: null,
+      bankCode: order.bankCode,
+      ispb: order.ispb,
+      agency: order.agency,
+      accountNumber: order.accountNumber,
+      accountDigit: order.accountDigit,
+      accountType: order.accountType,
+      pixKey: order.pixKey,
+      pixKeyType: order.pixKeyType,
+    },
+  };
+}
+
 function userFromToken(request) {
   const auth = request.headers.get("authorization") || "";
   if (auth.includes("sites-admin-token")) return state.users.admin;
@@ -264,6 +308,10 @@ function publicLoginMatches(user, username) {
   return raw === user.username.toLowerCase()
     || raw === user.email.toLowerCase()
     || (user.cpf && normalized === user.cpf);
+}
+
+function hasKycEvidence(body) {
+  return Boolean(body.documentFrontImage && body.documentBackImage && body.faceImage);
 }
 
 async function handleApi(request) {
@@ -283,6 +331,12 @@ async function handleApi(request) {
 
   if (request.method === "POST" && path === "/auth/register") {
     const body = await request.json().catch(() => ({}));
+    if (String(body.cpf || "").replace(/\\D/g, "").length !== 11) {
+      return json("Informe CPF com 11 digitos para abertura de conta.", { status: 400 });
+    }
+    if (!hasKycEvidence(body)) {
+      return json("Envie frente, verso do documento e capture a biometria facial.", { status: 400 });
+    }
     const user = {
       ...joao,
       id: 3,
@@ -293,6 +347,7 @@ async function handleApi(request) {
       accountNumber: "1000000001",
       balance: 0,
       roles: ["ROLE_USER"],
+      statusKyc: "VERIFICADO",
     };
     return json(authResponse(user));
   }
@@ -306,6 +361,12 @@ async function handleApi(request) {
   if (request.method === "GET" && path === "/user/transactions") return json(state.transactions.filter((tx) => tx.username === user.username));
   if (request.method === "GET" && path === "/credit/summary") return json(creditSummary(user));
   if (request.method === "GET" && path.startsWith("/user/external-transfers")) {
+    const receiptMatch = path.match(/^\\/user\\/external-transfers\\/(\\d+)\\/receipt$/);
+    if (receiptMatch) {
+      const order = state.externalTransfers.find((tx) => tx.id === Number(receiptMatch[1]) && tx.username === user.username);
+      if (!order) return json("Transferencia nao encontrada para este usuario.", { status: 404 });
+      return json(receiptForOrder(order, user));
+    }
     return json(state.externalTransfers.filter((tx) => tx.username === user.username));
   }
   if (request.method === "POST" && path === "/user/external-transfers") {
@@ -323,7 +384,7 @@ async function handleApi(request) {
       amount,
       description: body.description || "Transferencia via provedor Bravus",
       destinationAccount: body.pixKey || [body.bankCode, body.agency, body.accountNumber].filter(Boolean).join(" "),
-      status: "PENDING",
+      status: "COMPLETED",
       createdAt: now(),
     };
     state.transactions.unshift(tx);
@@ -348,9 +409,9 @@ async function handleApi(request) {
       provider: "BRAVUS_SELF_PROVIDER",
       providerTransferId: "bravus-self-sites-" + Date.now(),
       idempotencyKey: "sites-" + Date.now(),
-      status: "PROCESSING",
+      status: "COMPLETED",
       errorMessage: null,
-      rawResponse: "{\\"provider\\":\\"BRAVUS_SELF_PROVIDER\\",\\"status\\":\\"PROCESSING\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
+      rawResponse: "{\\"provider\\":\\"BRAVUS_SELF_PROVIDER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
       createdAt: now(),
     };
     state.externalTransfers.unshift(order);

@@ -112,6 +112,7 @@ export const userService = {
   getTransactions: () => api.get('/user/transactions'),
   getCreditSummary: () => api.get('/credit/summary'),
   getExternalTransfers: (limit = 20) => api.get(`/user/external-transfers?limit=${limit}`),
+  getExternalTransferReceipt: (orderId) => api.get(`/user/external-transfers/${orderId}/receipt`),
   deposit: (amount, description) =>
     api.post('/user/deposit', { type: 'DEPOSIT', amount, description }),
   withdraw: (amount, description) =>

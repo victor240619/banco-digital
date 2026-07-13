@@ -154,6 +154,16 @@ public class ExternalTransferService {
                 PageRequest.of(0, Math.max(1, Math.min(limit, 50))));
     }
 
+    @Transactional(readOnly = true)
+    public ExternalTransferEntity findForUser(Long orderId, Long userId) {
+        ExternalTransferEntity order = transferRepo.findById(orderId)
+                .orElseThrow(() -> new IllegalArgumentException("Transferencia nao encontrada."));
+        if (order.getUser() == null || !order.getUser().getId().equals(userId)) {
+            throw new IllegalArgumentException("Transferencia nao encontrada para este usuario.");
+        }
+        return order;
+    }
+
     private BankingTransferProvider.ProviderTransferResult pendingProviderResult() {
         BankingTransferProvider.ProviderTransferResult result = new BankingTransferProvider.ProviderTransferResult();
         result.status = "PENDING_PROVIDER";

@@ -62,6 +62,8 @@ export default function UserDashboard() {
   const [transactions, setTransactions] = useState([]);
   const [creditSummary, setCreditSummary] = useState(null);
   const [externalOrders, setExternalOrders] = useState([]);
+  const [selectedReceipt, setSelectedReceipt] = useState(null);
+  const [receiptLoading, setReceiptLoading] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -152,6 +154,10 @@ export default function UserDashboard() {
         message = data?.status === 'PENDING_PROVIDER'
           ? 'Ordem registrada. Aguardando configuração do provedor Bravus.'
           : 'Transferência aceita pelo provedor Bravus e valor debitado.';
+        if (data?.id) {
+          const receiptRes = await userService.getExternalTransferReceipt(data.id).catch(() => ({ data: null }));
+          if (receiptRes?.data) setSelectedReceipt(receiptRes.data);
+        }
       }
 
       setSuccess(message);
@@ -163,6 +169,20 @@ export default function UserDashboard() {
       setError(typeof msg === 'string' ? msg : 'Falha na operação.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const openReceipt = async (orderId) => {
+    setReceiptLoading(orderId);
+    setError('');
+    try {
+      const { data } = await userService.getExternalTransferReceipt(orderId);
+      setSelectedReceipt(data);
+    } catch (err) {
+      const msg = err?.response?.data?.message || err?.response?.data || 'Falha ao carregar comprovante.';
+      setError(typeof msg === 'string' ? msg : 'Falha ao carregar comprovante.');
+    } finally {
+      setReceiptLoading(null);
     }
   };
 
@@ -662,9 +682,16 @@ export default function UserDashboard() {
                         <span className="min-w-0 truncate text-ink-200">
                           {order.channel} · {order.beneficiaryName}
                         </span>
-                        <span className="shrink-0 text-ink-300">
-                          {formatCurrency(order.amountCentavos)} · {order.status}
-                        </span>
+                        <span className="shrink-0 text-ink-300">{formatCurrency(order.amountCentavos)} · {order.status}</span>
+                        <button
+                          type="button"
+                          className="btn-secondary !py-1.5 !px-2.5"
+                          disabled={receiptLoading === order.id}
+                          onClick={() => openReceipt(order.id)}
+                        >
+                          <Receipt className="h-4 w-4" />
+                          Comprovante
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -674,6 +701,82 @@ export default function UserDashboard() {
           </div>
         )}
       </div>
+
+      <AnimatePresence>
+        {selectedReceipt && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="w-full max-w-2xl rounded-2xl border border-white/15 bg-ink-950 p-6 shadow-2xl"
+              initial={{ scale: 0.96, y: 12 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.96, y: 12 }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="pill-gold mb-2">
+                    <Receipt className="h-3.5 w-3.5" />
+                    Comprovante Bravus
+                  </div>
+                  <h3 className="title-md">{formatCurrency(selectedReceipt.amountCentavos)}</h3>
+                  <p className="mt-1 text-sm text-ink-300">
+                    {selectedReceipt.channel} · {selectedReceipt.status} · {selectedReceipt.settlementStatus}
+                  </p>
+                </div>
+                <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => setSelectedReceipt(null)}>
+                  Fechar
+                </button>
+              </div>
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <ReceiptBlock title="Pagador" party={selectedReceipt.payer} />
+                <ReceiptBlock title="Recebedor" party={selectedReceipt.beneficiary} />
+              </div>
+
+              <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
+                <ReceiptLine label="Comprovante" value={selectedReceipt.receiptId} />
+                <ReceiptLine label="Transação" value={selectedReceipt.transactionId} />
+                <ReceiptLine label="Provedor" value={selectedReceipt.provider} />
+                <ReceiptLine label="ID provedor" value={selectedReceipt.providerTransferId} />
+                <ReceiptLine label="Idempotência" value={selectedReceipt.idempotencyKey} />
+                <ReceiptLine label="Data" value={formatDate(selectedReceipt.createdAt)} />
+                <ReceiptLine label="Descrição" value={selectedReceipt.description || 'Transferência Bravus'} />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </main>
+  );
+}
+
+function ReceiptBlock({ title, party }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
+      <div className="mb-3 font-semibold text-white">{title}</div>
+      <ReceiptLine label="Nome" value={party?.name} />
+      <ReceiptLine label="Documento" value={party?.document} />
+      <ReceiptLine label="Banco" value={party?.bankName || party?.bankCode} />
+      <ReceiptLine label="Código" value={party?.bankCode} />
+      <ReceiptLine label="ISPB" value={party?.ispb} />
+      <ReceiptLine label="Agência" value={party?.agency} />
+      <ReceiptLine label="Conta" value={[party?.accountNumber, party?.accountDigit].filter(Boolean).join('-')} />
+      <ReceiptLine label="Tipo" value={party?.accountType} />
+      <ReceiptLine label="Chave Pix" value={party?.pixKey} />
+      <ReceiptLine label="Tipo chave" value={party?.pixKeyType} />
+    </div>
+  );
+}
+
+function ReceiptLine({ label, value }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-white/5 py-1.5 last:border-0">
+      <span className="text-ink-400">{label}</span>
+      <span className="max-w-[65%] break-words text-right font-mono text-ink-100">{value || '-'}</span>
+    </div>
   );
 }

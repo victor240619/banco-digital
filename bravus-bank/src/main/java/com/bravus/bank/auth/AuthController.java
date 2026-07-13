@@ -1,5 +1,6 @@
 package com.bravus.bank.auth;
 
+import com.bravus.bank.compliance.AccountOpeningKycService;
 import com.bravus.bank.compliance.DocumentAnalysisEntity;
 import com.bravus.bank.compliance.DocumentAnalysisService;
 import com.bravus.bank.db.entity.RoleEntity;
@@ -36,6 +37,7 @@ public class AuthController {
     private final AuthenticationManager authenticationManager;
     private final UserDetailsService userDetailsService;
     private final DocumentAnalysisService documentAnalysisService;
+    private final AccountOpeningKycService accountOpeningKycService;
     private final SecureRandom secureRandom = new SecureRandom();
     
     public AuthController(
@@ -45,7 +47,8 @@ public class AuthController {
             JwtService jwtService,
             AuthenticationManager authenticationManager,
             UserDetailsService userDetailsService,
-            DocumentAnalysisService documentAnalysisService) {
+            DocumentAnalysisService documentAnalysisService,
+            AccountOpeningKycService accountOpeningKycService) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
@@ -53,6 +56,7 @@ public class AuthController {
         this.authenticationManager = authenticationManager;
         this.userDetailsService = userDetailsService;
         this.documentAnalysisService = documentAnalysisService;
+        this.accountOpeningKycService = accountOpeningKycService;
     }
     
     public record LoginRequest(
@@ -66,7 +70,11 @@ public class AuthController {
             @NotBlank @Size(min = 8) String password,
             @NotBlank String fullName,
             String cpf,
-            String phone
+            String phone,
+            String documentFrontImage,
+            String documentBackImage,
+            String faceImage,
+            String biometricChallenge
     ) {}
     
     public record AuthResponse(
@@ -118,6 +126,21 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody @Valid RegisterRequest request) {
         String normalizedCpf = normalizeDocument(request.cpf());
+        if (normalizedCpf == null || normalizedCpf.length() != 11) {
+            return ResponseEntity.badRequest().body("Informe CPF com 11 digitos para abertura de conta.");
+        }
+        AccountOpeningKycService.KycPayload kycPayload = new AccountOpeningKycService.KycPayload(
+                request.documentFrontImage(),
+                request.documentBackImage(),
+                request.faceImage(),
+                request.biometricChallenge()
+        );
+
+        try {
+            accountOpeningKycService.validatePayload(kycPayload);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
 
         // Validate password strength
         if (!PasswordValidator.isValid(request.password())) {
@@ -161,7 +184,8 @@ public class AuthController {
         user = userRepository.save(user);
 
         DocumentAnalysisEntity analysis = documentAnalysisService.analyzeForUser(user);
-        user.setStatusKyc(documentAnalysisService.kycStatusFor(analysis));
+        accountOpeningKycService.storeForUser(user, kycPayload, "CPF", normalizedCpf);
+        user.setStatusKyc(statusForAccountOpening(analysis));
         user = userRepository.save(user);
         
         // Generate token
@@ -197,5 +221,12 @@ public class AuthController {
         if (value == null || value.isBlank()) return null;
         String digits = value.replaceAll("\\D", "");
         return digits.isBlank() ? null : digits;
+    }
+
+    private String statusForAccountOpening(DocumentAnalysisEntity analysis) {
+        if (analysis == null) return "EM_ANALISE_BIOMETRIA";
+        if ("BAIXO".equals(analysis.getRiskLevel())) return "VERIFICADO";
+        if ("MEDIO".equals(analysis.getRiskLevel())) return "EM_ANALISE_BIOMETRIA";
+        return "BLOQUEADO_ANALISE";
     }
 }

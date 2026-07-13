@@ -92,8 +92,8 @@ public class ConfiguredHttpBankingTransferProvider implements BankingTransferPro
     private ProviderTransferResult acceptOnBravusRail(ProviderTransferCommand command) {
         ProviderTransferResult result = new ProviderTransferResult();
         result.providerTransferId = "bravus-self-" + command.idempotencyKey;
-        result.status = "PROCESSING";
-        result.rawResponse = "{\"provider\":\"BRAVUS_SELF_PROVIDER\",\"status\":\"PROCESSING\",\"settlement\":\"INTERNAL_LEDGER\"}";
+        result.status = "COMPLETED";
+        result.rawResponse = "{\"provider\":\"BRAVUS_SELF_PROVIDER\",\"status\":\"COMPLETED\",\"settlement\":\"INTERNAL_LEDGER\"}";
         return result;
     }
 
