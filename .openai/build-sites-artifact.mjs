@@ -113,6 +113,18 @@ const joao = {
   balance: 89000000,
   roles: ["ROLE_USER"],
 };
+const francisca = {
+  id: 3,
+  username: "francisca.reis",
+  email: "melynievict@gmail.com",
+  fullName: "Francisca de Assis dos Reis",
+  cpf: "00829040145",
+  phone: "",
+  accountNumber: "0082904014",
+  accountType: "CORRENTE",
+  balance: 0,
+  roles: ["ROLE_USER"],
+};
 const admin = {
   id: 1,
   username: "admin@bravusbank.com",
@@ -126,7 +138,7 @@ const admin = {
   roles: ["ROLE_ADMIN"],
 };
 const state = globalThis.__bravusState || (globalThis.__bravusState = {
-  users: { joao, admin },
+  users: { joao, francisca, admin },
   transactions: [],
   externalTransfers: [],
   globalRailParticipants: [{
@@ -149,6 +161,7 @@ const state = globalThis.__bravusState || (globalThis.__bravusState = {
     updatedAt: now(),
   }],
 });
+state.users.francisca = { ...francisca, ...(state.users.francisca || {}) };
 
 function bytesFromBase64(value) {
   const binary = atob(value);
@@ -195,7 +208,7 @@ function userSummary(user) {
 
 function authResponse(user) {
   return {
-    token: user.roles.includes("ROLE_ADMIN") ? "sites-admin-token" : "sites-joao-token",
+    token: tokenForUser(user),
     username: user.username,
     email: user.email,
     fullName: user.fullName,
@@ -203,6 +216,12 @@ function authResponse(user) {
     balance: user.balance,
     roles: user.roles,
   };
+}
+
+function tokenForUser(user) {
+  if (user.roles.includes("ROLE_ADMIN")) return "sites-admin-token";
+  if (user.username === joao.username) return "sites-joao-token";
+  return "sites-user-" + user.id + "-token";
 }
 
 function creditSummary(user) {
@@ -432,9 +451,8 @@ function receiptForOrder(order, user) {
 
 function userFromToken(request) {
   const auth = request.headers.get("authorization") || "";
-  if (auth.includes("sites-admin-token")) return state.users.admin;
-  if (auth.includes("sites-joao-token")) return state.users.joao;
-  return null;
+  const token = auth.replace(/^Bearer\\s+/i, "").trim();
+  return Object.values(state.users).find((item) => token === tokenForUser(item)) || null;
 }
 
 function publicLoginMatches(user, username) {
@@ -457,7 +475,7 @@ async function handleApi(request) {
 
   if (request.method === "POST" && path === "/auth/login") {
     const body = await request.json().catch(() => ({}));
-    const user = [state.users.joao, state.users.admin].find((item) => publicLoginMatches(item, body.username));
+    const user = Object.values(state.users).find((item) => publicLoginMatches(item, body.username));
     if (!user || body.password !== "6run0955") {
       return json("Invalid username or password", { status: 400 });
     }
@@ -482,7 +500,7 @@ async function handleApi(request) {
     }
     const user = {
       ...joao,
-      id: 3,
+      id: Math.max(...Object.values(state.users).map((item) => item.id)) + 1,
       username: body.username || "novo.cliente",
       email: body.email || "cliente@bravusbank.com",
       fullName: body.fullName || "Novo Cliente",
@@ -492,6 +510,7 @@ async function handleApi(request) {
       roles: ["ROLE_USER"],
       statusKyc: "VERIFICADO",
     };
+    state.users[user.username] = user;
     return json(authResponse(user));
   }
 
@@ -964,14 +983,22 @@ async function handleApi(request) {
   if (request.method === "POST" && path === "/admin/search/unified") {
     const body = await request.json().catch(() => ({}));
     const query = String(body.query || "");
+    const queryLower = query.toLowerCase();
+    const queryDigits = query.replace(/\\D/g, "");
+    const matchingUsers = Object.values(state.users).filter((item) =>
+      (queryDigits && (item.cpf === queryDigits || item.accountNumber === queryDigits))
+      || item.username.toLowerCase().includes(queryLower)
+      || item.email.toLowerCase().includes(queryLower)
+      || item.fullName.toLowerCase().includes(queryLower)
+    );
     return json({
       query,
-      queryType: query.replace(/\\D/g, "").length === 11 ? "CPF" : "GERAL",
-      normalizedQuery: query.replace(/\\D/g, "") || query,
-      resultCount: query.includes("055") || query.toLowerCase().includes("joao") ? 1 : 0,
-      summary: { users: 1, transactions: 0, other: 0 },
+      queryType: queryDigits.length === 11 ? "CPF" : "GERAL",
+      normalizedQuery: queryDigits || query,
+      resultCount: matchingUsers.length,
+      summary: { users: matchingUsers.length, transactions: 0, other: 0 },
       warnings: ["Consulta demonstrativa do ChatGPT Sites; backend Spring continua sendo a fonte local completa."],
-      results: query.includes("055") || query.toLowerCase().includes("joao") ? [{ source: "USERS", kind: "CLIENTE", title: joao.fullName, status: "ATIVO", fields: userSummary(joao) }] : [],
+      results: matchingUsers.map((item) => ({ source: "USERS", kind: "CLIENTE", title: item.fullName, status: "ATIVO", fields: userSummary(item) })),
     });
   }
 
