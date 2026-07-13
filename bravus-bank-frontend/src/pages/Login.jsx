@@ -3,9 +3,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
 import { authService } from '../services/api';
 import Logo from '../components/Logo';
+import { isMobileApp } from '../lib/appChannel';
 
 export default function Login() {
   const navigate = useNavigate();
+  const nativeApp = isMobileApp();
   const [form, setForm] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -45,9 +47,9 @@ export default function Login() {
   };
 
   return (
-    <main className="container-app py-12 sm:py-16">
-      <div className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1fr_420px] lg:items-center">
-        <section className="hidden lg:block">
+    <main className={nativeApp ? 'container-app flex min-h-screen items-center py-6' : 'container-app py-12 sm:py-16'}>
+      <div className={nativeApp ? 'mx-auto grid w-full max-w-md gap-6' : 'mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1fr_420px] lg:items-center'}>
+        <section className={nativeApp ? 'hidden' : 'hidden lg:block'}>
           <div className="pill-gold mb-5">
             <ShieldCheck className="h-3.5 w-3.5" />
             Acesso protegido
@@ -87,7 +89,7 @@ export default function Login() {
                 type="text"
                 value={form.username}
                 onChange={updateField('username')}
-                placeholder="05569161155 ou admin@bravusbank.com"
+                placeholder="Digite seu CPF, e-mail ou usuario"
                 required
                 autoFocus
                 autoComplete="username"

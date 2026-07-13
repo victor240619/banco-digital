@@ -34,6 +34,8 @@ api.interceptors.request.use(
   (config) => {
     const url = (config.url || '').replace(/^\/+/, '/');
     const isPublic = PUBLIC_PATHS.some((p) => url.startsWith(p));
+    const appHeader = getAppClientHeader();
+    if (appHeader) config.headers['X-Bravus-Client'] = appHeader;
     if (isPublic) {
       // garante que NUNCA enviamos token em endpoints públicos
       if (config.headers && config.headers.Authorization) delete config.headers.Authorization;
@@ -79,7 +81,11 @@ export const authService = {
     // garante que login parte sem token sujo no storage
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    const { data } = await api.post('/auth/login', { username, password });
+    const { data } = await api.post('/auth/login', {
+      username,
+      password,
+      clientChannel: getAppClientChannel(),
+    });
     if (data.token) {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data));

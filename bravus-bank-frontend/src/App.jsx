@@ -4,6 +4,7 @@ import { AlertCircle, Loader2 } from 'lucide-react';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import { authService } from './services/api';
+import { isMobileApp } from './lib/appChannel';
 
 const Home = lazy(() => import('./pages/Home'));
 const Login = lazy(() => import('./pages/Login'));
@@ -44,13 +45,21 @@ function PublicRoute({ children }) {
 function NotFoundRedirect() {
   const isAuthenticated = authService.isAuthenticated();
   const isAdmin = authService.hasRole('ROLE_ADMIN');
-  if (!isAuthenticated) return <Navigate to="/" replace />;
+  if (!isAuthenticated) return <Navigate to={isMobileApp() ? '/login' : '/'} replace />;
   return <Navigate to={isAdmin ? '/admin' : '/dashboard'} replace />;
+}
+
+function RootRoute() {
+  if (!isMobileApp()) return <Home />;
+  const isAuthenticated = authService.isAuthenticated();
+  const isAdmin = authService.hasRole('ROLE_ADMIN');
+  return <Navigate to={isAuthenticated ? (isAdmin ? '/admin' : '/dashboard') : '/login'} replace />;
 }
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const nativeApp = isMobileApp();
 
   useEffect(() => {
     window.setGlobalLoading = setIsLoading;
@@ -64,7 +73,7 @@ export default function App() {
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <div className="min-h-screen flex flex-col">
-        <Navbar />
+        {!nativeApp && <Navbar />}
 
         {error && (
           <div
@@ -87,7 +96,7 @@ export default function App() {
         <div className="flex-1">
           <Suspense fallback={<PageFallback />}>
             <Routes>
-              <Route path="/" element={<Home />} />
+              <Route path="/" element={<RootRoute />} />
               <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
               <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
               <Route path="/dashboard" element={<ProtectedRoute userOnly><UserDashboard /></ProtectedRoute>} />
@@ -97,7 +106,7 @@ export default function App() {
           </Suspense>
         </div>
 
-        <Footer />
+        {!nativeApp && <Footer />}
       </div>
     </Router>
   );
