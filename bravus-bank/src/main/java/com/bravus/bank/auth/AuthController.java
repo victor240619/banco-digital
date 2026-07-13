@@ -89,8 +89,12 @@ public class AuthController {
             UserDetails userDetails = userDetailsService.loadUserByUsername(request.username());
             String token = jwtService.generateToken(userDetails);
             
+            String normalizedLoginDocument = normalizeDocument(request.username());
             UserEntity user = userRepository.findByUsername(request.username())
                     .or(() -> userRepository.findByEmail(request.username()))
+                    .or(() -> normalizedLoginDocument != null && normalizedLoginDocument.length() == 11
+                            ? userRepository.findByCpf(normalizedLoginDocument)
+                            : java.util.Optional.empty())
                     .orElseThrow(() -> new RuntimeException("User not found"));
             
             Set<String> roles = user.getRoles().stream()

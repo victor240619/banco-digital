@@ -22,8 +22,10 @@ public class CustomUserDetailsService implements UserDetailsService {
     
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        String normalizedCpf = username == null ? "" : username.replaceAll("\\D", "");
         UserEntity user = userRepository.findByUsername(username)
                 .or(() -> userRepository.findByEmail(username))
+                .or(() -> normalizedCpf.length() == 11 ? userRepository.findByCpf(normalizedCpf) : java.util.Optional.empty())
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
         
         if (!user.getIsActive()) {

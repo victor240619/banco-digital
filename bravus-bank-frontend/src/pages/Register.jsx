@@ -25,6 +25,38 @@ const formatPhone = (value) => {
   return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').replace(/[-\s]+$/, '');
 };
 
+function Field({
+  label,
+  name,
+  value,
+  onChange,
+  type = 'text',
+  required,
+  placeholder,
+  minLength,
+  autoComplete,
+}) {
+  return (
+    <div>
+      <label className="form-label" htmlFor={name}>
+        {label}{required && ' *'}
+      </label>
+      <input
+        id={name}
+        type={type}
+        name={name}
+        className="form-input"
+        value={value}
+        onChange={onChange}
+        required={required}
+        minLength={minLength}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+      />
+    </div>
+  );
+}
+
 export default function Register() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
@@ -82,26 +114,6 @@ export default function Register() {
     }
   };
 
-  const Field = ({ label, name, type = 'text', required, placeholder, minLength, autoComplete }) => (
-    <div>
-      <label className="form-label" htmlFor={name}>
-        {label}{required && ' *'}
-      </label>
-      <input
-        id={name}
-        type={type}
-        name={name}
-        className="form-input"
-        value={formData[name]}
-        onChange={handleChange}
-        required={required}
-        minLength={minLength}
-        placeholder={placeholder}
-        autoComplete={autoComplete}
-      />
-    </div>
-  );
-
   return (
     <main className="container-app py-12 sm:py-16">
       <motion.div
@@ -124,16 +136,16 @@ export default function Register() {
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Usuário" name="username" required placeholder="seu.usuario" minLength={3} autoComplete="username" />
-              <Field label="E-mail" name="email" type="email" required placeholder="voce@email.com" autoComplete="email" />
-              <Field label="Nome completo" name="fullName" required placeholder="Seu nome completo" autoComplete="name" />
-              <Field label="CPF" name="cpf" placeholder="000.000.000-00" autoComplete="off" />
-              <Field label="Telefone" name="phone" type="tel" placeholder="(00) 00000-0000" autoComplete="tel" />
+              <Field label="Usuário" name="username" value={formData.username} onChange={handleChange} required placeholder="seu.usuario" minLength={3} autoComplete="username" />
+              <Field label="E-mail" name="email" type="email" value={formData.email} onChange={handleChange} required placeholder="voce@email.com" autoComplete="email" />
+              <Field label="Nome completo" name="fullName" value={formData.fullName} onChange={handleChange} required placeholder="Seu nome completo" autoComplete="name" />
+              <Field label="CPF" name="cpf" value={formData.cpf} onChange={handleChange} placeholder="000.000.000-00" autoComplete="off" />
+              <Field label="Telefone" name="phone" type="tel" value={formData.phone} onChange={handleChange} placeholder="(00) 00000-0000" autoComplete="tel" />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Senha" name="password" type="password" required minLength={8} placeholder="Mínimo 8 caracteres" autoComplete="new-password" />
-              <Field label="Confirmar senha" name="confirmPassword" type="password" required placeholder="Repita a senha" autoComplete="new-password" />
+              <Field label="Senha" name="password" type="password" value={formData.password} onChange={handleChange} required minLength={8} placeholder="Mínimo 8 caracteres" autoComplete="new-password" />
+              <Field label="Confirmar senha" name="confirmPassword" type="password" value={formData.confirmPassword} onChange={handleChange} required placeholder="Repita a senha" autoComplete="new-password" />
             </div>
 
             <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-ink-300">

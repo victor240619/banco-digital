@@ -29,7 +29,7 @@ export default function Login() {
       const message = typeof payload === 'string' ? payload : payload?.message;
 
       if (status === 400 || status === 401 || status === 403) {
-        setError('E-mail/usuario ou senha incorretos.');
+        setError('CPF, e-mail/usuario ou senha incorretos.');
       } else if (err?.code === 'ECONNABORTED') {
         setError('A conexão demorou demais. Tente novamente em instantes.');
       } else {
@@ -80,14 +80,14 @@ export default function Login() {
 
           <form onSubmit={onSubmit} className="space-y-5">
             <div>
-              <label className="form-label" htmlFor="username">E-mail ou usuario</label>
+              <label className="form-label" htmlFor="username">CPF, e-mail ou usuario</label>
               <input
                 id="username"
                 className="form-input"
                 type="text"
                 value={form.username}
                 onChange={updateField('username')}
-                placeholder="admin@bravusbank.com"
+                placeholder="05569161155 ou admin@bravusbank.com"
                 required
                 autoFocus
                 autoComplete="username"

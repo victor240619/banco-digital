@@ -1,9 +1,17 @@
 import axios from 'axios';
 
-const localApiHost = typeof window !== 'undefined' && window.location.hostname === '127.0.0.1'
-  ? '127.0.0.1'
-  : 'localhost';
-const API_URL = import.meta.env.VITE_API_URL || `http://${localApiHost}:9000/api`;
+const resolveApiUrl = () => {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (typeof window === 'undefined') return 'http://localhost:9000/api';
+
+  const { hostname } = window.location;
+  if (hostname === '127.0.0.1') return 'http://127.0.0.1:9000/api';
+  if (hostname === 'localhost') return 'http://localhost:9000/api';
+
+  return '/api';
+};
+
+const API_URL = resolveApiUrl();
 
 const api = axios.create({
   baseURL: API_URL,
