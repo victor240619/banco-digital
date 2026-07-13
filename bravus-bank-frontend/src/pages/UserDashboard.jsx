@@ -898,29 +898,38 @@ export default function UserDashboard() {
       <AnimatePresence>
         {selectedReceipt && (
           <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8"
+            className="fixed inset-0 z-50 overflow-y-auto bg-black/70 px-3 py-4 sm:px-4 sm:py-6"
+            data-testid="receipt-modal-overlay"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
             <motion.div
-              className="w-full max-w-2xl rounded-2xl border border-white/15 bg-ink-950 p-6 shadow-2xl"
+              className="mx-auto min-h-full w-full max-w-3xl py-2 sm:flex sm:items-center"
               initial={{ scale: 0.96, y: 12 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.96, y: 12 }}
             >
+              <div
+                className="max-h-[calc(100vh-2rem)] w-full overflow-y-auto rounded-xl border border-slate-300 bg-white p-4 text-slate-950 shadow-2xl [&_.receipt-block-title]:text-slate-950 [&_.receipt-block]:border-slate-200 [&_.receipt-block]:bg-slate-50 [&_.receipt-line-label]:text-slate-500 [&_.receipt-line-value]:text-slate-950 [&_.receipt-line]:border-slate-200 sm:max-h-[calc(100vh-3rem)] sm:p-6"
+                data-testid="receipt-modal-paper"
+              >
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="pill-gold mb-2">
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-slate-300 bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-700">
                     <Receipt className="h-3.5 w-3.5" />
                     Comprovante Bravus
                   </div>
-                  <h3 className="title-md">{formatCurrency(selectedReceipt.amountCentavos)}</h3>
-                  <p className="mt-1 text-sm text-ink-300">
+                  <h3 className="font-display text-2xl font-semibold text-slate-950">{formatCurrency(selectedReceipt.amountCentavos)}</h3>
+                  <p className="mt-1 text-sm text-slate-600">
                     {selectedReceipt.channel} · {selectedReceipt.status} · {selectedReceipt.settlementStatus}
                   </p>
                 </div>
-                <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => setSelectedReceipt(null)}>
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100"
+                  onClick={() => setSelectedReceipt(null)}
+                >
                   Fechar
                 </button>
               </div>
@@ -930,7 +939,7 @@ export default function UserDashboard() {
                 <ReceiptBlock title="Recebedor" party={selectedReceipt.beneficiary} />
               </div>
 
-              <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
+              <div className="receipt-block mt-5 rounded-xl border border-slate-200 bg-white p-4 text-sm">
                 <ReceiptLine label="Comprovante" value={selectedReceipt.receiptId} />
                 <ReceiptLine label="Tipo" value={selectedReceipt.receiptKind} />
                 <ReceiptLine label="Transação" value={selectedReceipt.transactionId} />
@@ -944,6 +953,7 @@ export default function UserDashboard() {
                 <ReceiptLine label="Idempotência" value={selectedReceipt.idempotencyKey} />
                 <ReceiptLine label="Data" value={formatDate(selectedReceipt.createdAt)} />
                 <ReceiptLine label="Descrição" value={selectedReceipt.description || 'Transferência Bravus'} />
+              </div>
               </div>
             </motion.div>
           </motion.div>
@@ -1345,8 +1355,8 @@ function Metric({ label, value }) {
 
 function ReceiptBlock({ title, party }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
-      <div className="mb-3 font-semibold text-white">{title}</div>
+    <div className="receipt-block rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
+      <div className="receipt-block-title mb-3 font-semibold text-white">{title}</div>
       <ReceiptLine label="Nome" value={party?.name} />
       <ReceiptLine label="Documento" value={party?.document} />
       <ReceiptLine label="Banco" value={party?.bankName || party?.bankCode} />
@@ -1363,9 +1373,9 @@ function ReceiptBlock({ title, party }) {
 
 function ReceiptLine({ label, value }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-white/5 py-1.5 last:border-0">
-      <span className="text-ink-400">{label}</span>
-      <span className="max-w-[65%] break-words text-right font-mono text-ink-100">{value || '-'}</span>
+    <div className="receipt-line flex items-start justify-between gap-3 border-b border-white/5 py-1.5 last:border-0">
+      <span className="receipt-line-label text-ink-400">{label}</span>
+      <span className="receipt-line-value max-w-[65%] break-words text-right font-mono text-ink-100">{value || '-'}</span>
     </div>
   );
 }
