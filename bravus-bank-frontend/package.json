@@ -9,9 +9,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "android:sync": "npm run build && cap sync android",
+    "android:sync": "powershell -ExecutionPolicy Bypass -File scripts/sync-native.ps1 -Platform android",
     "android:apk": "powershell -ExecutionPolicy Bypass -File scripts/build-apk.ps1",
-    "ios:sync": "npm run build && cap sync ios",
+    "ios:sync": "powershell -ExecutionPolicy Bypass -File scripts/sync-native.ps1 -Platform ios",
     "ios:open": "cap open ios",
     "ios:archive": "bash scripts/build-ios.sh",
     "preview": "vite preview",

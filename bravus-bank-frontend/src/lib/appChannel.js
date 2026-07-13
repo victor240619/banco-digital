@@ -1,5 +1,5 @@
 export const APK_DOWNLOAD_URL =
-  import.meta.env.VITE_APK_DOWNLOAD_URL || '/downloads/bravus-bank.apk';
+  import.meta.env.VITE_APK_DOWNLOAD_URL || '/downloads/bravus-bank-mobile.apk';
 
 export const APK_DEFAULT_API_URL =
   import.meta.env.VITE_APK_API_URL || 'https://bravus-bank-240619.victor2406.chatgpt.site/api';
