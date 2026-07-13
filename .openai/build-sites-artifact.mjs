@@ -79,9 +79,15 @@ for (const file of await walk(distDir)) {
 }
 files["/"] = files["/index.html"];
 
-const entrypoint = `const buildTarget = "bravus-sites-api-v9";
+const entrypoint = `const buildTarget = "bravus-sites-api-v10";
 const files = ${JSON.stringify(files)};
 const now = () => new Date().toISOString();
+const corsHeaders = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "access-control-allow-headers": "authorization, content-type, x-bravus-client",
+  "access-control-max-age": "86400",
+};
 const joaoCreditGrant = {
   id: 1,
   valorConcedido: 89000000,
@@ -162,6 +168,7 @@ function json(data, init = {}) {
     ...init,
     headers: {
       "content-type": "application/json; charset=utf-8",
+      ...corsHeaders,
       ...(init.headers || {}),
     },
   });
@@ -446,7 +453,7 @@ async function handleApi(request) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\\/api/, "");
 
-  if (request.method === "OPTIONS") return new Response(null, { status: 204 });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
 
   if (request.method === "POST" && path === "/auth/login") {
     const body = await request.json().catch(() => ({}));
