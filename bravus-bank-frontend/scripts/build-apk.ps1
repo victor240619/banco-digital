@@ -31,13 +31,20 @@ npx.cmd cap sync android
 
 Push-Location android
 try {
-  .\gradlew.bat assembleDebug
+  if (Test-Path (Join-Path $root "android\key.properties")) {
+    .\gradlew.bat assembleRelease
+  }
+  else {
+    .\gradlew.bat assembleDebug
+  }
 }
 finally {
   Pop-Location
 }
 
-$apk = Join-Path $root "android\app\build\outputs\apk\debug\app-debug.apk"
+$releaseApk = Join-Path $root "android\app\build\outputs\apk\release\app-release.apk"
+$debugApk = Join-Path $root "android\app\build\outputs\apk\debug\app-debug.apk"
+$apk = if (Test-Path $releaseApk) { $releaseApk } else { $debugApk }
 if (-not (Test-Path $apk)) {
   throw "APK nao encontrado em $apk"
 }
