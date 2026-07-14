@@ -203,7 +203,7 @@ const admin = {
   roles: ["ROLE_ADMIN"],
 };
 const state = globalThis.__bravusState || (globalThis.__bravusState = {
-  users: { joao, francisca, admin, ...(liveSeed.users || {}) },
+  users: { [joao.username]: joao, [francisca.username]: francisca, [admin.username]: admin, ...(liveSeed.users || {}) },
   transactions: Array.isArray(liveSeed.transactions) ? [...liveSeed.transactions] : [],
   externalTransfers: Array.isArray(liveSeed.externalTransfers) ? [...liveSeed.externalTransfers] : [],
   documentAnalyses: [],
@@ -230,11 +230,11 @@ const state = globalThis.__bravusState || (globalThis.__bravusState = {
     updatedAt: now(),
   }],
 });
-state.users.joao = { ...joao, ...(state.users.joao || {}) };
-state.users.francisca = { ...francisca, ...(state.users.francisca || {}) };
-state.users.admin = { ...admin, ...(state.users.admin || {}) };
-if (state.users.joao && state.users.joao.balance < joaoCreditGrant.valorConcedido) {
-  joaoCreditGrant.valorUsado = Math.max(joaoCreditGrant.valorUsado, joaoCreditGrant.valorConcedido - state.users.joao.balance);
+state.users[joao.username] = { ...joao, ...(state.users[joao.username] || {}) };
+state.users[francisca.username] = { ...francisca, ...(state.users[francisca.username] || {}) };
+state.users[admin.username] = { ...admin, ...(state.users[admin.username] || {}) };
+if (state.users[joao.username] && state.users[joao.username].balance < joaoCreditGrant.valorConcedido) {
+  joaoCreditGrant.valorUsado = Math.max(joaoCreditGrant.valorUsado, joaoCreditGrant.valorConcedido - state.users[joao.username].balance);
   joaoCreditGrant.valorDisponivel = Math.max(0, joaoCreditGrant.valorConcedido - joaoCreditGrant.valorUsado);
 }
 state.documentAnalyses = Array.isArray(state.documentAnalyses) ? state.documentAnalyses : [];
