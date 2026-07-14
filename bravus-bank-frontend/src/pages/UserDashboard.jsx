@@ -213,16 +213,15 @@ const monthLabel = (key) => {
 const selectedMonthLabel = (months) =>
   months.length === 1 ? monthLabel(months[0]) : `${months.length} meses selecionados`;
 
-const documentFilename = (prefix, identifier) =>
+const documentFilename = (prefix, identifier, extension = 'html') =>
   `${prefix}-${String(identifier || new Date().toISOString().slice(0, 10))
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9-]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .toLowerCase()}.html`;
+    .toLowerCase()}.${extension}`;
 
-const downloadHtmlDocument = ({ filename, html }) => {
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+const downloadBlobDocument = ({ filename, blob }) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -231,6 +230,17 @@ const downloadHtmlDocument = ({ filename, html }) => {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+};
+
+const downloadHtmlDocument = ({ filename, html }) => {
+  downloadBlobDocument({
+    filename,
+    blob: new Blob([html], { type: 'text/html;charset=utf-8' }),
+  });
+};
+
+const downloadPdfDocument = ({ filename, pdf }) => {
+  downloadBlobDocument({ filename, blob: pdf });
 };
 
 const shareHtmlDocument = async ({ filename, html, title, text }) => {
@@ -246,6 +256,77 @@ const shareHtmlDocument = async ({ filename, html, title, text }) => {
   await navigator.clipboard?.writeText(text);
   downloadHtmlDocument({ filename, html });
   return 'Compartilhamento direto indisponivel. O arquivo foi baixado e o resumo foi copiado.';
+};
+
+const sharePdfDocument = async ({ filename, pdf, title, text }) => {
+  const file = new File([pdf], filename, { type: 'application/pdf' });
+  if (navigator.canShare?.({ files: [file] })) {
+    await navigator.share({ files: [file], title, text });
+    return 'PDF compartilhado.';
+  }
+  if (navigator.share) {
+    await navigator.share({ title, text, url: window.location.href });
+    return 'Link compartilhado.';
+  }
+  await navigator.clipboard?.writeText(text);
+  downloadPdfDocument({ filename, pdf });
+  return 'Compartilhamento direto indisponivel. O PDF foi baixado e o resumo foi copiado.';
+};
+
+const pdfByteLength = (value) => new TextEncoder().encode(value).length;
+
+const normalizePdfText = (value, fallback = '-') => {
+  const normalized = String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized || fallback;
+};
+
+const escapePdfText = (value) =>
+  normalizePdfText(value).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+
+const truncatePdfText = (value, maxLength = 92) => {
+  const text = normalizePdfText(value);
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+};
+
+const pdfTextCommand = ({ text, x, y, size = 10, bold = false }) =>
+  `BT /${bold ? 'F2' : 'F1'} ${size} Tf 1 0 0 1 ${x} ${y} Tm (${escapePdfText(text)}) Tj ET`;
+
+const createSinglePagePdf = (commands) => {
+  const stream = `${commands.join('\n')}\n`;
+  const objects = [
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>\nendobj\n',
+    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
+    '5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n',
+    `6 0 obj\n<< /Length ${pdfByteLength(stream)} >>\nstream\n${stream}endstream\nendobj\n`,
+  ];
+  const parts = ['%PDF-1.4\n'];
+  const offsets = [];
+  let offset = pdfByteLength(parts[0]);
+  objects.forEach((object) => {
+    offsets.push(offset);
+    parts.push(object);
+    offset += pdfByteLength(object);
+  });
+  const xrefOffset = offset;
+  const xref = [
+    'xref\n',
+    `0 ${objects.length + 1}\n`,
+    '0000000000 65535 f \n',
+    ...offsets.map((item) => `${String(item).padStart(10, '0')} 00000 n \n`),
+    'trailer\n',
+    `<< /Size ${objects.length + 1} /Root 1 0 R >>\n`,
+    'startxref\n',
+    `${xrefOffset}\n`,
+    '%%EOF',
+  ].join('');
+  return new Blob([...parts, xref], { type: 'application/pdf' });
 };
 
 const buildPrintableHtml = ({ title, subtitle, body, footer }) => `
@@ -336,6 +417,71 @@ const partyRows = (party) => [
   ['Tipo chave', party?.pixKeyType],
 ];
 
+const buildReceiptPdfBlob = (receipt) => {
+  const commands = [
+    '0.035 0.063 0.141 rg 0 800 595 42 re f',
+    '0.918 0.686 0.157 rg 0 796 595 4 re f',
+    '1 1 1 rg',
+    pdfTextCommand({ text: 'BRAVUS PREMIUM BANK', x: 48, y: 816, size: 13, bold: true }),
+    pdfTextCommand({ text: 'Comprovante de transferencia', x: 48, y: 782, size: 22, bold: true }),
+    '0 0 0 rg',
+    pdfTextCommand({ text: `Valor: ${formatCurrency(receipt?.amountCentavos)}`, x: 48, y: 752, size: 16, bold: true }),
+    pdfTextCommand({
+      text: `${receipt?.channel || 'BRAVUS'} | ${receipt?.settlementStatus || receipt?.status || 'PROCESSADO'}`,
+      x: 48,
+      y: 731,
+      size: 10,
+    }),
+  ];
+  let y = 698;
+  const addSection = (title, rows) => {
+    commands.push('0.918 0.686 0.157 rg');
+    commands.push(pdfTextCommand({ text: title, x: 48, y, size: 12, bold: true }));
+    commands.push('0 0 0 rg');
+    y -= 20;
+    rows.forEach(([label, value]) => {
+      if (y < 58) return;
+      commands.push(pdfTextCommand({ text: `${label}:`, x: 58, y, size: 8.5, bold: true }));
+      commands.push(pdfTextCommand({ text: truncatePdfText(value), x: 190, y, size: 8.5 }));
+      y -= 13;
+    });
+    y -= 8;
+  };
+
+  addSection('Dados da transferencia', [
+    ['Comprovante', receipt?.receiptId],
+    ['Tipo', receipt?.receiptKind],
+    ['Transacao', receipt?.transactionId],
+    ['Valor', formatCurrency(receipt?.amountCentavos)],
+    ['Canal', receipt?.channel],
+    ['Status', receipt?.status],
+    ['Liquidacao', receipt?.settlementStatus],
+    ['Data', documentDate(receipt?.createdAt)],
+  ]);
+  addSection('Pagador', partyRows(receipt?.payer));
+  addSection('Recebedor', partyRows(receipt?.beneficiary));
+  addSection('Rastreabilidade', [
+    ['Provedor', receipt?.provider],
+    ['ID provedor', receipt?.providerTransferId],
+    ['Rede destino', receipt?.destinationNetwork],
+    ['Participante', receipt?.destinationParticipantCode],
+    ['Confirmacao destino', receipt?.destinationConfirmationId],
+    ['Confirmado em', documentDate(receipt?.destinationConfirmedAt)],
+    ['Mensagem', receipt?.settlementMessage],
+    ['Idempotencia', receipt?.idempotencyKey],
+    ['Descricao', receipt?.description || 'Transferencia Bravus'],
+  ]);
+
+  commands.push('0.25 0.25 0.25 rg');
+  commands.push(pdfTextCommand({
+    text: `Comprovante emitido em ${formatDate(new Date().toISOString())}. Validacao interna: ${receipt?.receiptId || '-'}`,
+    x: 48,
+    y: 38,
+    size: 8,
+  }));
+  return createSinglePagePdf(commands);
+};
+
 const buildReceiptDocument = (receipt) => {
   const title = `Comprovante Bravus ${formatCurrency(receipt?.amountCentavos)}`;
   const body = `
@@ -375,13 +521,14 @@ const buildReceiptDocument = (receipt) => {
       ])}
     </section>`;
   return {
-    filename: documentFilename('comprovante-bravus', receipt?.receiptId || receipt?.transactionId),
+    filename: documentFilename('comprovante-bravus', receipt?.receiptId || receipt?.transactionId, 'pdf'),
     html: buildPrintableHtml({
       title,
       subtitle: `${receipt?.channel || 'BRAVUS'} | ${receipt?.settlementStatus || receipt?.status || 'PROCESSADO'}`,
       body,
       footer: `Comprovante emitido em ${formatDate(new Date().toISOString())}. Validacao interna: ${receipt?.receiptId || '-'}`,
     }),
+    pdf: buildReceiptPdfBlob(receipt),
     text: `${title}\nRecebedor: ${receipt?.beneficiary?.name || '-'}\nValor: ${formatCurrency(receipt?.amountCentavos)}\nComprovante: ${receipt?.receiptId || '-'}`,
   };
 };
@@ -650,15 +797,15 @@ export default function UserDashboard() {
   const downloadReceipt = () => {
     if (!selectedReceipt) return;
     const document = buildReceiptDocument(selectedReceipt);
-    downloadHtmlDocument(document);
-    setSuccess('Comprovante baixado.');
+    downloadPdfDocument(document);
+    setSuccess('Comprovante em PDF baixado.');
   };
 
   const shareReceipt = async () => {
     if (!selectedReceipt) return;
     const document = buildReceiptDocument(selectedReceipt);
     try {
-      const message = await shareHtmlDocument({
+      const message = await sharePdfDocument({
         ...document,
         title: 'Comprovante Bravus Bank',
       });
