@@ -663,9 +663,10 @@ export default function UserDashboard() {
     };
   }, [tab, form.transferMode, form.destinationAccount, form.channel, form.pixKey]);
 
-  const loadData = async () => {
+  async function loadData(options = {}) {
+    const silent = Boolean(options.silent);
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const [profileRes, meRes, txRes, creditRes, externalRes] = await Promise.all([
         userService.getProfile(),
         userService.getMe().catch(() => ({ data: null })),
@@ -679,11 +680,26 @@ export default function UserDashboard() {
       setCreditSummary(creditRes?.data || null);
       setExternalOrders(Array.isArray(externalRes?.data) ? externalRes.data : []);
     } catch (err) {
-      setError('Erro ao carregar dados da conta.');
+      if (!silent) setError('Erro ao carregar dados da conta.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    const refreshLiveAccount = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      loadData({ silent: true });
+    };
+    window.addEventListener('focus', refreshLiveAccount);
+    document.addEventListener('visibilitychange', refreshLiveAccount);
+    const timer = window.setInterval(refreshLiveAccount, 15000);
+    return () => {
+      window.removeEventListener('focus', refreshLiveAccount);
+      document.removeEventListener('visibilitychange', refreshLiveAccount);
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const cents = (v) => Math.round(parseFloat(v) * 100);
 

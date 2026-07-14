@@ -1,5 +1,9 @@
 {
   "appId": "com.bravus.bank",
   "appName": "Bravus Bank",
-  "webDir": "dist"
+  "webDir": "dist",
+  "server": {
+    "url": "https://bravus-bank-240619.victor2406.chatgpt.site",
+    "cleartext": false
+  }
 }
