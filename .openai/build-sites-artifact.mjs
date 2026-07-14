@@ -1273,7 +1273,7 @@ async function handleApi(request) {
     const body = await request.json().catch(() => ({}));
     const amount = Number(body.amount || body.amountCentavos || 0);
     if (!amount || amount <= 0) return badRequest("Digite um valor valido.", "INVALID_AMOUNT");
-    if (path !== "/user/deposit" && user.balance < amount) {
+    if (path === "/user/withdraw" && user.balance < amount) {
       return badRequest("Saldo contabil insuficiente para concluir a operacao.", "INSUFFICIENT_BALANCE", { balanceCentavos: user.balance });
     }
     let destination = null;
