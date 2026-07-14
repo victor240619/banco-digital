@@ -129,6 +129,8 @@ const database = new FakeD1();
 const env = {
   DB: database,
   BRAVUS_BIOMETRIC_KEY: Buffer.alloc(32, 37).toString("base64url"),
+  BRAVUS_PASSWORD_PEPPER: "test-only-password-pepper-value",
+  BRAVUS_ALLOW_TEST_BOOTSTRAP: "true",
 };
 
 async function loadWorker(label) {

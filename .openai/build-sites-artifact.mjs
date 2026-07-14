@@ -92,6 +92,38 @@ function rolesForSnapshotUser(user) {
 }
 
 async function loadLiveSeed() {
+  if (process.env.BRAVUS_SITES_TEST_BUILD === "1") {
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    return {
+      verified: "TEST_ONLY",
+      capturedAt: createdAt,
+      source: "local-test-fixture",
+      users: {},
+      transactions: [{
+        id: 1,
+        username: "joao.victor",
+        type: "WITHDRAWAL",
+        amount: 100000,
+        description: "Fixture contabil D1",
+        status: "COMPLETED",
+        createdAt,
+      }],
+      externalTransfers: [],
+      globalRailParticipants: [],
+      ledgerEntries: [
+        {
+          id: 1, transferId: "sites-transaction-1-WITHDRAWAL", transactionId: 1,
+          accountUsername: "joao.victor", accountNumber: "0556916115", entryType: "debit",
+          signedAmountCentavos: -100000, currency: "BRL", reason: "TEST_FIXTURE", createdAt,
+        },
+        {
+          id: 2, transferId: "sites-transaction-1-WITHDRAWAL", transactionId: 1,
+          accountUsername: "BRAVUS_LEDGER", accountNumber: "BRAVUS-LEDGER", entryType: "credit",
+          signedAmountCentavos: 100000, currency: "BRL", reason: "TEST_FIXTURE", createdAt,
+        },
+      ],
+    };
+  }
   try {
     const [users, transactions, externalTransfers, globalRailParticipants, ledgerEntries] = await Promise.all([
       fetchLiveJson("/api/admin/users"),
@@ -182,10 +214,12 @@ const corsHeaders = {
 };
 const legacyPasswordCredential = Object.freeze({
   algorithm: "PBKDF2-SHA256",
-  iterations: 210000,
+  version: 1,
+  iterations: 100000,
   salt: "d56fMiKDhEvfKfp1ke7P3A",
-  hash: "L2REk7JF5sj-Qn5xtdb7UJ85x4M83bc-bEFzGrm87O8",
+  hash: "LVbDqSALR9FqE_pCUCvavsMYBUC-pRLv0uSpa2rKWbs",
 });
+const legacyPasswordV0Hash = "L2REk7JF5sj-Qn5xtdb7UJ85x4M83bc-bEFzGrm87O8";
 const joaoCreditGrantSeed = {
   id: 1,
   valorConcedido: 89000000,
@@ -246,6 +280,7 @@ const initialStateSeed = {
   sessions: {},
   passwordResetRequests: [],
   passwordResetAudit: [],
+  loginAttempts: [],
   creditGrant: { ...joaoCreditGrantSeed },
   globalRailParticipants: Array.isArray(liveSeed.globalRailParticipants) && liveSeed.globalRailParticipants.length
     ? [...liveSeed.globalRailParticipants]
@@ -283,7 +318,9 @@ function normalizeState(candidate) {
   next.users[admin.username] = { ...admin, ...(next.users[admin.username] || {}) };
   for (const user of Object.values(next.users)) {
     user.roles = Array.isArray(user.roles) && user.roles.length ? user.roles : ["ROLE_USER"];
-    user.passwordCredential = user.passwordCredential || { ...legacyPasswordCredential };
+    if (!user.passwordCredential || user.passwordCredential.hash === legacyPasswordV0Hash) {
+      user.passwordCredential = { ...legacyPasswordCredential };
+    }
   }
   next.transactions = Array.isArray(next.transactions) ? next.transactions : [];
   next.externalTransfers = Array.isArray(next.externalTransfers) ? next.externalTransfers : [];
@@ -294,6 +331,7 @@ function normalizeState(candidate) {
   next.sessions = next.sessions && typeof next.sessions === "object" ? next.sessions : {};
   next.passwordResetRequests = Array.isArray(next.passwordResetRequests) ? next.passwordResetRequests : [];
   next.passwordResetAudit = Array.isArray(next.passwordResetAudit) ? next.passwordResetAudit : [];
+  next.loginAttempts = Array.isArray(next.loginAttempts) ? next.loginAttempts : [];
   next.creditGrant = next.creditGrant && typeof next.creditGrant === "object"
     ? { ...joaoCreditGrantSeed, ...next.creditGrant }
     : { ...joaoCreditGrantSeed };
@@ -359,10 +397,17 @@ async function sha256Text(value) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function derivePasswordHash(password, salt, iterations) {
+function passwordPepper() {
+  const value = String(currentEnv?.BRAVUS_PASSWORD_PEPPER || "");
+  if (!value) throw new Error("PASSWORD_PEPPER_UNAVAILABLE");
+  return value;
+}
+
+async function derivePasswordHash(password, salt, iterations, peppered = false) {
+  const material = peppered ? String(password || "") + "\u0000" + passwordPepper() : String(password || "");
   const key = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(String(password || "")),
+    new TextEncoder().encode(material),
     "PBKDF2",
     false,
     ["deriveBits"],
@@ -378,18 +423,20 @@ async function derivePasswordHash(password, salt, iterations) {
 
 async function createPasswordCredential(password) {
   const salt = randomToken(16);
-  const iterations = 210000;
+  const iterations = 100000;
   return {
     algorithm: "PBKDF2-SHA256",
+    version: 2,
+    peppered: true,
     iterations,
     salt,
-    hash: await derivePasswordHash(password, salt, iterations),
+    hash: await derivePasswordHash(password, salt, iterations, true),
   };
 }
 
 async function verifyPassword(password, credential) {
   if (!credential || credential.algorithm !== "PBKDF2-SHA256") return false;
-  const actual = await derivePasswordHash(password, credential.salt, Number(credential.iterations || 210000));
+  const actual = await derivePasswordHash(password, credential.salt, Number(credential.iterations || 100000), Boolean(credential.peppered));
   const expectedBytes = bytesFromBase64Url(credential.hash);
   const actualBytes = bytesFromBase64Url(actual);
   if (expectedBytes.length !== actualBytes.length) return false;
@@ -1597,7 +1644,8 @@ async function loadOrCreateD1State(db) {
   await ensureD1Schema(db);
   let row = await db.prepare("SELECT revision, payload, payload_hash, updated_at FROM bravus_state WHERE id = 1").first();
   if (row) return row;
-  if (liveSeed.verified !== true) throw new Error("D1_INITIAL_IMPORT_REQUIRES_VERIFIED_SNAPSHOT");
+  const testBootstrap = liveSeed.verified === "TEST_ONLY" && currentEnv?.BRAVUS_ALLOW_TEST_BOOTSTRAP === "true";
+  if (liveSeed.verified !== true && !testBootstrap) throw new Error("D1_INITIAL_IMPORT_REQUIRES_VERIFIED_SNAPSHOT");
 
   state = createInitialState();
   enforceFinancialConsistency("D1_INITIAL_IMPORT");
@@ -1704,9 +1752,20 @@ async function handleApi(request) {
 
   if (request.method === "POST" && path === "/auth/login") {
     const body = await request.json().catch(() => ({}));
+    const loginIdentifierHash = await sha256Text(String(body.username || "").trim().toLowerCase());
+    const cutoff = Date.now() - 15 * 60 * 1000;
+    state.loginAttempts = state.loginAttempts.filter((attempt) => new Date(attempt.createdAt).getTime() >= cutoff).slice(0, 200);
+    if (state.loginAttempts.filter((attempt) => attempt.identifierHash === loginIdentifierHash).length >= 5) {
+      return json({ message: "Muitas tentativas. Aguarde antes de tentar novamente.", code: "RATE_LIMITED" }, { status: 429 });
+    }
     const user = Object.values(state.users).find((item) => publicLoginMatches(item, body.username));
     if (!user || !await verifyPassword(body.password, user.passwordCredential)) {
+      state.loginAttempts.unshift({ identifierHash: loginIdentifierHash, createdAt: now() });
       return json("Invalid username or password", { status: 400 });
+    }
+    state.loginAttempts = state.loginAttempts.filter((attempt) => attempt.identifierHash !== loginIdentifierHash);
+    if (!user.passwordCredential.peppered) {
+      user.passwordCredential = await createPasswordCredential(body.password);
     }
     const token = createSession(user);
     return json(authResponse(user, token));
