@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   Users, Activity, Banknote, TrendingUp, Power, Trash2, CheckCircle2, AlertCircle,
   Search, Shield, BarChart3, ListChecks, Coins, Link2, Hash, Vault, PiggyBank,
-  Send, RefreshCw, ChevronDown, ChevronUp, Landmark, Globe2,
+  Send, RefreshCw, ChevronDown, ChevronUp, Landmark, Globe2, KeyRound, ScanFace, Eye, XCircle,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import {
   adminService, analysisService, caymanRailService,
-  externalTransferService, globalRailService, ledgerAdminService, unifiedSearchService,
+  externalTransferService, globalRailService, ledgerAdminService, passwordResetAdminService, unifiedSearchService,
 } from '../services/api';
 import { formatCurrency, formatDate, getTransactionTypeLabel } from '../utils/helpers';
 import { cn } from '../lib/cn';
@@ -59,6 +59,7 @@ export default function AdminDashboard() {
   const [documentAnalyses, setDocumentAnalyses] = useState([]);
   const [externalTransfers, setExternalTransfers] = useState([]);
   const [globalRailParticipants, setGlobalRailParticipants] = useState([]);
+  const [passwordResetRequests, setPasswordResetRequests] = useState([]);
   const [caymanRail, setCaymanRail] = useState({
     config: null,
     readiness: null,
@@ -81,7 +82,7 @@ export default function AdminDashboard() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [d, u, t, bs, ch, en, da, et, grParticipants, crConfig, crReady, crParticipants, crInstructions] = await Promise.all([
+      const [d, u, t, bs, ch, en, da, et, grParticipants, crConfig, crReady, crParticipants, crInstructions, resetRequests] = await Promise.all([
         adminService.getDashboard().catch(() => ({ data: null })),
         adminService.getAllUsers().catch(() => ({ data: [] })),
         adminService.getAllTransactions().catch(() => ({ data: [] })),
@@ -95,6 +96,7 @@ export default function AdminDashboard() {
         caymanRailService.readiness().catch(() => ({ data: null })),
         caymanRailService.participants().catch(() => ({ data: [] })),
         caymanRailService.instructions(20).catch(() => ({ data: [] })),
+        passwordResetAdminService.pending().catch(() => ({ data: [] })),
       ]);
       setStats(d.data);
       setUsers(Array.isArray(u.data) ? u.data : []);
@@ -105,6 +107,7 @@ export default function AdminDashboard() {
       setDocumentAnalyses(Array.isArray(da.data) ? da.data : []);
       setExternalTransfers(Array.isArray(et.data) ? et.data : []);
       setGlobalRailParticipants(Array.isArray(grParticipants.data) ? grParticipants.data : []);
+      setPasswordResetRequests(Array.isArray(resetRequests.data) ? resetRequests.data : []);
       setCaymanRail({
         config: crConfig.data,
         readiness: crReady.data,
@@ -199,6 +202,7 @@ export default function AdminDashboard() {
         <Tab id="users"   label="Usuários"         icon={Users} />
         <Tab id="unifiedSearch" label="Consulta Geral" icon={Search} />
         <Tab id="analysis" label="Analise automatica" icon={Shield} />
+        <Tab id="passwordReset" label="Recuperacao de senha" icon={KeyRound} />
         <Tab id="credit"  label="Emissão Escritural" icon={Coins} />
         <Tab id="external" label="Envio Bancario" icon={Send} />
         <Tab id="globalRail" label="Trilho Global" icon={Globe2} />
@@ -227,6 +231,15 @@ export default function AdminDashboard() {
         <DocumentAnalysisView
           analyses={documentAnalyses}
           onSuccess={(msg) => { setSuccess(msg); loadAll(); }}
+          onError={setError}
+        />
+      )}
+
+      {tab === 'passwordReset' && (
+        <PasswordResetReviewView
+          requests={passwordResetRequests}
+          onRefresh={loadAll}
+          onSuccess={setSuccess}
           onError={setError}
         />
       )}
@@ -487,6 +500,141 @@ function UsersView({ users, search, setSearch, onToggle, onDelete }) {
         </table>
       </div>
     </div>
+  );
+}
+
+function PasswordResetReviewView({ requests, onRefresh, onSuccess, onError }) {
+  const [selected, setSelected] = useState(null);
+  const [evidence, setEvidence] = useState(null);
+  const [reason, setReason] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function openEvidence(request) {
+    setLoading(true);
+    setEvidence(null);
+    try {
+      const { data } = await passwordResetAdminService.evidence(request.requestId);
+      setSelected(request);
+      setEvidence(data);
+      setReason('');
+    } catch (error) {
+      onError(apiError(error, 'Falha ao abrir as evidencias faciais.'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function review(action) {
+    if (!selected) return;
+    if (reason.trim().length < 10) {
+      onError('Registre um motivo com pelo menos 10 caracteres antes de concluir a revisao.');
+      return;
+    }
+    setLoading(true);
+    try {
+      if (action === 'approve') {
+        await passwordResetAdminService.approve(selected.requestId, reason.trim());
+        onSuccess('Verificacao facial aprovada. O cliente ja pode redefinir a senha.');
+      } else {
+        await passwordResetAdminService.reject(selected.requestId, reason.trim());
+        onSuccess('Verificacao facial rejeitada e registrada na auditoria.');
+      }
+      setSelected(null);
+      setEvidence(null);
+      setReason('');
+      await onRefresh();
+    } catch (error) {
+      onError(apiError(error, 'Falha ao concluir a revisao.'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <section className="card-premium p-5 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-white">
+            <ScanFace className="h-5 w-5 text-gold-300" />
+            <h2 className="text-lg font-semibold">Revisao facial para recuperacao</h2>
+          </div>
+          <p className="mt-1 text-sm text-ink-400">Compare as duas capturas antes de autorizar qualquer troca de senha.</p>
+        </div>
+        <span className="pill-gold">{requests.length} pendente{requests.length === 1 ? '' : 's'}</span>
+      </div>
+
+      <div className="mt-5 divide-y divide-white/10 border-y border-white/10">
+        {requests.map((request) => (
+          <div key={request.requestId} className="flex flex-wrap items-center justify-between gap-3 py-4">
+            <div>
+              <div className="font-medium text-white">{request.fullName}</div>
+              <div className="mt-1 text-xs text-ink-400">
+                {request.maskedCpf || 'Documento protegido'} · {formatDate(request.createdAt)} · {request.attempts} tentativa(s)
+              </div>
+            </div>
+            <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => openEvidence(request)} disabled={loading}>
+              <Eye className="h-4 w-4" /> Revisar
+            </button>
+          </div>
+        ))}
+        {requests.length === 0 && (
+          <div className="py-8 text-center text-sm text-ink-400">Nenhuma verificacao facial aguardando revisao.</div>
+        )}
+      </div>
+
+      {selected && evidence && (
+        <div className="mt-6 border-t border-white/10 pt-6">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="font-semibold text-white">{evidence.fullName}</div>
+              <div className="text-xs text-ink-400">{evidence.maskedCpf}</div>
+            </div>
+            <button type="button" className="btn-secondary !p-2" onClick={() => { setSelected(null); setEvidence(null); }} aria-label="Fechar evidencias">
+              <XCircle className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <figure>
+              <figcaption className="mb-2 text-xs font-medium uppercase text-ink-300">Abertura da conta</figcaption>
+              <div className="aspect-video overflow-hidden rounded-lg border border-white/10 bg-ink-950">
+                <img src={evidence.enrolledFace} alt="Captura facial da abertura da conta" className="h-full w-full object-cover" />
+              </div>
+            </figure>
+            <figure>
+              <figcaption className="mb-2 text-xs font-medium uppercase text-ink-300">Recuperacao atual</figcaption>
+              <div className="aspect-video overflow-hidden rounded-lg border border-white/10 bg-ink-950">
+                <img src={evidence.submittedFace} alt="Captura facial da recuperacao atual" className="h-full w-full object-cover" />
+              </div>
+            </figure>
+          </div>
+
+          <div className="mt-4 border-l-2 border-gold-400 bg-gold-400/10 px-4 py-3 text-sm text-gold-100">
+            <strong>Desafio solicitado:</strong> {evidence.challenge}
+          </div>
+
+          <div className="mt-4">
+            <label className="form-label" htmlFor="password-reset-review-reason">Motivo da decisao</label>
+            <textarea
+              id="password-reset-review-reason"
+              className="form-input min-h-24 resize-y"
+              maxLength={500}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="Registre os elementos considerados na comparacao."
+            />
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <button type="button" className="btn-secondary !text-red-300" onClick={() => review('reject')} disabled={loading || reason.trim().length < 10}>
+              <XCircle className="h-4 w-4" /> Rejeitar
+            </button>
+            <button type="button" className="btn-primary" onClick={() => review('approve')} disabled={loading || reason.trim().length < 10}>
+              <CheckCircle2 className="h-4 w-4" /> Aprovar verificacao
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

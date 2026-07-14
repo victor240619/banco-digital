@@ -97,7 +97,12 @@ export default function Login() {
             </div>
 
             <div>
-              <label className="form-label" htmlFor="password">Senha</label>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <label className="form-label mb-0" htmlFor="password">Senha</label>
+                <Link to="/redefinir-senha" className="text-xs font-medium text-gold-300 hover:text-gold-200">
+                  Esqueci minha senha
+                </Link>
+              </div>
               <input
                 id="password"
                 className="form-input"

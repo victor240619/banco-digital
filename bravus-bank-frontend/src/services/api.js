@@ -27,7 +27,7 @@ const api = axios.create({
 });
 
 // Endpoints públicos — não devem receber Authorization (token velho gera 403)
-const PUBLIC_PATHS = ['/auth/login', '/auth/register'];
+const PUBLIC_PATHS = ['/auth/login', '/auth/register', '/auth/password-reset'];
 
 // ====== Interceptors ======
 api.interceptors.request.use(
@@ -64,8 +64,9 @@ api.interceptors.response.use(
     const url = (error?.config?.url || '');
     const isPublic = PUBLIC_PATHS.some((p) => url.includes(p));
 
-    // Token inválido em endpoint protegido: limpa e redireciona
-    if ((status === 401 || status === 403) && !isPublic) {
+    // Somente 401 encerra a sessao. Um 403 pertence ao modulo/acao negada
+    // e nao pode expulsar o usuario das demais funcoes autorizadas.
+    if (status === 401 && !isPublic) {
       const onAuthPage = ['/login', '/register'].some((p) => window.location.pathname.startsWith(p));
       localStorage.removeItem('token');
       localStorage.removeItem('user');
@@ -149,6 +150,13 @@ export const userService = {
   externalTransfer: (payload) => api.post('/user/external-transfers', payload),
 };
 
+export const passwordResetService = {
+  start: (payload) => api.post('/auth/password-reset/start', payload),
+  submitFace: (payload) => api.post('/auth/password-reset/face', payload),
+  status: (payload) => api.post('/auth/password-reset/status', payload),
+  complete: (payload) => api.post('/auth/password-reset/complete', payload),
+};
+
 // ====== Admin ======
 export const adminService = {
   getDashboard: () => api.get('/admin/dashboard'),
@@ -170,6 +178,13 @@ export const ledgerAdminService = {
   grantCredit: (payload) => api.post('/admin/ledger/credit/grant', payload),
   issueCredit: (payload) => api.post('/admin/ledger/credit/issue', payload),
   releaseCredit: (grantId) => api.post(`/admin/ledger/credit/${grantId}/release`),
+};
+
+export const passwordResetAdminService = {
+  pending: () => api.get('/admin/password-reset/requests'),
+  evidence: (requestId) => api.get(`/admin/password-reset/requests/${requestId}/evidence`),
+  approve: (requestId, reason) => api.post(`/admin/password-reset/requests/${requestId}/approve`, { reason }),
+  reject: (requestId, reason) => api.post(`/admin/password-reset/requests/${requestId}/reject`, { reason }),
 };
 
 export const analysisService = {

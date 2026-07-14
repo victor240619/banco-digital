@@ -9,6 +9,7 @@ import { isMobileApp } from './lib/appChannel';
 const Home = lazy(() => import('./pages/Home'));
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
+const PasswordReset = lazy(() => import('./pages/PasswordReset'));
 const UserDashboard = lazy(() => import('./pages/UserDashboard'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 
@@ -99,6 +100,7 @@ export default function App() {
               <Route path="/" element={<RootRoute />} />
               <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
               <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
+              <Route path="/redefinir-senha" element={<PublicRoute><PasswordReset /></PublicRoute>} />
               <Route path="/dashboard/*" element={<ProtectedRoute userOnly><UserDashboard /></ProtectedRoute>} />
               <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>} />
               <Route path="*" element={<NotFoundRedirect />} />

@@ -42,6 +42,15 @@ public class AccountOpeningKycEntity {
     @Column(name = "face_sha256", nullable = false, length = 64)
     private String faceSha256;
 
+    @Column(name = "face_cipher", columnDefinition = "bytea")
+    private byte[] faceCipher;
+
+    @Column(name = "face_cipher_iv")
+    private byte[] faceCipherIv;
+
+    @Column(name = "face_cipher_algorithm")
+    private String faceCipherAlgorithm;
+
     @Column(name = "front_mime", nullable = false)
     private String frontMime;
 
@@ -102,6 +111,12 @@ public class AccountOpeningKycEntity {
     public void setBackSha256(String backSha256) { this.backSha256 = backSha256; }
     public String getFaceSha256() { return faceSha256; }
     public void setFaceSha256(String faceSha256) { this.faceSha256 = faceSha256; }
+    public byte[] getFaceCipher() { return faceCipher; }
+    public void setFaceCipher(byte[] faceCipher) { this.faceCipher = faceCipher; }
+    public byte[] getFaceCipherIv() { return faceCipherIv; }
+    public void setFaceCipherIv(byte[] faceCipherIv) { this.faceCipherIv = faceCipherIv; }
+    public String getFaceCipherAlgorithm() { return faceCipherAlgorithm; }
+    public void setFaceCipherAlgorithm(String faceCipherAlgorithm) { this.faceCipherAlgorithm = faceCipherAlgorithm; }
     public String getFrontMime() { return frontMime; }
     public void setFrontMime(String frontMime) { this.frontMime = frontMime; }
     public String getBackMime() { return backMime; }

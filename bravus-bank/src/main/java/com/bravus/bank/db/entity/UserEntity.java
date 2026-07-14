@@ -13,6 +13,9 @@ public class UserEntity {
     @Version
     private Long version;
 
+    @Column(name = "credentials_version")
+    private Long credentialsVersion = 0L;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -226,4 +229,7 @@ public class UserEntity {
 
     public Long getVersion() { return version; }
     public void setVersion(Long version) { this.version = version; }
+
+    public Long getCredentialsVersion() { return credentialsVersion == null ? 0L : credentialsVersion; }
+    public void setCredentialsVersion(Long credentialsVersion) { this.credentialsVersion = credentialsVersion; }
 }

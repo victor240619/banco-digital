@@ -29,11 +29,14 @@ public class AccountOpeningKycService {
     private static final int MIN_FACE_BYTES = 2 * 1024;
 
     private final AccountOpeningKycRepository repository;
+    private final BiometricMediaCipher biometricMediaCipher;
     private final Path storageDir;
 
     public AccountOpeningKycService(AccountOpeningKycRepository repository,
+                                    BiometricMediaCipher biometricMediaCipher,
                                     @Value("${BRAVUS_KYC_STORAGE_DIR:./data/kyc}") String storageDir) {
         this.repository = repository;
+        this.biometricMediaCipher = biometricMediaCipher;
         this.storageDir = Path.of(storageDir);
     }
 
@@ -80,7 +83,14 @@ public class AccountOpeningKycService {
             Files.createDirectories(storageDir);
             StoredFile frontFile = writeImage(user.getId(), "document-front", front);
             StoredFile backFile = writeImage(user.getId(), "document-back", back);
-            StoredFile faceFile = writeImage(user.getId(), "face-biometric", face);
+            BiometricMediaCipher.EncryptedMedia encryptedFace = null;
+            String faceStorageReference;
+            if (biometricMediaCipher.isConfigured()) {
+                encryptedFace = biometricMediaCipher.encrypt(face.bytes);
+                faceStorageReference = "ENCRYPTED_DATABASE";
+            } else {
+                faceStorageReference = writeImage(user.getId(), "face-biometric", face).path.toString();
+            }
 
             AccountOpeningKycEntity entity = repository.findByUserId(user.getId())
                     .orElseGet(AccountOpeningKycEntity::new);
@@ -89,10 +99,15 @@ public class AccountOpeningKycService {
             entity.setDocumentNumber(documentNumber);
             entity.setFrontFilePath(frontFile.path.toString());
             entity.setBackFilePath(backFile.path.toString());
-            entity.setFaceFilePath(faceFile.path.toString());
+            entity.setFaceFilePath(faceStorageReference);
             entity.setFrontSha256(front.sha256);
             entity.setBackSha256(back.sha256);
             entity.setFaceSha256(face.sha256);
+            if (encryptedFace != null) {
+                entity.setFaceCipher(encryptedFace.cipherBytes());
+                entity.setFaceCipherIv(encryptedFace.iv());
+                entity.setFaceCipherAlgorithm(encryptedFace.algorithm());
+            }
             entity.setFrontMime(front.mime);
             entity.setBackMime(back.mime);
             entity.setFaceMime(face.mime);
@@ -107,6 +122,39 @@ public class AccountOpeningKycService {
             return repository.save(entity);
         } catch (IOException e) {
             throw new IllegalStateException("Falha ao armazenar arquivos KYC.", e);
+        }
+    }
+
+    public ValidatedFace validateRecoveryFace(String dataUrl) {
+        StoredImage face = decodeAndValidate(dataUrl, "biometria facial", MIN_FACE_BYTES, 180, 180);
+        return new ValidatedFace(face.mime, face.bytes, face.sha256);
+    }
+
+    @Transactional
+    public AccountOpeningKycEntity ensureEncryptedFace(AccountOpeningKycEntity entity) {
+        if (entity == null || entity.getFaceCipher() != null) return entity;
+        if (!biometricMediaCipher.isConfigured()) {
+            throw new IllegalStateException("Protecao biometrica indisponivel.");
+        }
+
+        try {
+            Path base = storageDir.toRealPath();
+            Path legacyFace = Path.of(entity.getFaceFilePath()).toRealPath();
+            if (!legacyFace.startsWith(base) || !Files.isRegularFile(legacyFace)) {
+                throw new IllegalStateException("Arquivo biometrico legado fora do diretorio autorizado.");
+            }
+            byte[] bytes = Files.readAllBytes(legacyFace);
+            if (bytes.length < MIN_FACE_BYTES || bytes.length > MAX_IMAGE_BYTES
+                    || !sha256(bytes).equalsIgnoreCase(entity.getFaceSha256())) {
+                throw new IllegalStateException("Integridade da biometria legada invalida.");
+            }
+            BiometricMediaCipher.EncryptedMedia encrypted = biometricMediaCipher.encrypt(bytes);
+            entity.setFaceCipher(encrypted.cipherBytes());
+            entity.setFaceCipherIv(encrypted.iv());
+            entity.setFaceCipherAlgorithm(encrypted.algorithm());
+            return repository.save(entity);
+        } catch (IOException e) {
+            throw new IllegalStateException("Biometria legada indisponivel para migracao protegida.", e);
         }
     }
 
@@ -190,4 +238,5 @@ public class AccountOpeningKycService {
 
     private record StoredImage(String mime, byte[] bytes, String sha256) {}
     private record StoredFile(Path path) {}
+    public record ValidatedFace(String mime, byte[] bytes, String sha256) {}
 }

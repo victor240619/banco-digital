@@ -28,6 +28,10 @@ services:
         sync: false
       - key: JWT_SECRET
         generateValue: true       # Render gera um secret seguro automaticamente
+      - key: BRAVUS_BIOMETRIC_KEY
+        generateValue: true       # Chave exclusiva para AES-256-GCM
+      - key: BRAVUS_PASSWORD_RESET_GLOBAL_LIMIT
+        value: "300"
       - key: CORS_ORIGIN
         sync: false               # URL do frontend depois do deploy
       - key: JAVA_TOOL_OPTIONS

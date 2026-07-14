@@ -19,6 +19,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.SecureRandom;
@@ -96,8 +97,6 @@ public class AuthController {
             );
             
             UserDetails userDetails = userDetailsService.loadUserByUsername(request.username());
-            String token = jwtService.generateToken(userDetails);
-            
             String normalizedLoginDocument = normalizeDocument(request.username());
             UserEntity user = userRepository.findByUsername(request.username())
                     .or(() -> userRepository.findByEmail(request.username()))
@@ -105,6 +104,7 @@ public class AuthController {
                             ? userRepository.findByCpf(normalizedLoginDocument)
                             : java.util.Optional.empty())
                     .orElseThrow(() -> new RuntimeException("User not found"));
+            String token = jwtService.generateToken(userDetails, user.getCredentialsVersion());
             
             Set<String> roles = user.getRoles().stream()
                     .map(RoleEntity::getName)
@@ -125,6 +125,7 @@ public class AuthController {
     }
     
     @PostMapping("/register")
+    @Transactional
     public ResponseEntity<?> register(@RequestBody @Valid RegisterRequest request,
                                       @RequestHeader(value = "X-Bravus-Client", required = false) String bravusClient) {
         if (!isAndroidApkRegistration(request, bravusClient)) {
@@ -196,7 +197,7 @@ public class AuthController {
         
         // Generate token
         UserDetails userDetails = userDetailsService.loadUserByUsername(user.getUsername());
-        String token = jwtService.generateToken(userDetails);
+        String token = jwtService.generateToken(userDetails, user.getCredentialsVersion());
         
         Set<String> roleNames = user.getRoles().stream()
                 .map(RoleEntity::getName)
