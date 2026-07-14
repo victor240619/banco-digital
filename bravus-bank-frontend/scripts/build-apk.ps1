@@ -21,6 +21,8 @@ if (Test-Path $localTrustStore) {
   $env:GRADLE_OPTS = "$sslOptions $env:GRADLE_OPTS".Trim()
 }
 
+& (Join-Path $PSScriptRoot "generate-app-icons.ps1")
+
 npm.cmd run build
 
 $downloadsInDist = Join-Path $root "dist\downloads"

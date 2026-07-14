@@ -26,6 +26,8 @@ if (-not (Test-Path $keyProperties)) {
   throw "Arquivo de assinatura nao encontrado: android\key.properties"
 }
 
+& (Join-Path $PSScriptRoot "generate-app-icons.ps1")
+
 npm.cmd run build
 
 $downloadsInDist = Join-Path $root "dist\downloads"

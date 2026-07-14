@@ -6,7 +6,7 @@ import {
   Send, Landmark, CreditCard, Percent,
   FileText, Barcode, CalendarDays, LineChart, UserCheck, UsersRound,
   ClipboardCheck, ShieldCheck, Smartphone, Building2, List, Grid3X3,
-  Download, Share2,
+  Download, Share2, ArrowLeft,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -104,6 +104,13 @@ const MODULE_ROUTE_STATE = {
   '/dashboard/favorecidos': { tab: 'overview', activeModule: 'beneficiaries' },
   '/dashboard/limites': { tab: 'overview', activeModule: 'limits' },
   '/dashboard/seguranca': { tab: 'overview', activeModule: 'security' },
+};
+
+const DIRECT_ROUTE_META = {
+  '/dashboard/deposit': { label: 'Depósito', Icon: ArrowDownToLine },
+  '/dashboard/withdraw': { label: 'Saque', Icon: ArrowUpFromLine },
+  '/dashboard/saque': { label: 'Saque', Icon: ArrowUpFromLine },
+  '/dashboard/transfer': { label: 'Transferência', Icon: ArrowRightLeft },
 };
 
 const routeStateForPath = (pathname) => {
@@ -625,6 +632,7 @@ export default function UserDashboard() {
       });
       setResolvedRecipient(null);
     }
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [location.pathname]);
   useEffect(() => {
     if (success || error) {
@@ -924,6 +932,13 @@ export default function UserDashboard() {
     { id: 'security', label: 'Seguranca', Icon: ShieldCheck, badge: 'Ativa' },
   ];
 
+  const normalizedDashboardPath = location.pathname.replace(/\/+$/, '') || '/dashboard';
+  const isDashboardHome = normalizedDashboardPath === '/dashboard';
+  const activeModuleDefinition = bankingModules.find((module) => module.id === activeModule) || bankingModules[0];
+  const dedicatedPageMeta = DIRECT_ROUTE_META[normalizedDashboardPath] || activeModuleDefinition;
+  const transferOperationLabel =
+    activeModule === 'payments' ? 'pagamento' : activeModule === 'pix' ? 'Pix' : 'transferência';
+
   const handleModuleClick = (moduleId) => {
     const route = MODULE_ROUTES[moduleId] || '/dashboard';
     const routeState = routeStateForPath(route);
@@ -954,8 +969,10 @@ export default function UserDashboard() {
 
   return (
     <main className="container-app py-10 space-y-6">
-      {/* ==== Bank Identity Card ==== */}
-      {me && <BankIdentityCard me={me} />}
+      {isDashboardHome ? (
+        <>
+          {/* ==== Bank Identity Card ==== */}
+          {me && <BankIdentityCard me={me} />}
 
       {/* ==== Greeting + Balance ==== */}
       <div className="grid lg:grid-cols-3 gap-6">
@@ -1067,24 +1084,24 @@ export default function UserDashboard() {
         </div>
       </div>
 
-      <BankingAccessPanel
-        user={user}
-        me={me}
-        profile={profile}
-        modules={bankingModules}
-        view={portalView}
-        setView={setPortalView}
-        activeModule={activeModule}
-        onModuleClick={handleModuleClick}
-        transactions={transactions}
-        externalOrders={externalOrders}
-        creditSummary={creditSummary}
-        showBalance={showBalance}
-        openReceipt={openReceipt}
-        receiptLoading={receiptLoading}
-        openTransferMode={openTransferMode}
-        setTab={navigateToTab}
-      />
+          <BankingAccessPanel
+            user={user}
+            me={me}
+            profile={profile}
+            modules={bankingModules}
+            view={portalView}
+            setView={setPortalView}
+            activeModule={activeModule}
+            onModuleClick={handleModuleClick}
+          />
+        </>
+      ) : (
+        <DedicatedPageHeader
+          page={dedicatedPageMeta}
+          accountNumber={me?.dadosBancarios?.contaFormatada || me?.accountNumber || accountNumber}
+          onBack={() => navigate('/dashboard')}
+        />
+      )}
 
       {/* Alerts */}
       <AnimatePresence>
@@ -1101,18 +1118,21 @@ export default function UserDashboard() {
       </AnimatePresence>
 
       {/* Tabs */}
-      <div className="mt-8 flex flex-wrap gap-2">
+      {isDashboardHome && (
+        <div className="mt-8 flex flex-wrap gap-2">
         <Tab id="overview" label="Visão geral" icon={Wallet} />
         <Tab id="deposit" label="Depósito" icon={ArrowDownToLine} />
         <Tab id="withdraw" label="Saque" icon={ArrowUpFromLine} />
         <Tab id="transfer" label="Transferência" icon={ArrowRightLeft} />
         <Tab id="statements" label="Extratos" icon={FileText} />
-      </div>
+        </div>
+      )}
 
       {/* Content */}
       <div className="mt-6">
         {tab === 'overview' && (
-          <div className="grid lg:grid-cols-3 gap-6">
+          isDashboardHome ? (
+            <div className="grid lg:grid-cols-3 gap-6">
             {/* Chart */}
             <div className="lg:col-span-2 card-premium p-6">
               <div className="flex items-center justify-between mb-4">
@@ -1164,7 +1184,23 @@ export default function UserDashboard() {
                 </ul>
               )}
             </div>
-          </div>
+            </div>
+          ) : (
+            <PortalModuleDetail
+              module={activeModuleDefinition}
+              activeModule={activeModule}
+              pageRoute={MODULE_ROUTES[activeModule] || normalizedDashboardPath}
+              transactions={transactions}
+              externalOrders={externalOrders}
+              creditSummary={creditSummary}
+              showBalance={showBalance}
+              openReceipt={openReceipt}
+              receiptLoading={receiptLoading}
+              openTransferMode={openTransferMode}
+              setTab={navigateToTab}
+              me={me}
+            />
+          )
         )}
 
         {tab === 'statements' && (
@@ -1182,10 +1218,16 @@ export default function UserDashboard() {
         {(tab === 'deposit' || tab === 'withdraw' || tab === 'transfer') && (
           <div className="card-premium p-6 max-w-3xl">
             <h3 className="title-md mb-1">
-              {tab === 'deposit' ? 'Novo depósito' : tab === 'withdraw' ? 'Novo saque' : 'Nova transferência'}
+              {tab === 'deposit' ? 'Novo depósito' : tab === 'withdraw' ? 'Novo saque' : `Novo ${transferOperationLabel}`}
             </h3>
             <p className="text-sm text-ink-300 mb-5">
-              {tab === 'transfer' ? 'Envie para conta Bravus ou registre PIX/TED pelo provedor Bravus.' : 'Operação em conta corrente.'}
+              {tab === 'transfer'
+                ? activeModule === 'payments'
+                  ? 'Pague por Pix, TED ou outro canal bancário disponível.'
+                  : activeModule === 'pix'
+                    ? 'Envie um Pix pela chave do beneficiário.'
+                    : 'Envie para conta Bravus ou registre PIX/TED pelo provedor Bravus.'
+                : 'Operação em conta corrente.'}
             </p>
 
             <div className="space-y-4">
@@ -1432,7 +1474,7 @@ export default function UserDashboard() {
               >
                 {submitting ? 'Processando...' : (
                   tab === 'deposit' ? 'Confirmar depósito' :
-                  tab === 'withdraw' ? 'Confirmar saque' : 'Confirmar transferência'
+                  tab === 'withdraw' ? 'Confirmar saque' : `Confirmar ${transferOperationLabel}`
                 )}
               </button>
 
@@ -1441,14 +1483,14 @@ export default function UserDashboard() {
                   <div className="text-sm font-semibold text-white mb-3">Ordens Bravus recentes</div>
                   <ul className="space-y-2">
                     {externalOrders.slice(0, 4).map((order) => (
-                      <li key={order.id} className="flex items-center justify-between gap-3 text-sm">
+                      <li key={order.id} className="flex flex-col items-stretch gap-2 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                         <span className="min-w-0 truncate text-ink-200">
                           {order.channel} · {order.beneficiaryName}
                         </span>
                         <span className="shrink-0 text-ink-300">{formatCurrency(order.amountCentavos)} - {order.settlementStatus || order.status}</span>
                         <button
                           type="button"
-                          className="btn-secondary !py-1.5 !px-2.5"
+                          className="btn-secondary w-full justify-center !py-1.5 !px-2.5 sm:w-auto"
                           disabled={receiptLoading === order.id}
                           onClick={() => openReceipt(order.id)}
                         >
@@ -1556,16 +1598,38 @@ export default function UserDashboard() {
   );
 }
 
+function DedicatedPageHeader({ page, accountNumber, onBack }) {
+  const Icon = page?.Icon || Wallet;
+
+  return (
+    <section className="flex min-w-0 items-center gap-4 border-b border-white/10 pb-5">
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.05] text-ink-100 transition hover:bg-white/[0.1]"
+        aria-label="Voltar para Minha Conta"
+        title="Voltar para Minha Conta"
+      >
+        <ArrowLeft className="h-5 w-5" />
+      </button>
+      <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-gold text-[#05122f]">
+        <Icon className="h-6 w-6" />
+      </span>
+      <div className="min-w-0">
+        <div className="text-xs uppercase tracking-[0.2em] text-amber-300/80">Página bancária</div>
+        <h1 className="mt-1 truncate font-display text-2xl font-semibold text-white">{page?.label || 'Minha Conta'}</h1>
+        <div className="mt-1 truncate text-xs font-mono text-ink-400">Conta {accountNumber || '-'}</div>
+      </div>
+    </section>
+  );
+}
+
 function BankingAccessPanel({
   user, me, profile, modules, view, setView, activeModule, onModuleClick,
-  transactions, externalOrders, creditSummary, showBalance, openReceipt,
-  receiptLoading, openTransferMode, setTab,
 }) {
-  const active = modules.find((module) => module.id === activeModule) || modules[0];
   const account = me?.dadosBancarios || {};
   const companyName = profile?.fullName || user?.fullName || user?.username || 'Cliente Bravus';
   const document = profile?.cpf || user?.cpf || me?.cpf;
-  const pageRoute = MODULE_ROUTES[activeModule] || '/dashboard';
 
   return (
     <section className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
@@ -1633,20 +1697,6 @@ function BankingAccessPanel({
           </div>
         )}
 
-        <PortalModuleDetail
-          module={active}
-          activeModule={activeModule}
-          pageRoute={pageRoute}
-          transactions={transactions}
-          externalOrders={externalOrders}
-          creditSummary={creditSummary}
-          showBalance={showBalance}
-          openReceipt={openReceipt}
-          receiptLoading={receiptLoading}
-          openTransferMode={openTransferMode}
-          setTab={setTab}
-          me={me}
-        />
       </div>
     </section>
   );
