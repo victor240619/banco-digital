@@ -65,8 +65,6 @@ function command(file, args) {
   });
 }
 
-const sourceCommitSha = await command("git", ["rev-parse", "HEAD"]);
-const rawPublicUrl = `https://raw.githubusercontent.com/victor240619/banco-digital/${sourceCommitSha}/bravus-bank-frontend/public`;
 const snapshotUrl = process.env.BRAVUS_SITES_SNAPSHOT_URL || "https://bravus-bank-240619.victor2406.chatgpt.site";
 
 async function fetchLiveJson(path, token = "sites-admin-token") {
@@ -144,8 +142,8 @@ const files = {};
 for (const file of await walk(distDir)) {
   const route = `/${relative(distDir, file).replaceAll("\\", "/")}`;
   const type = contentTypes[extname(file).toLowerCase()] || "application/octet-stream";
-  if (extname(file).toLowerCase() === ".apk") {
-    files[route] = { type, redirect: `${rawPublicUrl}${route}` };
+  if (extname(file).toLowerCase() === ".apk" && basename(file) === "bravus-bank.apk") {
+    files[route] = { type, alias: "/downloads/bravus-bank-mobile.apk" };
     continue;
   }
   files[route] = { type, body: (await readFile(file)).toString("base64") };
@@ -1672,10 +1670,17 @@ async function handleApi(request) {
 export default {
   fetch(request) {
     if (new URL(request.url).pathname.startsWith("/api/")) return handleApi(request);
-    const file = files[routePath(request.url)];
+    const requestedPath = routePath(request.url);
+    const file = files[requestedPath];
     if (!file) return new Response("Not found", { status: 404 });
-    if (file.redirect) return Response.redirect(file.redirect, 302);
-    return new Response(bytesFromBase64(file.body), { headers: { "content-type": file.type } });
+    const servedFile = file.alias ? files[file.alias] : file;
+    if (!servedFile?.body) return new Response("Not found", { status: 404 });
+    const headers = { "content-type": file.type };
+    if (file.type === "application/vnd.android.package-archive") {
+      headers["content-disposition"] = 'attachment; filename="' + (requestedPath.split("/").pop() || "bravus-bank.apk") + '"';
+      headers["x-content-type-options"] = "nosniff";
+    }
+    return new Response(bytesFromBase64(servedFile.body), { headers });
   },
 };
 `;
@@ -1691,6 +1696,6 @@ console.log(JSON.stringify({
   archive: archivePath,
   archiveName: basename(archivePath),
   files: Object.keys(files).length,
-  redirects: Object.values(files).filter((file) => file.redirect).length,
+  aliases: Object.values(files).filter((file) => file.alias).length,
   bytes: archive.size,
 }, null, 2));
