@@ -467,8 +467,13 @@ export default function UserDashboard() {
   }, [success, error]);
 
   useEffect(() => {
-    const destination = form.destinationAccount.trim();
-    if (tab !== 'transfer' || form.transferMode !== 'internal' || destination.length < 3) {
+    const destination =
+      form.transferMode === 'internal'
+        ? form.destinationAccount.trim()
+        : form.channel === 'PIX'
+          ? form.pixKey.trim()
+          : '';
+    if (tab !== 'transfer' || destination.length < 3) {
       setResolvedRecipient(null);
       setResolveLoading(false);
       return undefined;
@@ -489,7 +494,7 @@ export default function UserDashboard() {
       active = false;
       clearTimeout(timer);
     };
-  }, [tab, form.transferMode, form.destinationAccount]);
+  }, [tab, form.transferMode, form.destinationAccount, form.channel, form.pixKey]);
 
   const loadData = async () => {
     try {
@@ -521,7 +526,7 @@ export default function UserDashboard() {
       return setError('Informe conta, CPF, e-mail ou chave Pix Bravus de destino.');
     }
     if (kind === 'transfer' && form.transferMode === 'external') {
-      if (!form.beneficiaryName || !form.beneficiaryDocument) {
+      if ((!form.beneficiaryName || !form.beneficiaryDocument) && !resolvedRecipient) {
         return setError('Informe nome e documento do beneficiário.');
       }
       if (form.channel === 'PIX' && !form.pixKey) {
@@ -563,15 +568,15 @@ export default function UserDashboard() {
         const { data } = await userService.externalTransfer({
           amountCentavos,
           channel: form.channel,
-          beneficiaryName: form.beneficiaryName,
-          beneficiaryDocument: form.beneficiaryDocument,
-          bankCode: form.bankCode,
-          ispb: form.ispb,
-          agency: form.agency,
-          accountNumber: form.accountNumber,
-          accountDigit: form.accountDigit,
-          accountType: form.accountType,
-          destinationNetwork: form.destinationNetwork,
+          beneficiaryName: form.beneficiaryName || resolvedRecipient?.name || resolvedRecipient?.fullName,
+          beneficiaryDocument: form.beneficiaryDocument || resolvedRecipient?.document,
+          bankCode: form.bankCode || resolvedRecipient?.bankCode,
+          ispb: form.ispb || resolvedRecipient?.ispb,
+          agency: form.agency || resolvedRecipient?.agency,
+          accountNumber: form.accountNumber || resolvedRecipient?.accountNumber,
+          accountDigit: form.accountDigit || resolvedRecipient?.accountDigit,
+          accountType: form.accountType || resolvedRecipient?.accountType,
+          destinationNetwork: resolvedRecipient ? 'INTERNAL_BRAVUS' : form.destinationNetwork,
           pixKey: form.pixKey,
           pixKeyType: form.pixKeyType,
           description: form.description,
@@ -1821,8 +1826,10 @@ function TransactionCompactLine({ tx, showBalance, openReceipt, receiptLoading }
 }
 
 function TransferRecipientPreview({ form, resolvedRecipient, resolveLoading }) {
-  if (form.transferMode === 'internal') {
-    const destination = form.destinationAccount.trim();
+  const internalDestination = form.transferMode === 'internal';
+  const pixDestination = form.transferMode === 'external' && form.channel === 'PIX';
+  if (internalDestination || pixDestination) {
+    const destination = internalDestination ? form.destinationAccount.trim() : form.pixKey.trim();
     if (!destination) return null;
     const name = resolvedRecipient?.name || resolvedRecipient?.fullName;
     const detail = resolvedRecipient
@@ -1831,7 +1838,7 @@ function TransferRecipientPreview({ form, resolvedRecipient, resolveLoading }) {
           resolvedRecipient.accountNumber && `Conta ${resolvedRecipient.accountNumber}`,
           resolvedRecipient.bankName || 'Bravus Premium Bank',
         ].filter(Boolean).join(' | ')
-      : `Chave/conta informada: ${destination}`;
+      : `${internalDestination ? 'Chave/conta' : 'Chave Pix'} informada: ${destination}`;
 
     return (
       <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.06] p-4 text-sm">

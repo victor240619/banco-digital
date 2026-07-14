@@ -19,6 +19,7 @@ const contentTypes = {
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".txt": "text/plain; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
   ".webp": "image/webp",
 };
 
@@ -150,7 +151,7 @@ const now = () => new Date().toISOString();
 const corsHeaders = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "access-control-allow-headers": "authorization, content-type, x-bravus-client",
+  "access-control-allow-headers": "authorization, content-type, x-bravus-client, idempotency-key",
   "access-control-max-age": "86400",
 };
 const joaoCreditGrant = {
