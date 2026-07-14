@@ -74,9 +74,9 @@ const MODULE_ROUTES = {
   transfers: '/dashboard/transferencias',
   receipts: '/dashboard/comprovantes',
   pix: '/dashboard/pix',
-  'deposit-check': '/dashboard/deposit',
-  credit: '/dashboard/credito',
-  dda: '/dashboard/dda',
+  'deposit-check': '/dashboard/deposito-cheque',
+  credit: '/dashboard/emprestimos-recebiveis',
+  dda: '/dashboard/dda-boletos',
   cards: '/dashboard/cartoes',
   checks: '/dashboard/cheques',
   schedules: '/dashboard/agendamentos',
@@ -87,6 +87,25 @@ const MODULE_ROUTES = {
   security: '/dashboard/seguranca',
 };
 
+const MODULE_ROUTE_STATE = {
+  '/dashboard/extratos': { tab: 'statements', activeModule: 'balances' },
+  '/dashboard/pagamentos': { tab: 'transfer', activeModule: 'payments', transferMode: 'external', channel: 'PIX', destinationNetwork: 'PIX_BR' },
+  '/dashboard/transferencias': { tab: 'transfer', activeModule: 'transfers', transferMode: 'internal', channel: 'PIX', destinationNetwork: 'PIX_BR' },
+  '/dashboard/comprovantes': { tab: 'overview', activeModule: 'receipts' },
+  '/dashboard/pix': { tab: 'transfer', activeModule: 'pix', transferMode: 'external', channel: 'PIX', destinationNetwork: 'PIX_BR' },
+  '/dashboard/deposito-cheque': { tab: 'overview', activeModule: 'deposit-check' },
+  '/dashboard/emprestimos-recebiveis': { tab: 'overview', activeModule: 'credit' },
+  '/dashboard/dda-boletos': { tab: 'overview', activeModule: 'dda' },
+  '/dashboard/cartoes': { tab: 'overview', activeModule: 'cards' },
+  '/dashboard/cheques': { tab: 'overview', activeModule: 'checks' },
+  '/dashboard/agendamentos': { tab: 'overview', activeModule: 'schedules' },
+  '/dashboard/investimentos': { tab: 'overview', activeModule: 'investments' },
+  '/dashboard/pendencias': { tab: 'overview', activeModule: 'pending' },
+  '/dashboard/favorecidos': { tab: 'overview', activeModule: 'beneficiaries' },
+  '/dashboard/limites': { tab: 'overview', activeModule: 'limits' },
+  '/dashboard/seguranca': { tab: 'overview', activeModule: 'security' },
+};
+
 const routeStateForPath = (pathname) => {
   const path = pathname.replace(/\/+$/, '') || '/dashboard';
   const states = {
@@ -95,13 +114,14 @@ const routeStateForPath = (pathname) => {
     '/dashboard/withdraw': { tab: 'withdraw', activeModule: 'balances' },
     '/dashboard/saque': { tab: 'withdraw', activeModule: 'balances' },
     '/dashboard/transfer': { tab: 'transfer', activeModule: 'transfers', transferMode: 'internal', channel: 'PIX' },
-    '/dashboard/transferencias': { tab: 'transfer', activeModule: 'transfers', transferMode: 'internal', channel: 'PIX' },
-    '/dashboard/pagamentos': { tab: 'transfer', activeModule: 'payments', transferMode: 'external', channel: 'PIX' },
-    '/dashboard/pix': { tab: 'transfer', activeModule: 'pix', transferMode: 'external', channel: 'PIX' },
-    '/dashboard/extratos': { tab: 'statements', activeModule: 'balances' },
-    '/dashboard/comprovantes': { tab: 'overview', activeModule: 'receipts' },
+    '/dashboard/transferencias': MODULE_ROUTE_STATE['/dashboard/transferencias'],
+    '/dashboard/pagamentos': MODULE_ROUTE_STATE['/dashboard/pagamentos'],
+    '/dashboard/pix': MODULE_ROUTE_STATE['/dashboard/pix'],
+    '/dashboard/extratos': MODULE_ROUTE_STATE['/dashboard/extratos'],
+    '/dashboard/comprovantes': MODULE_ROUTE_STATE['/dashboard/comprovantes'],
     '/dashboard/credito': { tab: 'overview', activeModule: 'credit' },
     '/dashboard/dda': { tab: 'overview', activeModule: 'dda' },
+    ...MODULE_ROUTE_STATE,
     '/dashboard/cartoes': { tab: 'overview', activeModule: 'cards' },
     '/dashboard/cheques': { tab: 'overview', activeModule: 'checks' },
     '/dashboard/agendamentos': { tab: 'overview', activeModule: 'schedules' },
@@ -454,7 +474,7 @@ export default function UserDashboard() {
         ...EMPTY_FORM,
         transferMode: route.transferMode,
         channel: route.channel || 'PIX',
-        destinationNetwork: route.channel === 'TED' ? 'TED_BR' : 'PIX_BR',
+        destinationNetwork: route.destinationNetwork || (route.channel === 'TED' ? 'TED_BR' : 'PIX_BR'),
       });
       setResolvedRecipient(null);
     }
@@ -702,7 +722,7 @@ export default function UserDashboard() {
     navigate(TAB_ROUTES[id] || '/dashboard');
   };
 
-  const openTransferMode = (transferMode = 'internal', channel = 'PIX') => {
+  const openTransferMode = (transferMode = 'internal', channel = 'PIX', routeOverride = null) => {
     setForm({
       ...EMPTY_FORM,
       transferMode,
@@ -713,7 +733,7 @@ export default function UserDashboard() {
         : channel,
     });
     setTab('transfer');
-    navigate(transferMode === 'internal' ? '/dashboard/transfer' : '/dashboard/pagamentos');
+    navigate(routeOverride || (transferMode === 'internal' ? '/dashboard/transfer' : '/dashboard/pagamentos'));
   };
 
   const bankingModules = [
@@ -736,13 +756,19 @@ export default function UserDashboard() {
   ];
 
   const handleModuleClick = (moduleId) => {
-    setActiveModule(moduleId);
-    if (moduleId === 'payments' || moduleId === 'pix') return openTransferMode('external', 'PIX');
-    if (moduleId === 'transfers') return openTransferMode('internal', 'PIX');
-    if (moduleId === 'deposit-check') return navigateToTab('deposit');
-    if (moduleId === 'balances') return navigateToTab('statements');
-    setTab('overview');
-    return navigate(MODULE_ROUTES[moduleId] || '/dashboard');
+    const route = MODULE_ROUTES[moduleId] || '/dashboard';
+    const routeState = routeStateForPath(route);
+    setActiveModule(routeState.activeModule);
+    setTab(routeState.tab);
+    if (routeState.transferMode) {
+      setForm({
+        ...EMPTY_FORM,
+        transferMode: routeState.transferMode,
+        channel: routeState.channel || 'PIX',
+        destinationNetwork: routeState.destinationNetwork || (routeState.channel === 'TED' ? 'TED_BR' : 'PIX_BR'),
+      });
+    }
+    return navigate(route);
   };
 
   const Tab = ({ id, label, icon: Icon }) => (
@@ -1370,6 +1396,7 @@ function BankingAccessPanel({
   const account = me?.dadosBancarios || {};
   const companyName = profile?.fullName || user?.fullName || user?.username || 'Cliente Bravus';
   const document = profile?.cpf || user?.cpf || me?.cpf;
+  const pageRoute = MODULE_ROUTES[activeModule] || '/dashboard';
 
   return (
     <section className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
@@ -1440,6 +1467,7 @@ function BankingAccessPanel({
         <PortalModuleDetail
           module={active}
           activeModule={activeModule}
+          pageRoute={pageRoute}
           transactions={transactions}
           externalOrders={externalOrders}
           creditSummary={creditSummary}
@@ -1507,17 +1535,84 @@ function ModuleListButton({ module, active, onClick }) {
 }
 
 function PortalModuleDetail({
-  module, activeModule, transactions, externalOrders, creditSummary, showBalance,
+  module, activeModule, pageRoute, transactions, externalOrders, creditSummary, showBalance,
   openReceipt, receiptLoading, openTransferMode, setTab, me,
 }) {
   const latestTx = transactions.slice(0, 4);
   const latestOrders = externalOrders.slice(0, 4);
+  const moduleMetrics = {
+    payments: [
+      { label: 'Canal', value: 'PIX/TED' },
+      { label: 'Ordens', value: `${externalOrders.length}` },
+      { label: 'Pagina', value: 'Pagamentos' },
+    ],
+    pix: [
+      { label: 'Chave', value: me?.dadosBancarios?.chavePix || me?.cpf || '-' },
+      { label: 'Tipo', value: me?.dadosBancarios?.tipoChavePix || 'CPF' },
+      { label: 'Pagina', value: 'Pix' },
+    ],
+    transfers: [
+      { label: 'Destino', value: 'Bravus' },
+      { label: 'Liquidação', value: 'Interna' },
+      { label: 'Pagina', value: 'Transferencias' },
+    ],
+    dda: [
+      { label: 'Registrados', value: '0' },
+      { label: 'Pendentes', value: module?.badge || '0 pendentes' },
+      { label: 'Pagina', value: 'DDA' },
+    ],
+    cards: [
+      { label: 'Conta', value: module?.badge || 'Ativa' },
+      { label: 'Bandeira', value: 'Bravus' },
+      { label: 'Pagina', value: 'Cartoes' },
+    ],
+    'deposit-check': [
+      { label: 'Canal', value: 'Digital' },
+      { label: 'Status', value: module?.badge || 'Ativo' },
+      { label: 'Pagina', value: 'Deposito de Cheque' },
+    ],
+    checks: [
+      { label: 'Folhas', value: module?.badge || '0 folhas' },
+      { label: 'Conta', value: me?.dadosBancarios?.contaFormatada || me?.accountNumber || '-' },
+      { label: 'Pagina', value: 'Cheques' },
+    ],
+    schedules: [
+      { label: 'Hoje', value: module?.badge || '0 hoje' },
+      { label: 'Conta', value: me?.dadosBancarios?.contaFormatada || me?.accountNumber || '-' },
+      { label: 'Pagina', value: 'Agendamentos' },
+    ],
+    investments: [
+      { label: 'Carteira', value: module?.badge || 'Ativa' },
+      { label: 'Moeda', value: 'BRL' },
+      { label: 'Pagina', value: 'Investimentos' },
+    ],
+    pending: [
+      { label: 'KYC', value: module?.badge || 'Conta' },
+      { label: 'Documento', value: me?.cpf || '-' },
+      { label: 'Pagina', value: 'Pendencias' },
+    ],
+    beneficiaries: [
+      { label: 'Recentes', value: `${externalOrders.length}` },
+      { label: 'Conta', value: me?.dadosBancarios?.contaFormatada || me?.accountNumber || '-' },
+      { label: 'Pagina', value: 'Favorecidos' },
+    ],
+    limits: [
+      { label: 'Pix diario', value: showBalance ? formatCurrency(me?.saldos?.limitePixDiarioCentavos ?? 0) : 'R$ ******' },
+      { label: 'Conta', value: me?.dadosBancarios?.contaFormatada || me?.accountNumber || '-' },
+      { label: 'Pagina', value: 'Limites' },
+    ],
+    security: [
+      { label: 'Status', value: module?.badge || 'Ativa' },
+      { label: 'KYC', value: me?.conta?.statusKyc || 'Conta' },
+      { label: 'Pagina', value: 'Seguranca' },
+    ],
+  };
 
   return (
     <div className="mt-6 rounded-xl border border-white/10 bg-black/20 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-xs uppercase tracking-widest text-ink-400">Modulo selecionado</div>
+          <div className="text-xs uppercase tracking-widest text-ink-400">Pagina bancaria</div>
           <div className="mt-1 text-lg font-display font-semibold text-white">{module?.label}</div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1528,14 +1623,18 @@ function PortalModuleDetail({
             </button>
           )}
           {(activeModule === 'payments' || activeModule === 'pix') && (
-            <button type="button" className="btn-primary !py-2 !px-3" onClick={() => openTransferMode('external', 'PIX')}>
+            <button
+              type="button"
+              className="btn-primary !py-2 !px-3"
+              onClick={() => openTransferMode('external', 'PIX', activeModule === 'pix' ? '/dashboard/pix' : '/dashboard/pagamentos')}
+            >
               <Send className="h-4 w-4" />
               Pagar
             </button>
           )}
           {activeModule === 'transfers' && (
             <>
-              <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => openTransferMode('internal', 'PIX')}>Bravus</button>
+              <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => openTransferMode('internal', 'PIX', '/dashboard/transferencias')}>Bravus</button>
               <button type="button" className="btn-primary !py-2 !px-3" onClick={() => openTransferMode('external', 'PIX')}>Outros bancos</button>
             </>
           )}
@@ -1608,9 +1707,13 @@ function PortalModuleDetail({
 
       {!['balances', 'credit', 'receipts'].includes(activeModule) && (
         <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <Metric label="Status" value={module?.badge || 'Ativo'} />
-          <Metric label="Conta" value={me?.dadosBancarios?.contaFormatada || me?.accountNumber || '-'} />
-          <Metric label="Ultima atualizacao" value={formatDate(new Date().toISOString())} />
+          {(moduleMetrics[activeModule] || [
+            { label: 'Status', value: module?.badge || 'Ativo' },
+            { label: 'Conta', value: me?.dadosBancarios?.contaFormatada || me?.accountNumber || '-' },
+            { label: 'Pagina', value: module?.label || pageRoute },
+          ]).map((metric) => (
+            <Metric key={metric.label} label={metric.label} value={metric.value} />
+          ))}
         </div>
       )}
     </div>
