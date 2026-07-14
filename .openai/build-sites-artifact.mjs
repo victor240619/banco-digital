@@ -832,6 +832,212 @@ function reconcileInternalOrders() {
   }
 }
 
+function completedFinancialTransactions() {
+  return state.transactions.filter((tx) =>
+    tx
+    && String(tx.status || "COMPLETED").toUpperCase() === "COMPLETED"
+    && Number(tx.amount || 0) > 0
+  );
+}
+
+function transactionAmountSign(tx) {
+  const amount = Number(tx.amount || 0);
+  if (["DEPOSIT", "TRANSFER_IN"].includes(tx.type)) return amount;
+  if (["WITHDRAWAL", "TRANSFER_OUT", "TRANSFER_EXTERNAL", "PAYMENT"].includes(tx.type)) return -amount;
+  return 0;
+}
+
+function openingBalanceForUser(user) {
+  if (!user) return 0;
+  if (user.username === joao.username) return joao.balance;
+  if (user.username === francisca.username) return francisca.balance;
+  if (user.username === admin.username) return admin.balance;
+  return Number(user.openingBalanceCentavos || user.initialBalanceCentavos || 0);
+}
+
+function expectedBalancesFromTransactions() {
+  const expected = {};
+  for (const user of Object.values(state.users)) {
+    expected[user.username] = openingBalanceForUser(user);
+  }
+  for (const tx of completedFinancialTransactions()) {
+    if (!tx.username || expected[tx.username] === undefined) continue;
+    expected[tx.username] += transactionAmountSign(tx);
+  }
+  return expected;
+}
+
+function materializeBalancesFromTransactions(reason) {
+  const expected = expectedBalancesFromTransactions();
+  for (const user of Object.values(state.users)) {
+    if (expected[user.username] === undefined) continue;
+    const current = Number(user.balance || 0);
+    const next = expected[user.username];
+    if (current !== next) {
+      state.ledgerAudit.unshift({
+        status: "BALANCE_MATERIALIZED_FROM_TRANSACTIONS",
+        username: user.username,
+        previousBalanceCentavos: current,
+        correctedBalanceCentavos: next,
+        reason,
+        createdAt: now(),
+      });
+      user.balance = next;
+    }
+  }
+}
+
+function syncJoaoCreditGrantFromBalance() {
+  const current = state.users[joao.username];
+  if (!current) return;
+  const used = Math.max(0, joaoCreditGrant.valorConcedido - Number(current.balance || 0));
+  joaoCreditGrant.valorUsado = used;
+  joaoCreditGrant.valorDisponivel = Math.max(0, joaoCreditGrant.valorConcedido - used);
+}
+
+function ledgerPairForTransaction(tx) {
+  const transferId = "sites-transaction-" + tx.id + "-" + tx.type;
+  if (hasBalancedLedger(transferId)) return;
+  const amount = Number(tx.amount || 0);
+  const user = state.users[tx.username];
+  if (!user || !amount || amount <= 0) return;
+  const bank = { username: "BRAVUS_LEDGER", accountNumber: "BRAVUS-LEDGER" };
+  const isCreditToUser = tx.type === "DEPOSIT";
+  const debitUser = isCreditToUser ? bank : user;
+  const creditUser = isCreditToUser ? user : bank;
+  const debitId = nextNumericId(state.ledgerEntries);
+  const creditId = debitId + 1;
+  const createdAt = tx.createdAt || now();
+  state.ledgerEntries.unshift(
+    {
+      id: creditId,
+      transferId,
+      transactionId: tx.id,
+      accountUsername: creditUser.username,
+      accountNumber: creditUser.accountNumber,
+      entryType: "credit",
+      signedAmountCentavos: amount,
+      currency: "BRL",
+      reason: "TRANSACTION_RECONCILIATION",
+      createdAt,
+    },
+    {
+      id: debitId,
+      transferId,
+      transactionId: tx.id,
+      accountUsername: debitUser.username,
+      accountNumber: debitUser.accountNumber,
+      entryType: "debit",
+      signedAmountCentavos: -amount,
+      currency: "BRL",
+      reason: "TRANSACTION_RECONCILIATION",
+      createdAt,
+    }
+  );
+  state.ledgerAudit.unshift({ transactionId: tx.id, status: "LEDGER_PAIR_CREATED_FOR_TRANSACTION", transferId, createdAt: now() });
+}
+
+function sameReceipt(outTx, inTx) {
+  const outReceipt = outTx.receiptOrderId || outTx.externalOrderId || null;
+  const inReceipt = inTx.receiptOrderId || inTx.externalOrderId || null;
+  return outReceipt && inReceipt && outReceipt === inReceipt;
+}
+
+function sameMoment(outTx, inTx) {
+  if (!outTx.createdAt || !inTx.createdAt) return false;
+  return Math.abs(new Date(outTx.createdAt).getTime() - new Date(inTx.createdAt).getTime()) <= 2000;
+}
+
+function existingOrderForOutTransaction(outTx) {
+  return state.externalTransfers.find((order) =>
+    order.transactionId === outTx.id
+    || order.id === outTx.receiptOrderId
+    || order.id === outTx.externalOrderId
+  ) || null;
+}
+
+function reconcileOrphanInternalTransactionPairs() {
+  const usedIncoming = new Set();
+  const outgoing = completedFinancialTransactions().filter((tx) => tx.type === "TRANSFER_OUT");
+  const incoming = completedFinancialTransactions().filter((tx) => tx.type === "TRANSFER_IN");
+  for (const outTx of outgoing) {
+    const payer = state.users[outTx.username];
+    const beneficiary = findTransferDestination(outTx.destinationAccount);
+    if (!payer || !beneficiary || payer.username === beneficiary.username) continue;
+    const existingOrder = existingOrderForOutTransaction(outTx);
+    if (existingOrder && hasBalancedLedger(existingOrder.idempotencyKey)) continue;
+    const inTx = incoming.find((candidate) =>
+      !usedIncoming.has(candidate.id)
+      && candidate.username === beneficiary.username
+      && Number(candidate.amount || 0) === Number(outTx.amount || 0)
+      && findTransferDestination(candidate.destinationAccount)?.username === payer.username
+      && (sameReceipt(outTx, candidate) || sameMoment(outTx, candidate))
+    );
+    if (!inTx) {
+      state.ledgerAudit.unshift({
+        transactionId: outTx.id,
+        status: "ORPHAN_TRANSFER_OUT_WITHOUT_MATCHING_INCOMING",
+        createdAt: now(),
+      });
+      continue;
+    }
+    usedIncoming.add(inTx.id);
+    const orderId = outTx.receiptOrderId || outTx.externalOrderId || inTx.receiptOrderId || inTx.externalOrderId || nextNumericId(state.externalTransfers);
+    const transferKey = existingOrder?.idempotencyKey || outTx.idempotencyKey || inTx.idempotencyKey || ("sites-orphan-internal-" + outTx.id + "-" + inTx.id);
+    const order = internalOrderPayload({
+      order: existingOrder || { id: orderId, createdAt: outTx.createdAt || inTx.createdAt || now() },
+      payer,
+      beneficiary,
+      tx: outTx,
+      amount: Number(outTx.amount || 0),
+      description: outTx.description || inTx.description || "Transferencia interna reconciliada",
+      channel: "PIX",
+      idempotencyKey: transferKey,
+      settlementMessage: "Transferencia concluida encontrada no extrato e reconciliada no ledger Bravus.",
+    });
+    applyTransferParties(outTx, partyForUser(payer), partyForUser(beneficiary), "PAYER", order.id);
+    applyTransferParties(inTx, partyForUser(payer), partyForUser(beneficiary), "BENEFICIARY", order.id);
+    outTx.receiptOrderId = order.id;
+    outTx.externalOrderId = order.id;
+    outTx.receiptAvailable = true;
+    inTx.receiptOrderId = order.id;
+    inTx.externalOrderId = order.id;
+    inTx.receiptAvailable = true;
+    if (!state.externalTransfers.includes(order)) state.externalTransfers.unshift(order);
+    appendInternalLedgerPair(order, payer, beneficiary, Number(outTx.amount || 0), "TRANSACTION_PAIR_RECONCILIATION");
+    order.ledgerSettledAt = order.ledgerSettledAt || now();
+    order.ledgerStatus = "BALANCED";
+    state.ledgerAudit.unshift({ orderId: order.id, status: "ORPHAN_INTERNAL_TRANSFER_RECONCILED", createdAt: now() });
+  }
+}
+
+function reconcileStandaloneTransactions() {
+  for (const tx of completedFinancialTransactions()) {
+    if (["DEPOSIT", "WITHDRAWAL", "TRANSFER_EXTERNAL", "PAYMENT"].includes(tx.type)) {
+      ledgerPairForTransaction(tx);
+    }
+  }
+}
+
+function balanceMismatches() {
+  const expected = expectedBalancesFromTransactions();
+  return Object.values(state.users)
+    .map((user) => ({
+      username: user.username,
+      currentBalanceCentavos: Number(user.balance || 0),
+      expectedBalanceCentavos: expected[user.username] ?? Number(user.balance || 0),
+    }))
+    .filter((item) => item.currentBalanceCentavos !== item.expectedBalanceCentavos);
+}
+
+function enforceFinancialConsistency(reason) {
+  reconcileInternalOrders();
+  reconcileOrphanInternalTransactionPairs();
+  reconcileStandaloneTransactions();
+  materializeBalancesFromTransactions(reason);
+  syncJoaoCreditGrantFromBalance();
+}
+
 function validateSitesLedger() {
   const groups = {};
   for (const entry of state.ledgerEntries) {
@@ -841,15 +1047,19 @@ function validateSitesLedger() {
     groups[key].netAmount += Number(entry.signedAmountCentavos || 0);
   }
   const broken = Object.values(groups).filter((item) => item.entryCount !== 2 || item.netAmount !== 0);
+  const mismatches = balanceMismatches();
   return {
-    valid: broken.length === 0,
+    valid: broken.length === 0 && mismatches.length === 0,
     checkedTransfers: Object.keys(groups).length,
     brokenTransfers: broken,
-    message: broken.length === 0 ? "Ledger Sites balanceado: debito e credito pareados." : "Ledger Sites possui transferencias quebradas.",
+    balanceMismatches: mismatches,
+    message: broken.length === 0 && mismatches.length === 0
+      ? "Ledger Sites balanceado: debito e credito pareados, saldos materializados pela historia financeira."
+      : "Ledger Sites possui divergencias contabeis ou saldo materializado fora da historia financeira.",
   };
 }
 
-reconcileInternalOrders();
+enforceFinancialConsistency("BOOTSTRAP");
 
 function inferNetwork(body) {
   if (body.destinationNetwork) return String(body.destinationNetwork).toUpperCase();
@@ -1158,6 +1368,8 @@ async function handleApi(request) {
 
   const user = userFromToken(request);
   if (!user) return json({ message: "Unauthorized" }, { status: 401 });
+
+  enforceFinancialConsistency("AUTHENTICATED_REQUEST");
 
   if (request.method === "GET" && path === "/user/profile") return json(userSummary(user));
   if (request.method === "GET" && path === "/user/me") return json(bankMe(user));
