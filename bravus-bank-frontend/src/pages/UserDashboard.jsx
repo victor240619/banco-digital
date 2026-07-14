@@ -503,7 +503,7 @@ export default function UserDashboard() {
     const timer = setTimeout(async () => {
       try {
         const { data } = await userService.resolveTransferDestination(destination);
-        if (active) setResolvedRecipient(data);
+        if (active) setResolvedRecipient(data?.found === false ? null : data);
       } catch {
         if (active) setResolvedRecipient(null);
       } finally {
@@ -541,9 +541,16 @@ export default function UserDashboard() {
   const cents = (v) => Math.round(parseFloat(v) * 100);
 
   const submit = async (kind) => {
-    if (!form.amount || parseFloat(form.amount) <= 0) return setError('Digite um valor válido.');
+    const amountCentavos = cents(form.amount);
+    if (!form.amount || !Number.isFinite(amountCentavos) || amountCentavos <= 0) return setError('Digite um valor válido.');
+    if ((kind === 'withdraw' || kind === 'transfer') && balance < amountCentavos) {
+      return setError('Saldo disponivel insuficiente para concluir a operacao.');
+    }
     if (kind === 'transfer' && form.transferMode === 'internal' && !form.destinationAccount) {
       return setError('Informe conta, CPF, e-mail ou chave Pix Bravus de destino.');
+    }
+    if (kind === 'transfer' && form.transferMode === 'internal' && !resolvedRecipient) {
+      return setError('Confira o recebedor Bravus antes de enviar. Digite a conta, CPF ou chave Pix completa.');
     }
     if (kind === 'transfer' && form.transferMode === 'external') {
       if ((!form.beneficiaryName || !form.beneficiaryDocument) && !resolvedRecipient) {
@@ -561,7 +568,6 @@ export default function UserDashboard() {
       }
     setSubmitting(true);
     try {
-      const amountCentavos = cents(form.amount);
       let message =
         kind === 'deposit' ? 'Depósito realizado.' :
         kind === 'withdraw' ? 'Saque realizado.' : 'Transferência enviada.';
@@ -569,7 +575,7 @@ export default function UserDashboard() {
       if (kind === 'deposit') await userService.deposit(amountCentavos, form.description);
       if (kind === 'withdraw') await userService.withdraw(amountCentavos, form.description);
       if (kind === 'transfer' && form.transferMode === 'internal') {
-        const { data } = await userService.transfer(amountCentavos, form.destinationAccount, form.description);
+        const { data } = await userService.transfer(amountCentavos, resolvedRecipient.accountNumber, form.description);
         if (data?.provider === 'BRAVUS_INTERNAL_LEDGER') {
           message = 'Transferencia Bravus liquidada na hora.';
         }
@@ -1257,7 +1263,7 @@ export default function UserDashboard() {
               )}
 
               <button
-                disabled={submitting}
+                disabled={submitting || (tab === 'transfer' && resolveLoading)}
                 onClick={() => submit(tab)}
                 className="btn-primary w-full"
               >

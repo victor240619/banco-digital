@@ -168,15 +168,16 @@ public class UserController {
                 .orElseThrow(() -> new RuntimeException("User not found"));
         Optional<UserEntity> found = findTransferDestination(destination);
         if (found.isEmpty()) {
-            return ResponseEntity.status(404).body(Map.of(
+            return ResponseEntity.ok(Map.of(
                     "found", false,
                     "message", "Destinatario Bravus nao localizado."
             ));
         }
         UserEntity destinationUser = found.get();
         if (destinationUser.getId().equals(currentUser.getId())) {
-            return ResponseEntity.badRequest().body(Map.of(
+            return ResponseEntity.ok(Map.of(
                     "found", false,
+                    "code", "SELF_TRANSFER",
                     "message", "Nao e permitido transferir para a propria conta."
             ));
         }

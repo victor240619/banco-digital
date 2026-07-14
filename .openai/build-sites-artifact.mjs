@@ -862,8 +862,8 @@ async function handleApi(request) {
   if (request.method === "GET" && path === "/user/transfer/resolve") {
     const destination = url.searchParams.get("destination") || "";
     const found = findTransferDestination(destination);
-    if (!found) return json({ found: false, message: "Destinatario Bravus nao localizado." }, { status: 404 });
-    if (found.username === user.username) return json({ found: false, message: "Nao e permitido transferir para a propria conta." }, { status: 400 });
+    if (!found) return json({ found: false, message: "Destinatario Bravus nao localizado." });
+    if (found.username === user.username) return json({ found: false, code: "SELF_TRANSFER", message: "Nao e permitido transferir para a propria conta." });
     return json(recipientViewForUser(found));
   }
   if (request.method === "GET" && path === "/credit/summary") return json(creditSummary(user));
