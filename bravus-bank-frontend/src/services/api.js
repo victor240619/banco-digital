@@ -150,7 +150,9 @@ export const userService = {
     }, {
       headers: { 'Idempotency-Key': idempotencyKey },
     }),
-  externalTransfer: (payload) => api.post('/user/external-transfers', payload),
+  externalTransfer: (payload, idempotencyKey) => api.post('/user/external-transfers', payload, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  }),
 };
 
 export const passwordResetService = {
@@ -196,7 +198,9 @@ export const analysisService = {
 };
 
 export const externalTransferService = {
-  submit: (payload) => api.post('/admin/ledger/external-transfers', payload),
+  submit: (payload, idempotencyKey) => api.post('/admin/ledger/external-transfers', payload, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  }),
   recent: (limit = 20) => api.get(`/admin/ledger/external-transfers?limit=${limit}`),
 };
 

@@ -746,10 +746,13 @@ export default function UserDashboard() {
       return setError('Informe a conta beneficiaria para o canal selecionado.');
     }
     let transferIdempotencyKey = null;
-    if (kind === 'transfer' && form.transferMode === 'internal') {
+    if (kind === 'transfer') {
       const fingerprint = JSON.stringify([
+        form.transferMode,
         amountCentavos,
-        resolvedRecipient.accountNumber,
+        resolvedRecipient?.accountNumber || form.accountNumber || form.pixKey || '',
+        form.beneficiaryDocument || '',
+        form.channel || '',
         form.description?.trim() || '',
       ]);
       if (internalTransferAttempt.current?.fingerprint !== fingerprint) {
@@ -806,7 +809,8 @@ export default function UserDashboard() {
           pixKey: form.pixKey,
           pixKeyType: form.pixKeyType,
           description: form.description,
-        });
+        }, transferIdempotencyKey);
+        internalTransferAttempt.current = null;
         message = data?.status === 'PENDING_PROVIDER'
           ? 'Ordem registrada. Aguardando configuração do provedor Bravus.'
           : 'Transferência aceita pelo provedor Bravus e valor debitado.';

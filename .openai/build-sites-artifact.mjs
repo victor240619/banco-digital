@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
 const root = resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
@@ -113,7 +113,26 @@ async function loadLiveSeed() {
         roles: Array.isArray(user.roles) ? user.roles : rolesForSnapshotUser(user),
       };
     }
+    const requiredUsers = ["admin@bravusbank.com", "joao.victor", "francisca.reis"];
+    const missingUsers = requiredUsers.filter((username) => !usersByUsername[username]);
+    const ledgerNet = ledgerList.reduce(
+      (sum, entry) => sum + Number(entry?.signedAmountCentavos || 0),
+      0,
+    );
+    if (missingUsers.length) {
+      throw new Error(`snapshot missing required users: ${missingUsers.join(", ")}`);
+    }
+    if (!Array.isArray(transactions) || transactions.length === 0) {
+      throw new Error("snapshot has no financial transactions");
+    }
+    if (!Array.isArray(externalTransfers) || externalTransfers.length === 0) {
+      throw new Error("snapshot has no transfer receipts");
+    }
+    if (ledgerList.length === 0 || ledgerNet !== 0) {
+      throw new Error(`snapshot ledger is unavailable or unbalanced: net=${ledgerNet}`);
+    }
     return {
+      verified: true,
       capturedAt: new Date().toISOString(),
       source: snapshotUrl,
       users: usersByUsername,
@@ -123,8 +142,9 @@ async function loadLiveSeed() {
       ledgerEntries: ledgerList,
     };
   } catch (error) {
-    console.warn(`Sites live snapshot unavailable: ${error.message}`);
+    console.warn(`Sites live snapshot unavailable; the worker will require an existing D1 state: ${error.message}`);
     return {
+      verified: false,
       capturedAt: null,
       source: snapshotUrl,
       users: {},
@@ -150,7 +170,7 @@ for (const file of await walk(distDir)) {
 }
 files["/"] = files["/index.html"];
 
-const entrypoint = `const buildTarget = "bravus-sites-api-v13";
+const entrypoint = `const buildTarget = "bravus-sites-api-d1-v1";
 const files = ${JSON.stringify(files)};
 const liveSeed = ${JSON.stringify(liveSeed)};
 const now = () => new Date().toISOString();
@@ -160,7 +180,13 @@ const corsHeaders = {
   "access-control-allow-headers": "authorization, content-type, x-bravus-client, idempotency-key",
   "access-control-max-age": "86400",
 };
-const joaoCreditGrant = {
+const legacyPasswordCredential = Object.freeze({
+  algorithm: "PBKDF2-SHA256",
+  iterations: 210000,
+  salt: "d56fMiKDhEvfKfp1ke7P3A",
+  hash: "L2REk7JF5sj-Qn5xtdb7UJ85x4M83bc-bEFzGrm87O8",
+});
+const joaoCreditGrantSeed = {
   id: 1,
   valorConcedido: 89000000,
   valorDisponivel: 89000000,
@@ -209,7 +235,7 @@ const admin = {
   balance: 0,
   roles: ["ROLE_ADMIN"],
 };
-const state = globalThis.__bravusState || (globalThis.__bravusState = {
+const initialStateSeed = {
   users: { [joao.username]: joao, [francisca.username]: francisca, [admin.username]: admin, ...(liveSeed.users || {}) },
   transactions: Array.isArray(liveSeed.transactions) ? [...liveSeed.transactions] : [],
   externalTransfers: Array.isArray(liveSeed.externalTransfers) ? [...liveSeed.externalTransfers] : [],
@@ -217,6 +243,10 @@ const state = globalThis.__bravusState || (globalThis.__bravusState = {
   ledgerAudit: [],
   documentAnalyses: [],
   kycEvidence: {},
+  sessions: {},
+  passwordResetRequests: [],
+  passwordResetAudit: [],
+  creditGrant: { ...joaoCreditGrantSeed },
   globalRailParticipants: Array.isArray(liveSeed.globalRailParticipants) && liveSeed.globalRailParticipants.length
     ? [...liveSeed.globalRailParticipants]
     : [{
@@ -238,18 +268,45 @@ const state = globalThis.__bravusState || (globalThis.__bravusState = {
     createdAt: now(),
     updatedAt: now(),
   }],
-});
-state.users[joao.username] = { ...joao, ...(state.users[joao.username] || {}) };
-state.users[francisca.username] = { ...francisca, ...(state.users[francisca.username] || {}) };
-state.users[admin.username] = { ...admin, ...(state.users[admin.username] || {}) };
-if (state.users[joao.username] && state.users[joao.username].balance < joaoCreditGrant.valorConcedido) {
-  joaoCreditGrant.valorUsado = Math.max(joaoCreditGrant.valorUsado, joaoCreditGrant.valorConcedido - state.users[joao.username].balance);
-  joaoCreditGrant.valorDisponivel = Math.max(0, joaoCreditGrant.valorConcedido - joaoCreditGrant.valorUsado);
+};
+let state = null;
+let joaoCreditGrant = null;
+let currentEnv = null;
+let pendingBiometricWrites = [];
+let persistenceMeta = { backend: "D1", revision: 0, payloadHash: null, updatedAt: null };
+
+function normalizeState(candidate) {
+  const next = candidate && typeof candidate === "object" ? candidate : {};
+  next.users = next.users && typeof next.users === "object" ? next.users : {};
+  next.users[joao.username] = { ...joao, ...(next.users[joao.username] || {}) };
+  next.users[francisca.username] = { ...francisca, ...(next.users[francisca.username] || {}) };
+  next.users[admin.username] = { ...admin, ...(next.users[admin.username] || {}) };
+  for (const user of Object.values(next.users)) {
+    user.roles = Array.isArray(user.roles) && user.roles.length ? user.roles : ["ROLE_USER"];
+    user.passwordCredential = user.passwordCredential || { ...legacyPasswordCredential };
+  }
+  next.transactions = Array.isArray(next.transactions) ? next.transactions : [];
+  next.externalTransfers = Array.isArray(next.externalTransfers) ? next.externalTransfers : [];
+  next.ledgerEntries = Array.isArray(next.ledgerEntries) ? next.ledgerEntries : [];
+  next.ledgerAudit = Array.isArray(next.ledgerAudit) ? next.ledgerAudit : [];
+  next.documentAnalyses = Array.isArray(next.documentAnalyses) ? next.documentAnalyses : [];
+  next.kycEvidence = next.kycEvidence && typeof next.kycEvidence === "object" ? next.kycEvidence : {};
+  next.sessions = next.sessions && typeof next.sessions === "object" ? next.sessions : {};
+  next.passwordResetRequests = Array.isArray(next.passwordResetRequests) ? next.passwordResetRequests : [];
+  next.passwordResetAudit = Array.isArray(next.passwordResetAudit) ? next.passwordResetAudit : [];
+  next.creditGrant = next.creditGrant && typeof next.creditGrant === "object"
+    ? { ...joaoCreditGrantSeed, ...next.creditGrant }
+    : { ...joaoCreditGrantSeed };
+  next.globalRailParticipants = Array.isArray(next.globalRailParticipants) && next.globalRailParticipants.length
+    ? next.globalRailParticipants
+    : structuredClone(initialStateSeed.globalRailParticipants);
+  joaoCreditGrant = next.creditGrant;
+  return next;
 }
-state.documentAnalyses = Array.isArray(state.documentAnalyses) ? state.documentAnalyses : [];
-state.kycEvidence = state.kycEvidence || {};
-state.ledgerEntries = Array.isArray(state.ledgerEntries) ? state.ledgerEntries : [];
-state.ledgerAudit = Array.isArray(state.ledgerAudit) ? state.ledgerAudit : [];
+
+function createInitialState() {
+  return normalizeState(structuredClone(initialStateSeed));
+}
 
 function bytesFromBase64(value) {
   const binary = atob(value);
@@ -278,6 +335,183 @@ function badRequest(message, code, extra = {}) {
   return json({ message, code, ...extra }, { status: 400 });
 }
 
+function base64UrlFromBytes(value) {
+  let binary = "";
+  for (const byte of value) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+}
+
+function bytesFromBase64Url(value) {
+  const normalized = String(value || "").replaceAll("-", "+").replaceAll("_", "/");
+  const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function randomToken(byteLength = 32) {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return base64UrlFromBytes(bytes);
+}
+
+async function sha256Text(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value)));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function derivePasswordHash(password, salt, iterations) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(String(password || "")),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits({
+    name: "PBKDF2",
+    hash: "SHA-256",
+    salt: bytesFromBase64Url(salt),
+    iterations,
+  }, key, 256);
+  return base64UrlFromBytes(new Uint8Array(bits));
+}
+
+async function createPasswordCredential(password) {
+  const salt = randomToken(16);
+  const iterations = 210000;
+  return {
+    algorithm: "PBKDF2-SHA256",
+    iterations,
+    salt,
+    hash: await derivePasswordHash(password, salt, iterations),
+  };
+}
+
+async function verifyPassword(password, credential) {
+  if (!credential || credential.algorithm !== "PBKDF2-SHA256") return false;
+  const actual = await derivePasswordHash(password, credential.salt, Number(credential.iterations || 210000));
+  const expectedBytes = bytesFromBase64Url(credential.hash);
+  const actualBytes = bytesFromBase64Url(actual);
+  if (expectedBytes.length !== actualBytes.length) return false;
+  let difference = 0;
+  for (let index = 0; index < expectedBytes.length; index += 1) {
+    difference |= expectedBytes[index] ^ actualBytes[index];
+  }
+  return difference === 0;
+}
+
+function createSession(user) {
+  const token = randomToken(32);
+  state.sessions[token] = {
+    username: user.username,
+    createdAt: now(),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+  };
+  return token;
+}
+
+function revokeUserSessions(username) {
+  for (const [token, session] of Object.entries(state.sessions)) {
+    if (session?.username === username) delete state.sessions[token];
+  }
+}
+
+async function biometricEncryptionKey() {
+  const encoded = String(currentEnv?.BRAVUS_BIOMETRIC_KEY || "").trim();
+  if (!encoded) throw new Error("BIOMETRIC_ENCRYPTION_UNAVAILABLE");
+  const bytes = bytesFromBase64Url(encoded);
+  if (bytes.length !== 32) throw new Error("BIOMETRIC_ENCRYPTION_INVALID_KEY");
+  return crypto.subtle.importKey("raw", bytes, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+async function stageBiometricEvidence({ value, kind, username }) {
+  const raw = String(value || "");
+  const match = raw.match(/^data:(image\\/(?:jpeg|png));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) throw new Error("BIOMETRIC_EVIDENCE_INVALID");
+  const id = crypto.randomUUID();
+  const iv = new Uint8Array(12);
+  crypto.getRandomValues(iv);
+  const cipher = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(id + ":" + kind) },
+    await biometricEncryptionKey(),
+    new TextEncoder().encode(raw),
+  );
+  const evidence = {
+    id,
+    kind,
+    username,
+    mime: match[1],
+    ciphertext: base64UrlFromBytes(new Uint8Array(cipher)),
+    iv: base64UrlFromBytes(iv),
+    sha256: await sha256Text(raw),
+    createdAt: now(),
+  };
+  pendingBiometricWrites.push(evidence);
+  return { id, mime: evidence.mime, sha256: evidence.sha256, createdAt: evidence.createdAt };
+}
+
+async function decryptBiometricEvidence(id, kind) {
+  const row = await currentEnv.DB.prepare("SELECT id, kind, mime, ciphertext, iv FROM bravus_biometric_evidence WHERE id = ?").bind(id).first();
+  if (!row || row.kind !== kind) throw new Error("BIOMETRIC_EVIDENCE_NOT_FOUND");
+  const plain = await crypto.subtle.decrypt(
+    {
+      name: "AES-GCM",
+      iv: bytesFromBase64Url(row.iv),
+      additionalData: new TextEncoder().encode(row.id + ":" + row.kind),
+    },
+    await biometricEncryptionKey(),
+    bytesFromBase64Url(row.ciphertext),
+  );
+  return new TextDecoder().decode(plain);
+}
+
+const passwordResetTransitions = Object.freeze({
+  FACE_PENDING: ["REVIEW_PENDING", "REJECTED", "EXPIRED", "LOCKED"],
+  REVIEW_PENDING: ["VERIFIED", "REJECTED", "EXPIRED", "LOCKED"],
+  VERIFIED: ["CONSUMED", "EXPIRED"],
+  CONSUMED: [],
+  REJECTED: [],
+  EXPIRED: [],
+  LOCKED: [],
+});
+
+function transitionPasswordReset(request, next, actor, detail) {
+  if (request.status !== next && !passwordResetTransitions[request.status]?.includes(next)) {
+    throw new Error("PASSWORD_RESET_INVALID_TRANSITION");
+  }
+  const previous = request.status;
+  request.status = next;
+  state.passwordResetAudit.unshift({
+    id: crypto.randomUUID(),
+    requestId: request.requestId,
+    eventType: previous + "_TO_" + next,
+    actor: actor || "SYSTEM",
+    detail: String(detail || "").slice(0, 500),
+    createdAt: now(),
+  });
+}
+
+function passwordResetPublicStatus(status) {
+  return ["FACE_PENDING", "REVIEW_PENDING", "VERIFIED", "CONSUMED"].includes(status) ? status : "UNAVAILABLE";
+}
+
+function maskCpf(value) {
+  const normalized = digits(value);
+  return normalized.length === 11 ? "***." + normalized.slice(3, 6) + "." + normalized.slice(6, 9) + "-**" : "Documento protegido";
+}
+
+async function passwordResetRequestForClient(body) {
+  const request = state.passwordResetRequests.find((item) => item.requestId === String(body.requestId || ""));
+  if (!request || await sha256Text(body.clientSecret || "") !== request.clientSecretHash) {
+    throw new Error("PASSWORD_RESET_UNAVAILABLE");
+  }
+  if (!["CONSUMED", "REJECTED", "EXPIRED", "LOCKED"].includes(request.status)
+      && new Date(request.expiresAt).getTime() <= Date.now()) {
+    transitionPasswordReset(request, "EXPIRED", "SYSTEM", "Prazo de recuperacao encerrado.");
+  }
+  return request;
+}
+
 function userSummary(user) {
   return {
     id: user.id,
@@ -295,9 +529,9 @@ function userSummary(user) {
   };
 }
 
-function authResponse(user) {
+function authResponse(user, token) {
   return {
-    token: tokenForUser(user),
+    token,
     username: user.username,
     email: user.email,
     fullName: user.fullName,
@@ -306,12 +540,6 @@ function authResponse(user) {
     statusKyc: user.statusKyc || "APROVADO_AUTO",
     roles: user.roles,
   };
-}
-
-function tokenForUser(user) {
-  if (user.roles.includes("ROLE_ADMIN")) return "sites-admin-token";
-  if (user.username === joao.username) return "sites-joao-token";
-  return "sites-user-" + user.id + "-token";
 }
 
 function creditSummary(user) {
@@ -675,7 +903,11 @@ function commitInternalTransfer({ payer, beneficiary, amount, description, chann
   if (payer.username === beneficiary.username) throw new Error("SELF_TRANSFER");
   const transferKey = idempotencyKey || existingOrder?.idempotencyKey || ("sites-internal-" + Date.now());
   const previousOrder = state.externalTransfers.find((order) => order.idempotencyKey === transferKey && order.ledgerSettledAt);
+  const fingerprint = [payer.username, beneficiary.username, value, String(description || "").trim(), String(channel || "PIX")].join("|");
   if (previousOrder) {
+    if (previousOrder.idempotencyFingerprint && previousOrder.idempotencyFingerprint !== fingerprint) {
+      throw new Error("IDEMPOTENCY_CONFLICT");
+    }
     return {
       tx: transferTransactionForOrder(previousOrder, payer.username, "TRANSFER_OUT"),
       incomingTx: transferTransactionForOrder(previousOrder, beneficiary.username, "TRANSFER_IN"),
@@ -718,6 +950,7 @@ function commitInternalTransfer({ payer, beneficiary, amount, description, chann
       ? "Liquidacao interna confirmada no ledger Bravus, sem uso de Celcoin."
       : "Liquidacao interna confirmada no ledger Bravus.",
   });
+  order.idempotencyFingerprint = fingerprint;
   applyTransferParties(tx, partyForUser(payer), partyForUser(beneficiary), "PAYER", order.id);
   applyTransferParties(incomingTx, partyForUser(payer), partyForUser(beneficiary), "BENEFICIARY", order.id);
 
@@ -1059,8 +1292,6 @@ function validateSitesLedger() {
   };
 }
 
-enforceFinancialConsistency("BOOTSTRAP");
-
 function inferNetwork(body) {
   if (body.destinationNetwork) return String(body.destinationNetwork).toUpperCase();
   const channel = String(body.channel || "GLOBAL").toUpperCase();
@@ -1208,7 +1439,13 @@ function receiptForOrder(order, user) {
 function userFromToken(request) {
   const auth = request.headers.get("authorization") || "";
   const token = auth.replace(/^Bearer\\s+/i, "").trim();
-  return Object.values(state.users).find((item) => token === tokenForUser(item)) || null;
+  const session = state.sessions[token];
+  if (!session) return null;
+  if (new Date(session.expiresAt).getTime() <= Date.now()) {
+    delete state.sessions[token];
+    return null;
+  }
+  return state.users[session.username] || null;
 }
 
 function publicLoginMatches(user, username) {
@@ -1297,6 +1534,168 @@ function analyzeDocumentRequest(body) {
   return analysis;
 }
 
+let d1SchemaReady = false;
+let apiQueue = Promise.resolve();
+
+function enqueueApi(task) {
+  const run = apiQueue.then(task, task);
+  apiQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function ensureD1Schema(db) {
+  if (d1SchemaReady) return;
+  await db.batch([
+    db.prepare("CREATE TABLE IF NOT EXISTS bravus_state (id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1), revision INTEGER NOT NULL CHECK (revision >= 1), payload TEXT NOT NULL, payload_hash TEXT NOT NULL, source_captured_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS bravus_state_audit (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, revision INTEGER NOT NULL UNIQUE, request_id TEXT NOT NULL, method TEXT NOT NULL, path TEXT NOT NULL, actor TEXT NOT NULL, previous_hash TEXT NOT NULL, payload_hash TEXT NOT NULL, created_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS bravus_ledger_entries (transfer_id TEXT NOT NULL, entry_type TEXT NOT NULL CHECK (entry_type IN ('debit','credit')), order_id INTEGER, account_username TEXT, account_number TEXT NOT NULL, signed_amount_centavos INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'BRL', reason TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (transfer_id, entry_type), CHECK ((entry_type = 'debit' AND signed_amount_centavos < 0) OR (entry_type = 'credit' AND signed_amount_centavos > 0)))"),
+    db.prepare("CREATE TABLE IF NOT EXISTS bravus_biometric_evidence (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('ENROLLED_FACE','PASSWORD_RESET_FACE')), owner_username TEXT NOT NULL, mime TEXT NOT NULL, ciphertext TEXT NOT NULL, iv TEXT NOT NULL, sha256 TEXT NOT NULL, created_at TEXT NOT NULL)"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_ledger_entries_no_update BEFORE UPDATE ON bravus_ledger_entries BEGIN SELECT RAISE(ABORT, 'Ledger entries are immutable; create a compensating entry'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_ledger_entries_no_delete BEFORE DELETE ON bravus_ledger_entries BEGIN SELECT RAISE(ABORT, 'Ledger entries are immutable; create a compensating entry'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_state_audit_no_update BEFORE UPDATE ON bravus_state_audit BEGIN SELECT RAISE(ABORT, 'State audit entries are immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_state_audit_no_delete BEFORE DELETE ON bravus_state_audit BEGIN SELECT RAISE(ABORT, 'State audit entries are immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_biometric_evidence_no_update BEFORE UPDATE ON bravus_biometric_evidence BEGIN SELECT RAISE(ABORT, 'Biometric evidence is immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_biometric_evidence_no_delete BEFORE DELETE ON bravus_biometric_evidence BEGIN SELECT RAISE(ABORT, 'Biometric evidence is immutable'); END"),
+  ]);
+  d1SchemaReady = true;
+}
+
+function ledgerMirrorStatement(db, entry, revision, payloadHash) {
+  return db.prepare("INSERT OR IGNORE INTO bravus_ledger_entries (transfer_id, entry_type, order_id, account_username, account_number, signed_amount_centavos, currency, reason, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? FROM bravus_state WHERE id = 1 AND revision = ? AND payload_hash = ?")
+    .bind(
+      String(entry.transferId || ""),
+      String(entry.entryType || ""),
+      entry.orderId == null ? null : Number(entry.orderId),
+      entry.accountUsername || null,
+      String(entry.accountNumber || "BRAVUS-LEDGER"),
+      Number(entry.signedAmountCentavos || 0),
+      String(entry.currency || "BRL"),
+      String(entry.reason || "D1_STATE_MIRROR"),
+      String(entry.createdAt || now()),
+      revision,
+      payloadHash,
+    );
+}
+
+function biometricWriteStatement(db, evidence, revision, payloadHash) {
+  return db.prepare("INSERT OR IGNORE INTO bravus_biometric_evidence (id, kind, owner_username, mime, ciphertext, iv, sha256, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ? FROM bravus_state WHERE id = 1 AND revision = ? AND payload_hash = ?")
+    .bind(
+      evidence.id,
+      evidence.kind,
+      evidence.username,
+      evidence.mime,
+      evidence.ciphertext,
+      evidence.iv,
+      evidence.sha256,
+      evidence.createdAt,
+      revision,
+      payloadHash,
+    );
+}
+
+async function loadOrCreateD1State(db) {
+  await ensureD1Schema(db);
+  let row = await db.prepare("SELECT revision, payload, payload_hash, updated_at FROM bravus_state WHERE id = 1").first();
+  if (row) return row;
+  if (liveSeed.verified !== true) throw new Error("D1_INITIAL_IMPORT_REQUIRES_VERIFIED_SNAPSHOT");
+
+  state = createInitialState();
+  enforceFinancialConsistency("D1_INITIAL_IMPORT");
+  const payload = JSON.stringify(state);
+  const payloadHash = await sha256Text(payload);
+  const createdAt = now();
+  const statements = [
+    db.prepare("INSERT OR IGNORE INTO bravus_state (id, revision, payload, payload_hash, source_captured_at, created_at, updated_at) VALUES (1, 1, ?, ?, ?, ?, ?)")
+      .bind(payload, payloadHash, liveSeed.capturedAt || null, createdAt, createdAt),
+    db.prepare("INSERT OR IGNORE INTO bravus_state_audit (revision, request_id, method, path, actor, previous_hash, payload_hash, created_at) VALUES (1, ?, 'IMPORT', '/d1/bootstrap', 'SYSTEM', ?, ?, ?)")
+      .bind("d1-bootstrap-" + buildTarget, "GENESIS", payloadHash, createdAt),
+    ...state.ledgerEntries.map((entry) => ledgerMirrorStatement(db, entry, 1, payloadHash)),
+  ];
+  await db.batch(statements);
+  row = await db.prepare("SELECT revision, payload, payload_hash, updated_at FROM bravus_state WHERE id = 1").first();
+  if (!row) throw new Error("D1_STATE_INITIALIZATION_FAILED");
+  return row;
+}
+
+async function persistD1State(db, previous, request, actor) {
+  enforceFinancialConsistency("D1_PRE_COMMIT");
+  const validation = validateSitesLedger();
+  if (!validation.valid) {
+    throw new Error("D1_FINANCIAL_VALIDATION_FAILED");
+  }
+
+  const payload = JSON.stringify(state);
+  const payloadHash = await sha256Text(payload);
+  if (payloadHash === previous.payload_hash) {
+    persistenceMeta = {
+      backend: "D1",
+      revision: Number(previous.revision),
+      payloadHash,
+      updatedAt: previous.updated_at || null,
+    };
+    return true;
+  }
+
+  const nextRevision = Number(previous.revision) + 1;
+  const updatedAt = now();
+  const requestId = request.headers.get("idempotency-key") || request.headers.get("x-request-id") || crypto.randomUUID();
+  const path = new URL(request.url).pathname;
+  const statements = [
+    db.prepare("UPDATE bravus_state SET revision = ?, payload = ?, payload_hash = ?, updated_at = ? WHERE id = 1 AND revision = ? AND payload_hash = ?")
+      .bind(nextRevision, payload, payloadHash, updatedAt, Number(previous.revision), previous.payload_hash),
+    db.prepare("INSERT OR IGNORE INTO bravus_state_audit (revision, request_id, method, path, actor, previous_hash, payload_hash, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ? FROM bravus_state WHERE id = 1 AND revision = ? AND payload_hash = ?")
+      .bind(nextRevision, requestId, request.method, path, actor || "PUBLIC", previous.payload_hash, payloadHash, updatedAt, nextRevision, payloadHash),
+    ...state.ledgerEntries.map((entry) => ledgerMirrorStatement(db, entry, nextRevision, payloadHash)),
+    ...pendingBiometricWrites.map((evidence) => biometricWriteStatement(db, evidence, nextRevision, payloadHash)),
+  ];
+  const results = await db.batch(statements);
+  const changed = Number(results?.[0]?.meta?.changes || 0);
+  if (changed !== 1) return false;
+  persistenceMeta = { backend: "D1", revision: nextRevision, payloadHash, updatedAt };
+  return true;
+}
+
+function cloneRequestFactory(request, bodyBytes) {
+  return () => new Request(request.url, {
+    method: request.method,
+    headers: new Headers(request.headers),
+    body: bodyBytes == null ? undefined : bodyBytes.slice(0),
+  });
+}
+
+async function handlePersistedApi(request, env) {
+  if (!env?.DB) {
+    return json({ message: "Banco persistente D1 indisponivel.", code: "D1_UNAVAILABLE" }, { status: 503 });
+  }
+  const bodyBytes = ["GET", "HEAD", "OPTIONS"].includes(request.method)
+    ? null
+    : await request.clone().arrayBuffer();
+  const makeRequest = cloneRequestFactory(request, bodyBytes);
+
+  return enqueueApi(async () => {
+    currentEnv = env;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const previous = await loadOrCreateD1State(env.DB);
+      state = normalizeState(JSON.parse(String(previous.payload)));
+      pendingBiometricWrites = [];
+      persistenceMeta = {
+        backend: "D1",
+        revision: Number(previous.revision),
+        payloadHash: previous.payload_hash,
+        updatedAt: previous.updated_at || null,
+      };
+      const attemptRequest = makeRequest();
+      const actor = userFromToken(attemptRequest)?.username || "PUBLIC";
+      const response = await handleApi(attemptRequest);
+      if (await persistD1State(env.DB, previous, attemptRequest, actor)) return response;
+    }
+    return json({
+      message: "A operacao concorreu com outra atualizacao. Tente novamente com a mesma chave.",
+      code: "D1_SERIALIZATION_RETRY",
+    }, { status: 409 });
+  });
+}
+
 async function handleApi(request) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\\/api/, "");
@@ -1306,10 +1705,140 @@ async function handleApi(request) {
   if (request.method === "POST" && path === "/auth/login") {
     const body = await request.json().catch(() => ({}));
     const user = Object.values(state.users).find((item) => publicLoginMatches(item, body.username));
-    if (!user || body.password !== "6run0955") {
+    if (!user || !await verifyPassword(body.password, user.passwordCredential)) {
       return json("Invalid username or password", { status: 400 });
     }
-    return json(authResponse(user));
+    const token = createSession(user);
+    return json(authResponse(user, token));
+  }
+
+  if (request.method === "POST" && path === "/auth/password-reset/start") {
+    const body = await request.json().catch(() => ({}));
+    const identifier = String(body.identifier || "").trim();
+    const idempotencyKey = String(body.idempotencyKey || "").trim();
+    const clientSecret = String(body.clientSecret || "");
+    if (!identifier || idempotencyKey.length < 20 || clientSecret.length < 32) {
+      return badRequest("Dados de recuperacao invalidos.", "PASSWORD_RESET_INVALID_INPUT");
+    }
+    const identifierHash = await sha256Text(identifier.toLowerCase());
+    const clientSecretHash = await sha256Text(clientSecret);
+    const previous = state.passwordResetRequests.find((item) => item.idempotencyKey === idempotencyKey);
+    if (previous) {
+      if (previous.identifierHash !== identifierHash || previous.clientSecretHash !== clientSecretHash) {
+        return badRequest("Chave de recuperacao ja utilizada.", "PASSWORD_RESET_IDEMPOTENCY_CONFLICT");
+      }
+      return json({
+        requestId: previous.requestId,
+        challenge: previous.challenge,
+        instruction: previous.instruction,
+        expiresAt: previous.expiresAt,
+        status: passwordResetPublicStatus(previous.status),
+      }, { status: 202 });
+    }
+    const recentCount = state.passwordResetRequests.filter((item) =>
+      item.identifierHash === identifierHash
+      && Date.now() - new Date(item.createdAt).getTime() < 15 * 60 * 1000
+    ).length;
+    if (recentCount >= 5) {
+      return json({ message: "Muitas tentativas. Aguarde antes de tentar novamente.", code: "RATE_LIMITED" }, { status: 429 });
+    }
+    const found = Object.values(state.users).find((item) => publicLoginMatches(item, identifier)) || null;
+    const createdAt = now();
+    const resetRequest = {
+      requestId: crypto.randomUUID(),
+      username: found?.username || null,
+      identifierHash,
+      idempotencyKey,
+      clientSecretHash,
+      challenge: randomToken(24),
+      instruction: "Olhe para a camera, vire levemente o rosto para a direita e mantenha os olhos abertos.",
+      status: "FACE_PENDING",
+      attempts: 0,
+      createdAt,
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+    };
+    state.passwordResetRequests.unshift(resetRequest);
+    state.passwordResetAudit.unshift({
+      id: crypto.randomUUID(), requestId: resetRequest.requestId, eventType: "STARTED", actor: "PUBLIC",
+      detail: "Solicitacao criada sem expor a existencia da conta.", createdAt,
+    });
+    return json({
+      requestId: resetRequest.requestId,
+      challenge: resetRequest.challenge,
+      instruction: resetRequest.instruction,
+      expiresAt: resetRequest.expiresAt,
+      status: "FACE_PENDING",
+    }, { status: 202 });
+  }
+
+  if (request.method === "POST" && path === "/auth/password-reset/face") {
+    const body = await request.json().catch(() => ({}));
+    let resetRequest;
+    try {
+      resetRequest = await passwordResetRequestForClient(body);
+    } catch {
+      return badRequest("Solicitacao indisponivel.", "PASSWORD_RESET_UNAVAILABLE");
+    }
+    if (resetRequest.status !== "FACE_PENDING") {
+      return json({ status: passwordResetPublicStatus(resetRequest.status) }, { status: 202 });
+    }
+    resetRequest.attempts += 1;
+    if (String(body.challenge || "") !== resetRequest.challenge) {
+      if (resetRequest.attempts >= 3) transitionPasswordReset(resetRequest, "LOCKED", "PUBLIC", "Limite de desafios invalidos excedido.");
+      return badRequest("Desafio facial invalido.", "PASSWORD_RESET_CHALLENGE_INVALID");
+    }
+    const face = imageEvidence(body.faceImage, "Biometria facial", 2500);
+    if (!face.ok) {
+      if (resetRequest.attempts >= 3) transitionPasswordReset(resetRequest, "LOCKED", "PUBLIC", "Limite de capturas invalidas excedido.");
+      return badRequest(face.message, "PASSWORD_RESET_FACE_INVALID");
+    }
+    const enrolled = resetRequest.username ? state.kycEvidence[resetRequest.username] : null;
+    if (!resetRequest.username || !enrolled?.faceEvidenceId) {
+      transitionPasswordReset(resetRequest, "REJECTED", "SYSTEM", "Conta ou biometria de abertura indisponivel.");
+      return json({ status: "UNAVAILABLE" }, { status: 202 });
+    }
+    const submitted = await stageBiometricEvidence({
+      value: body.faceImage,
+      kind: "PASSWORD_RESET_FACE",
+      username: resetRequest.username,
+    });
+    resetRequest.submittedFaceEvidenceId = submitted.id;
+    resetRequest.submittedFaceSha256 = submitted.sha256;
+    transitionPasswordReset(resetRequest, "REVIEW_PENDING", "PUBLIC", "Captura facial recebida para revisao humana.");
+    return json({ status: "REVIEW_PENDING" }, { status: 202 });
+  }
+
+  if (request.method === "POST" && path === "/auth/password-reset/status") {
+    const body = await request.json().catch(() => ({}));
+    try {
+      const resetRequest = await passwordResetRequestForClient(body);
+      return json({ status: passwordResetPublicStatus(resetRequest.status), expiresAt: resetRequest.expiresAt });
+    } catch {
+      return json({ status: "UNAVAILABLE" });
+    }
+  }
+
+  if (request.method === "POST" && path === "/auth/password-reset/complete") {
+    const body = await request.json().catch(() => ({}));
+    let resetRequest;
+    try {
+      resetRequest = await passwordResetRequestForClient(body);
+    } catch {
+      return badRequest("Solicitacao indisponivel.", "PASSWORD_RESET_UNAVAILABLE");
+    }
+    if (resetRequest.status !== "VERIFIED") {
+      return badRequest("A verificacao facial ainda nao foi aprovada.", "PASSWORD_RESET_NOT_VERIFIED");
+    }
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$/.test(String(body.newPassword || ""))) {
+      return badRequest("Use no minimo 8 caracteres, com letra maiuscula, minuscula e numero.", "WEAK_PASSWORD");
+    }
+    const account = state.users[resetRequest.username];
+    if (!account) return badRequest("Solicitacao indisponivel.", "PASSWORD_RESET_UNAVAILABLE");
+    account.passwordCredential = await createPasswordCredential(body.newPassword);
+    revokeUserSessions(account.username);
+    resetRequest.consumedAt = now();
+    transitionPasswordReset(resetRequest, "CONSUMED", account.username, "Senha substituida e sessoes anteriores revogadas.");
+    return json({ status: "CONSUMED" });
   }
 
   if (request.method === "POST" && path === "/auth/register") {
@@ -1332,11 +1861,23 @@ async function handleApi(request) {
     }
     const username = String(body.username || "cliente." + normalizedCpf.slice(-4)).trim().toLowerCase();
     const email = String(body.email || "").trim().toLowerCase();
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$/.test(String(body.password || ""))) {
+      return badRequest(
+        "Use no minimo 8 caracteres, com letra maiuscula, minuscula e numero.",
+        "WEAK_PASSWORD",
+      );
+    }
     if (Object.values(state.users).some((item) => item.cpf === normalizedCpf)) {
       return json("CPF ja cadastrado no Bravus.", { status: 400 });
     }
     if (Object.values(state.users).some((item) => item.username.toLowerCase() === username || item.email.toLowerCase() === email)) {
       return json("Usuario ou e-mail ja cadastrado no Bravus.", { status: 400 });
+    }
+    let enrolledFace;
+    try {
+      enrolledFace = await stageBiometricEvidence({ value: body.faceImage, kind: "ENROLLED_FACE", username });
+    } catch (error) {
+      return json({ message: "Nao foi possivel proteger a biometria de abertura.", code: error.message }, { status: 503 });
     }
     const user = {
       ...joao,
@@ -1351,6 +1892,7 @@ async function handleApi(request) {
       roles: ["ROLE_USER"],
       statusKyc: "APROVADO_AUTO",
       kycAnalysisId: kycAnalysis.id,
+      passwordCredential: await createPasswordCredential(body.password),
     };
     kycAnalysis.subjectName = user.fullName;
     state.users[user.username] = user;
@@ -1361,9 +1903,12 @@ async function handleApi(request) {
       documentNumber: kycAnalysis.documentNumber,
       biometricStatus: kycAnalysis.biometricStatus,
       evidence: kycAnalysis.evidence,
+      faceEvidenceId: enrolledFace.id,
+      faceSha256: enrolledFace.sha256,
       createdAt: kycAnalysis.createdAt,
     };
-    return json(authResponse(user));
+    const token = createSession(user);
+    return json(authResponse(user, token));
   }
 
   const user = userFromToken(request);
@@ -1398,6 +1943,21 @@ async function handleApi(request) {
     const body = await request.json().catch(() => ({}));
     const amount = Number(body.amountCentavos || 0);
     if (!amount || amount <= 0) return json("Digite um valor valido.", { status: 400 });
+    const idempotencyKey = String(request.headers.get("idempotency-key") || body.idempotencyKey || "").trim();
+    if (idempotencyKey.length < 16 || idempotencyKey.length > 150) {
+      return badRequest("Informe uma chave de idempotencia valida para a transferencia.", "IDEMPOTENCY_KEY_REQUIRED");
+    }
+    const idempotencyFingerprint = [
+      user.username, amount, body.channel || "PIX", body.beneficiaryDocument || "", body.pixKey || "",
+      body.bankCode || "", body.ispb || "", body.agency || "", body.accountNumber || "", body.accountDigit || "",
+    ].join("|");
+    const previousOrder = state.externalTransfers.find((order) => order.idempotencyKey === idempotencyKey);
+    if (previousOrder) {
+      if (previousOrder.username !== user.username || (previousOrder.idempotencyFingerprint && previousOrder.idempotencyFingerprint !== idempotencyFingerprint)) {
+        return badRequest("A chave de idempotencia ja foi usada com outros dados.", "IDEMPOTENCY_CONFLICT");
+      }
+      return json(previousOrder);
+    }
     const bravusDestination = resolveBravusTransferDestination(body);
     if (bravusDestination) {
       if (bravusDestination.username === user.username) {
@@ -1410,7 +1970,7 @@ async function handleApi(request) {
           amount,
           description: body.description || "Transferencia interna Bravus",
           channel: body.channel || "PIX",
-          idempotencyKey: request.headers.get("idempotency-key") || ("sites-bravus-internal-" + Date.now()),
+          idempotencyKey,
           source: "USER_EXTERNAL_TRANSFER",
         });
         return json(result.order);
@@ -1434,7 +1994,6 @@ async function handleApi(request) {
       createdAt: now(),
     };
     state.transactions.unshift(tx);
-    const idempotencyKey = "sites-" + Date.now();
     const settlement = settlementFor(body, idempotencyKey);
     const payer = partyForUser(user);
     const beneficiary = partyForExternalBody(body);
@@ -1460,6 +2019,7 @@ async function handleApi(request) {
       provider: "BRAVUS_SELF_PROVIDER",
       providerTransferId: "bravus-self-sites-" + Date.now(),
       idempotencyKey,
+      idempotencyFingerprint,
       status: "COMPLETED",
       settlementStatus: settlement.settlementStatus,
       receiptKind: settlement.receiptKind,
@@ -1695,6 +2255,81 @@ async function handleApi(request) {
     return json({ message: "Forbidden" }, { status: 403 });
   }
 
+  if (request.method === "GET" && path === "/admin/persistence/status") {
+    const ledger = validateSitesLedger();
+    return json({
+      ...persistenceMeta,
+      buildTarget,
+      durable: true,
+      userCount: Object.keys(state.users).length,
+      transactionCount: state.transactions.length,
+      ledgerEntryCount: state.ledgerEntries.length,
+      ledgerValid: ledger.valid,
+    });
+  }
+
+  if (request.method === "GET" && path === "/admin/password-reset/requests") {
+    return json(state.passwordResetRequests
+      .filter((item) => item.status === "REVIEW_PENDING" && new Date(item.expiresAt).getTime() > Date.now())
+      .map((item) => {
+        const account = state.users[item.username];
+        return {
+          requestId: item.requestId,
+          fullName: account?.fullName || "Cliente protegido",
+          maskedCpf: maskCpf(account?.cpf),
+          status: item.status,
+          attempts: item.attempts,
+          createdAt: item.createdAt,
+          expiresAt: item.expiresAt,
+        };
+      }));
+  }
+
+  const resetEvidenceMatch = path.match(/^\\/admin\\/password-reset\\/requests\\/([^/]+)\\/evidence$/);
+  if (request.method === "GET" && resetEvidenceMatch) {
+    const resetRequest = state.passwordResetRequests.find((item) => item.requestId === resetEvidenceMatch[1]);
+    const account = resetRequest ? state.users[resetRequest.username] : null;
+    const enrolled = account ? state.kycEvidence[account.username] : null;
+    if (!resetRequest || !account || !enrolled?.faceEvidenceId || !resetRequest.submittedFaceEvidenceId) {
+      return json({ message: "Evidencia facial indisponivel." }, { status: 404 });
+    }
+    try {
+      const [enrolledFace, submittedFace] = await Promise.all([
+        decryptBiometricEvidence(enrolled.faceEvidenceId, "ENROLLED_FACE"),
+        decryptBiometricEvidence(resetRequest.submittedFaceEvidenceId, "PASSWORD_RESET_FACE"),
+      ]);
+      return json({
+        requestId: resetRequest.requestId,
+        fullName: account.fullName,
+        maskedCpf: maskCpf(account.cpf),
+        challenge: resetRequest.instruction,
+        enrolledFace,
+        submittedFace,
+      }, { headers: { "cache-control": "no-store", pragma: "no-cache" } });
+    } catch {
+      return json({ message: "Nao foi possivel abrir a evidencia protegida." }, { status: 503 });
+    }
+  }
+
+  const resetReviewMatch = path.match(/^\\/admin\\/password-reset\\/requests\\/([^/]+)\\/(approve|reject)$/);
+  if (request.method === "POST" && resetReviewMatch) {
+    const resetRequest = state.passwordResetRequests.find((item) => item.requestId === resetReviewMatch[1]);
+    const body = await request.json().catch(() => ({}));
+    const reason = String(body.reason || "").trim();
+    if (!resetRequest || resetRequest.status !== "REVIEW_PENDING") {
+      return badRequest("Solicitacao nao esta aguardando revisao.", "PASSWORD_RESET_INVALID_STATE");
+    }
+    if (reason.length < 10 || reason.length > 500) {
+      return badRequest("Registre um motivo entre 10 e 500 caracteres.", "PASSWORD_RESET_REASON_INVALID");
+    }
+    const next = resetReviewMatch[2] === "approve" ? "VERIFIED" : "REJECTED";
+    resetRequest.reviewedBy = user.username;
+    resetRequest.reviewReason = reason;
+    resetRequest.reviewedAt = now();
+    transitionPasswordReset(resetRequest, next, user.username, reason);
+    return json({ requestId: resetRequest.requestId, status: passwordResetPublicStatus(resetRequest.status) });
+  }
+
   if (request.method === "GET" && path === "/admin/dashboard") {
     const users = Object.values(state.users);
     return json({ totalUsers: users.length, activeUsers: users.length, totalTransactions: state.transactions.length, totalBalance: users.reduce((sum, item) => sum + item.balance, 0) });
@@ -1722,6 +2357,21 @@ async function handleApi(request) {
     if (!origin) return json("Usuario nao encontrado.", { status: 400 });
     const amount = Number(body.amountCentavos || 0);
     if (!amount || amount <= 0) return json("Digite um valor valido.", { status: 400 });
+    const idempotencyKey = String(request.headers.get("idempotency-key") || body.idempotencyKey || "").trim();
+    if (idempotencyKey.length < 16 || idempotencyKey.length > 150) {
+      return badRequest("Informe uma chave de idempotencia valida para a transferencia.", "IDEMPOTENCY_KEY_REQUIRED");
+    }
+    const idempotencyFingerprint = [
+      origin.username, amount, body.channel || "PIX", body.beneficiaryDocument || "", body.pixKey || "",
+      body.bankCode || "", body.ispb || "", body.agency || "", body.accountNumber || "", body.accountDigit || "",
+    ].join("|");
+    const previousOrder = state.externalTransfers.find((order) => order.idempotencyKey === idempotencyKey);
+    if (previousOrder) {
+      if (previousOrder.username !== origin.username || (previousOrder.idempotencyFingerprint && previousOrder.idempotencyFingerprint !== idempotencyFingerprint)) {
+        return badRequest("A chave de idempotencia ja foi usada com outros dados.", "IDEMPOTENCY_CONFLICT");
+      }
+      return json(previousOrder);
+    }
     const bravusDestination = resolveBravusTransferDestination(body);
     if (bravusDestination) {
       if (bravusDestination.username === origin.username) {
@@ -1734,7 +2384,7 @@ async function handleApi(request) {
           amount,
           description: body.description || "Transferencia interna admin Bravus",
           channel: body.channel || "PIX",
-          idempotencyKey: request.headers.get("idempotency-key") || ("sites-admin-bravus-internal-" + Date.now()),
+          idempotencyKey,
           source: "ADMIN",
         });
         return json(result.order);
@@ -1758,7 +2408,6 @@ async function handleApi(request) {
       createdAt: now(),
     };
     state.transactions.unshift(tx);
-    const idempotencyKey = "sites-admin-" + Date.now();
     const settlement = settlementFor(body, idempotencyKey);
     const payer = partyForUser(origin);
     const beneficiary = partyForExternalBody(body);
@@ -1784,6 +2433,7 @@ async function handleApi(request) {
       provider: "BRAVUS_SELF_PROVIDER",
       providerTransferId: "bravus-self-sites-admin-" + Date.now(),
       idempotencyKey,
+      idempotencyFingerprint,
       status: "COMPLETED",
       settlementStatus: settlement.settlementStatus,
       receiptKind: settlement.receiptKind,
@@ -1871,17 +2521,17 @@ async function handleApi(request) {
       normalizedQuery: queryDigits || query,
       resultCount: matchingUsers.length,
       summary: { users: matchingUsers.length, transactions: 0, other: 0 },
-      warnings: ["Consulta demonstrativa do ChatGPT Sites; backend Spring continua sendo a fonte local completa."],
+      warnings: [],
       results: matchingUsers.map((item) => ({ source: "USERS", kind: "CLIENTE", title: item.fullName, status: "ATIVO", fields: userSummary(item) })),
     });
   }
 
-  return json({ message: "Endpoint not available in ChatGPT Sites demo" }, { status: 404 });
+  return json({ message: "Endpoint nao disponivel." }, { status: 404 });
 }
 
 export default {
-  fetch(request) {
-    if (new URL(request.url).pathname.startsWith("/api/")) return handleApi(request);
+  async fetch(request, env) {
+    if (new URL(request.url).pathname.startsWith("/api/")) return handlePersistedApi(request, env);
     const requestedPath = routePath(request.url);
     const file = files[requestedPath];
     if (!file) return new Response("Not found", { status: 404 });
@@ -1901,6 +2551,12 @@ await rm(artifactDir, { recursive: true, force: true });
 await mkdir(join(artifactDir, ".openai"), { recursive: true });
 await writeFile(join(artifactDir, "index.mjs"), entrypoint);
 await writeFile(join(artifactDir, ".openai", "hosting.json"), await readFile(join(root, ".openai", "hosting.json")));
+const migrationFiles = await walk(join(root, "drizzle"));
+for (const migrationFile of migrationFiles) {
+  const destination = join(artifactDir, ".openai", "drizzle", relative(join(root, "drizzle"), migrationFile));
+  await mkdir(dirname(destination), { recursive: true });
+  await writeFile(destination, await readFile(migrationFile));
+}
 await tar(["-czf", archivePath, "-C", artifactDir, "."]);
 
 const archive = await stat(archivePath);
@@ -1909,5 +2565,6 @@ console.log(JSON.stringify({
   archiveName: basename(archivePath),
   files: Object.keys(files).length,
   aliases: Object.values(files).filter((file) => file.alias).length,
+  migrations: migrationFiles.length,
   bytes: archive.size,
 }, null, 2));

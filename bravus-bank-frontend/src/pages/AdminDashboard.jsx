@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Users, Activity, Banknote, TrendingUp, Power, Trash2, CheckCircle2, AlertCircle,
@@ -1055,12 +1055,17 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
     description: '',
   });
   const [submitting, setSubmitting] = useState(false);
+  const transferAttempt = useRef(null);
   const userOptions = users.filter((u) => !u.roles?.some?.((r) => r.includes?.('ADMIN')));
 
   async function submit(e) {
     e.preventDefault();
     if (!form.userId) return onError('Selecione o cliente de origem.');
     if (!form.amountReais || parseFloat(form.amountReais) <= 0) return onError('Informe um valor valido.');
+    const fingerprint = JSON.stringify(form);
+    if (transferAttempt.current?.fingerprint !== fingerprint) {
+      transferAttempt.current = { fingerprint, key: `admin-transfer-${crypto.randomUUID()}` };
+    }
     setSubmitting(true);
     try {
       await externalTransferService.submit({
@@ -1080,7 +1085,8 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
         description: form.description || null,
         destinationNetwork: form.destinationNetwork || null,
         participantCode: form.participantCode || null,
-      });
+      }, transferAttempt.current.key);
+      transferAttempt.current = null;
       onSuccess(`Ordem de R$ ${form.amountReais} registrada no trilho Bravus.`);
       setForm({ ...form, amountReais: '', description: '' });
     } catch (err) {
