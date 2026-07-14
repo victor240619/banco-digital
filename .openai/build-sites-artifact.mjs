@@ -95,12 +95,18 @@ function rolesForSnapshotUser(user) {
 
 async function loadLiveSeed() {
   try {
-    const [users, transactions, externalTransfers, globalRailParticipants] = await Promise.all([
+    const [users, transactions, externalTransfers, globalRailParticipants, ledgerEntries] = await Promise.all([
       fetchLiveJson("/api/admin/users"),
       fetchLiveJson("/api/admin/transactions"),
       fetchLiveJson("/api/admin/ledger/external-transfers"),
       fetchLiveJson("/api/admin/global-rail/participants"),
+      fetchLiveJson("/api/admin/ledger/entries").catch(() => ({ content: [] })),
     ]);
+    const ledgerList = Array.isArray(ledgerEntries)
+      ? ledgerEntries
+      : Array.isArray(ledgerEntries?.content)
+        ? ledgerEntries.content
+        : [];
     const usersByUsername = {};
     for (const user of Array.isArray(users) ? users : []) {
       if (!user?.username) continue;
@@ -116,6 +122,7 @@ async function loadLiveSeed() {
       transactions: Array.isArray(transactions) ? transactions : [],
       externalTransfers: Array.isArray(externalTransfers) ? externalTransfers : [],
       globalRailParticipants: Array.isArray(globalRailParticipants) ? globalRailParticipants : [],
+      ledgerEntries: ledgerList,
     };
   } catch (error) {
     console.warn(`Sites live snapshot unavailable: ${error.message}`);
@@ -126,6 +133,7 @@ async function loadLiveSeed() {
       transactions: [],
       externalTransfers: [],
       globalRailParticipants: [],
+      ledgerEntries: [],
     };
   }
 }
@@ -144,7 +152,7 @@ for (const file of await walk(distDir)) {
 }
 files["/"] = files["/index.html"];
 
-const entrypoint = `const buildTarget = "bravus-sites-api-v12";
+const entrypoint = `const buildTarget = "bravus-sites-api-v13";
 const files = ${JSON.stringify(files)};
 const liveSeed = ${JSON.stringify(liveSeed)};
 const now = () => new Date().toISOString();
@@ -207,6 +215,8 @@ const state = globalThis.__bravusState || (globalThis.__bravusState = {
   users: { [joao.username]: joao, [francisca.username]: francisca, [admin.username]: admin, ...(liveSeed.users || {}) },
   transactions: Array.isArray(liveSeed.transactions) ? [...liveSeed.transactions] : [],
   externalTransfers: Array.isArray(liveSeed.externalTransfers) ? [...liveSeed.externalTransfers] : [],
+  ledgerEntries: Array.isArray(liveSeed.ledgerEntries) ? [...liveSeed.ledgerEntries] : [],
+  ledgerAudit: [],
   documentAnalyses: [],
   kycEvidence: {},
   globalRailParticipants: Array.isArray(liveSeed.globalRailParticipants) && liveSeed.globalRailParticipants.length
@@ -240,6 +250,8 @@ if (state.users[joao.username] && state.users[joao.username].balance < joaoCredi
 }
 state.documentAnalyses = Array.isArray(state.documentAnalyses) ? state.documentAnalyses : [];
 state.kycEvidence = state.kycEvidence || {};
+state.ledgerEntries = Array.isArray(state.ledgerEntries) ? state.ledgerEntries : [];
+state.ledgerAudit = Array.isArray(state.ledgerAudit) ? state.ledgerAudit : [];
 
 function bytesFromBase64(value) {
   const binary = atob(value);
@@ -544,6 +556,302 @@ function consumeCreditIfAvailable(user, amount) {
   joaoCreditGrant.valorUsado += used;
   return used;
 }
+
+function nextNumericId(items) {
+  return Math.max(0, ...items.map((item) => Number(item.id) || 0)) + 1;
+}
+
+function transferTransactionForOrder(order, username, type) {
+  return state.transactions.find((tx) =>
+    tx.username === username
+    && tx.type === type
+    && (
+      tx.receiptOrderId === order.id
+      || tx.externalOrderId === order.id
+      || (type === "TRANSFER_OUT" && tx.id === order.transactionId)
+      || (tx.destinationAccount && (tx.destinationAccount === order.accountNumber || tx.destinationAccount === order.payerAccountNumber))
+    )
+  ) || null;
+}
+
+function ledgerEntriesForTransfer(idempotencyKey) {
+  return state.ledgerEntries.filter((entry) => entry.transferId === idempotencyKey);
+}
+
+function hasBalancedLedger(idempotencyKey) {
+  const entries = ledgerEntriesForTransfer(idempotencyKey);
+  return entries.length === 2
+    && entries.some((entry) => entry.entryType === "debit")
+    && entries.some((entry) => entry.entryType === "credit")
+    && entries.reduce((sum, entry) => sum + Number(entry.signedAmountCentavos || 0), 0) === 0;
+}
+
+function appendInternalLedgerPair(order, payer, beneficiary, amount, reason) {
+  const transferId = order.idempotencyKey;
+  if (hasBalancedLedger(transferId)) return ledgerEntriesForTransfer(transferId);
+  const debitId = nextNumericId(state.ledgerEntries);
+  const creditId = debitId + 1;
+  const createdAt = now();
+  const debit = {
+    id: debitId,
+    transferId,
+    orderId: order.id,
+    accountUsername: payer.username,
+    accountNumber: payer.accountNumber,
+    entryType: "debit",
+    signedAmountCentavos: -amount,
+    currency: "BRL",
+    reason,
+    createdAt,
+  };
+  const credit = {
+    id: creditId,
+    transferId,
+    orderId: order.id,
+    accountUsername: beneficiary.username,
+    accountNumber: beneficiary.accountNumber,
+    entryType: "credit",
+    signedAmountCentavos: amount,
+    currency: "BRL",
+    reason,
+    createdAt,
+  };
+  state.ledgerEntries.unshift(credit, debit);
+  return [debit, credit];
+}
+
+function isInternalCompletedOrder(order) {
+  return order
+    && order.provider === "BRAVUS_INTERNAL_LEDGER"
+    && order.status === "COMPLETED"
+    && order.settlementStatus === "LIQUIDADA_CONFIRMADA"
+    && Number(order.amountCentavos || 0) > 0;
+}
+
+function internalOrderPayload({ order, payer, beneficiary, tx, amount, description, channel, idempotencyKey, settlementMessage }) {
+  const target = order || {};
+  Object.assign(target, {
+    id: target.id || nextNumericId(state.externalTransfers),
+    username: payer.username,
+    payerUsername: payer.username,
+    beneficiaryUsername: beneficiary.username,
+    transactionId: tx.id,
+    amountCentavos: amount,
+    channel: channel || "PIX",
+    currency: "BRL",
+    beneficiaryName: beneficiary.fullName,
+    beneficiaryDocument: beneficiary.cpf,
+    bankCode: "999",
+    ispb: "99999999",
+    agency: "0001",
+    accountNumber: beneficiary.accountNumber,
+    accountDigit: null,
+    accountType: beneficiary.accountType,
+    pixKey: beneficiary.cpf || beneficiary.email,
+    pixKeyType: beneficiary.cpf ? "CPF" : "EMAIL",
+    description: description || null,
+    provider: "BRAVUS_INTERNAL_LEDGER",
+    providerTransferId: idempotencyKey,
+    idempotencyKey,
+    status: "COMPLETED",
+    settlementStatus: "LIQUIDADA_CONFIRMADA",
+    receiptKind: "COMPROVANTE_LIQUIDACAO_CONFIRMADA",
+    destinationNetwork: "INTERNAL_BRAVUS",
+    destinationParticipantCode: "BRAVUS-INTERNAL",
+    destinationConfirmationId: idempotencyKey,
+    destinationConfirmedAt: target.destinationConfirmedAt || now(),
+    settlementMessage: settlementMessage || "Liquidacao interna confirmada no ledger Bravus.",
+    errorMessage: null,
+    rawResponse: "{\\"provider\\":\\"BRAVUS_INTERNAL_LEDGER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
+    createdAt: target.createdAt || now(),
+  });
+  target.payer = partyForUser(payer);
+  target.beneficiary = partyForUser(beneficiary);
+  return target;
+}
+
+function commitInternalTransfer({ payer, beneficiary, amount, description, channel, idempotencyKey, existingOrder, source }) {
+  const value = Number(amount || 0);
+  if (!payer || !beneficiary) throw new Error("INTERNAL_TRANSFER_ACCOUNT_NOT_FOUND");
+  if (!value || value <= 0) throw new Error("INVALID_AMOUNT");
+  if (payer.username === beneficiary.username) throw new Error("SELF_TRANSFER");
+  const transferKey = idempotencyKey || existingOrder?.idempotencyKey || ("sites-internal-" + Date.now());
+  const previousOrder = state.externalTransfers.find((order) => order.idempotencyKey === transferKey && order.ledgerSettledAt);
+  if (previousOrder) {
+    return {
+      tx: transferTransactionForOrder(previousOrder, payer.username, "TRANSFER_OUT"),
+      incomingTx: transferTransactionForOrder(previousOrder, beneficiary.username, "TRANSFER_IN"),
+      order: previousOrder,
+      replayed: true,
+    };
+  }
+  if (payer.balance < value) throw new Error("INSUFFICIENT_BALANCE");
+
+  const tx = {
+    id: nextNumericId(state.transactions),
+    username: payer.username,
+    type: "TRANSFER_OUT",
+    amount: value,
+    description: description || "Transferencia interna Bravus",
+    destinationAccount: beneficiary.accountNumber,
+    status: "COMPLETED",
+    createdAt: now(),
+  };
+  const incomingTx = {
+    id: tx.id + 1,
+    username: beneficiary.username,
+    type: "TRANSFER_IN",
+    amount: value,
+    description: description || "Transferencia recebida Bravus",
+    destinationAccount: payer.accountNumber,
+    status: "COMPLETED",
+    createdAt: now(),
+  };
+  const order = internalOrderPayload({
+    order: existingOrder,
+    payer,
+    beneficiary,
+    tx,
+    amount: value,
+    description,
+    channel,
+    idempotencyKey: transferKey,
+    settlementMessage: source === "ADMIN"
+      ? "Liquidacao interna confirmada no ledger Bravus, sem uso de Celcoin."
+      : "Liquidacao interna confirmada no ledger Bravus.",
+  });
+  applyTransferParties(tx, partyForUser(payer), partyForUser(beneficiary), "PAYER", order.id);
+  applyTransferParties(incomingTx, partyForUser(payer), partyForUser(beneficiary), "BENEFICIARY", order.id);
+
+  payer.balance -= value;
+  beneficiary.balance += value;
+  consumeCreditIfAvailable(payer, value);
+  state.transactions.unshift(tx, incomingTx);
+  if (!state.externalTransfers.includes(order)) state.externalTransfers.unshift(order);
+  appendInternalLedgerPair(order, payer, beneficiary, value, source || "INTERNAL_TRANSFER");
+  order.ledgerSettledAt = now();
+  order.ledgerStatus = "BALANCED";
+  return { tx, incomingTx, order, replayed: false };
+}
+
+function reconcileInternalOrder(order) {
+  if (!isInternalCompletedOrder(order) || order.ledgerSettledAt || hasBalancedLedger(order.idempotencyKey)) {
+    if (isInternalCompletedOrder(order) && hasBalancedLedger(order.idempotencyKey)) {
+      order.ledgerSettledAt = order.ledgerSettledAt || now();
+      order.ledgerStatus = "BALANCED";
+    }
+    return;
+  }
+  const payer = state.users[order.payerUsername || order.username];
+  const beneficiary = state.users[order.beneficiaryUsername]
+    || findTransferDestination(order.accountNumber)
+    || findTransferDestination(order.beneficiaryDocument)
+    || findTransferDestination(order.pixKey);
+  const amount = Number(order.amountCentavos || 0);
+  if (!payer || !beneficiary || !amount || amount <= 0 || payer.username === beneficiary.username) {
+    order.ledgerStatus = "RECONCILIATION_BLOCKED";
+    order.reconciliationError = "INVALID_INTERNAL_ORDER";
+    state.ledgerAudit.unshift({ orderId: order.id, status: order.ledgerStatus, createdAt: now() });
+    return;
+  }
+  const outTx = transferTransactionForOrder(order, payer.username, "TRANSFER_OUT");
+  const inTx = transferTransactionForOrder(order, beneficiary.username, "TRANSFER_IN");
+  if (!outTx && !inTx) {
+    try {
+      commitInternalTransfer({
+        payer,
+        beneficiary,
+        amount,
+        description: order.description || "Transferencia interna reconciliada",
+        channel: order.channel || "PIX",
+        idempotencyKey: order.idempotencyKey,
+        existingOrder: order,
+        source: "RECONCILIATION",
+      });
+      order.reconciledFromLegacyOrder = true;
+      state.ledgerAudit.unshift({ orderId: order.id, status: "RECONCILED_FULL_TRANSFER", createdAt: now() });
+    } catch (error) {
+      order.ledgerStatus = "RECONCILIATION_BLOCKED";
+      order.reconciliationError = error.message;
+      state.ledgerAudit.unshift({ orderId: order.id, status: order.ledgerStatus, error: error.message, createdAt: now() });
+    }
+    return;
+  }
+
+  const payerParty = partyForUser(payer);
+  const beneficiaryParty = partyForUser(beneficiary);
+  let txOut = outTx;
+  let txIn = inTx;
+  if (!txOut) {
+    if (payer.balance < amount) {
+      order.ledgerStatus = "RECONCILIATION_BLOCKED";
+      order.reconciliationError = "PAYER_BALANCE_TOO_LOW_FOR_MISSING_DEBIT";
+      state.ledgerAudit.unshift({ orderId: order.id, status: order.ledgerStatus, error: order.reconciliationError, createdAt: now() });
+      return;
+    }
+    txOut = {
+      id: nextNumericId(state.transactions),
+      username: payer.username,
+      type: "TRANSFER_OUT",
+      amount,
+      description: order.description || "Transferencia interna reconciliada",
+      destinationAccount: beneficiary.accountNumber,
+      status: "COMPLETED",
+      createdAt: order.createdAt || now(),
+    };
+    applyTransferParties(txOut, payerParty, beneficiaryParty, "PAYER", order.id);
+    payer.balance -= amount;
+    consumeCreditIfAvailable(payer, amount);
+    state.transactions.unshift(txOut);
+  }
+  if (!txIn) {
+    txIn = {
+      id: nextNumericId(state.transactions),
+      username: beneficiary.username,
+      type: "TRANSFER_IN",
+      amount,
+      description: order.description || "Transferencia recebida Bravus",
+      destinationAccount: payer.accountNumber,
+      status: "COMPLETED",
+      createdAt: order.createdAt || now(),
+    };
+    applyTransferParties(txIn, payerParty, beneficiaryParty, "BENEFICIARY", order.id);
+    beneficiary.balance += amount;
+    state.transactions.unshift(txIn);
+  }
+  order.transactionId = txOut.id;
+  order.payer = payerParty;
+  order.beneficiary = beneficiaryParty;
+  order.ledgerSettledAt = now();
+  order.ledgerStatus = "BALANCED";
+  appendInternalLedgerPair(order, payer, beneficiary, amount, "RECONCILIATION");
+  state.ledgerAudit.unshift({ orderId: order.id, status: "RECONCILED_PARTIAL_TRANSFER", createdAt: now() });
+}
+
+function reconcileInternalOrders() {
+  for (const order of state.externalTransfers) {
+    reconcileInternalOrder(order);
+  }
+}
+
+function validateSitesLedger() {
+  const groups = {};
+  for (const entry of state.ledgerEntries) {
+    const key = entry.transferId || "unknown";
+    groups[key] = groups[key] || { transferId: key, entryCount: 0, netAmount: 0 };
+    groups[key].entryCount += 1;
+    groups[key].netAmount += Number(entry.signedAmountCentavos || 0);
+  }
+  const broken = Object.values(groups).filter((item) => item.entryCount !== 2 || item.netAmount !== 0);
+  return {
+    valid: broken.length === 0,
+    checkedTransfers: Object.keys(groups).length,
+    brokenTransfers: broken,
+    message: broken.length === 0 ? "Ledger Sites balanceado: debito e credito pareados." : "Ledger Sites possui transferencias quebradas.",
+  };
+}
+
+reconcileInternalOrders();
 
 function inferNetwork(body) {
   if (body.destinationNetwork) return String(body.destinationNetwork).toUpperCase();
@@ -885,76 +1193,21 @@ async function handleApi(request) {
       if (bravusDestination.username === user.username) {
         return json("Nao e permitido transferir para a propria conta Bravus.", { status: 400 });
       }
-      if (user.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });
-      user.balance -= amount;
-      bravusDestination.balance += amount;
-      consumeCreditIfAvailable(user, amount);
-      const tx = {
-        id: state.transactions.length + 1,
-        username: user.username,
-        type: "TRANSFER_OUT",
-        amount,
-        description: body.description || "Transferencia interna Bravus",
-        destinationAccount: bravusDestination.accountNumber,
-        status: "COMPLETED",
-        createdAt: now(),
-      };
-      const incomingTx = {
-        id: state.transactions.length + 2,
-        username: bravusDestination.username,
-        type: "TRANSFER_IN",
-        amount,
-        description: body.description || "Transferencia recebida Bravus",
-        destinationAccount: user.accountNumber,
-        status: "COMPLETED",
-        createdAt: now(),
-      };
-      state.transactions.unshift(tx);
-      state.transactions.unshift(incomingTx);
-      const idempotencyKey = "sites-bravus-internal-" + Date.now();
-      const payer = partyForUser(user);
-      const beneficiary = partyForUser(bravusDestination);
-      const order = {
-        id: state.externalTransfers.length + 1,
-        username: user.username,
-        payerUsername: user.username,
-        beneficiaryUsername: bravusDestination.username,
-        transactionId: tx.id,
-        amountCentavos: amount,
-        channel: body.channel || "PIX",
-        currency: "BRL",
-        beneficiaryName: bravusDestination.fullName,
-        beneficiaryDocument: bravusDestination.cpf,
-        bankCode: "999",
-        ispb: "99999999",
-        agency: "0001",
-        accountNumber: bravusDestination.accountNumber,
-        accountDigit: null,
-        accountType: bravusDestination.accountType,
-        pixKey: bravusDestination.cpf || bravusDestination.email,
-        pixKeyType: bravusDestination.cpf ? "CPF" : "EMAIL",
-        description: body.description || null,
-        provider: "BRAVUS_INTERNAL_LEDGER",
-        providerTransferId: idempotencyKey,
-        idempotencyKey,
-        status: "COMPLETED",
-        settlementStatus: "LIQUIDADA_CONFIRMADA",
-        receiptKind: "COMPROVANTE_LIQUIDACAO_CONFIRMADA",
-        destinationNetwork: "INTERNAL_BRAVUS",
-        destinationParticipantCode: "BRAVUS-INTERNAL",
-        destinationConfirmationId: idempotencyKey,
-        destinationConfirmedAt: now(),
-        settlementMessage: "Liquidacao interna confirmada no ledger Bravus, sem uso de Celcoin.",
-        errorMessage: null,
-        rawResponse: "{\\"provider\\":\\"BRAVUS_INTERNAL_LEDGER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
-        createdAt: now(),
-      };
-      order.payer = payer;
-      order.beneficiary = beneficiary;
-      applyTransferParties(tx, payer, beneficiary, "PAYER", order.id);
-      applyTransferParties(incomingTx, payer, beneficiary, "BENEFICIARY", order.id);
-      state.externalTransfers.unshift(order);
-      return json(order);
+      try {
+        const result = commitInternalTransfer({
+          payer: user,
+          beneficiary: bravusDestination,
+          amount,
+          description: body.description || "Transferencia interna Bravus",
+          channel: body.channel || "PIX",
+          idempotencyKey: request.headers.get("idempotency-key") || ("sites-bravus-internal-" + Date.now()),
+          source: "USER_EXTERNAL_TRANSFER",
+        });
+        return json(result.order);
+      } catch (error) {
+        if (error.message === "INSUFFICIENT_BALANCE") return json("Saldo contabil do usuario insuficiente.", { status: 400 });
+        return json(error.message, { status: 400 });
+      }
     }
     if (availableCreditFor(user) < amount) return json("Saldo escritural liberado insuficiente.", { status: 400 });
     if (user.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });
@@ -1110,6 +1363,34 @@ async function handleApi(request) {
       if (destination.username === user.username) {
         return badRequest("Nao e permitido transferir para a propria conta Bravus.", "SELF_TRANSFER");
       }
+      try {
+        const result = commitInternalTransfer({
+          payer: user,
+          beneficiary: destination,
+          amount,
+          description: body.description || "Transferencia interna Bravus",
+          channel: body.channel || "PIX",
+          idempotencyKey: request.headers.get("idempotency-key") || ("sites-legacy-internal-" + Date.now()),
+          source: "LEGACY_USER_TRANSFER",
+        });
+        return json({
+          message: "Transferencia interna Bravus liquidada.",
+          status: "COMPLETED",
+          provider: "BRAVUS_INTERNAL_LEDGER",
+          settlementStatus: "LIQUIDADA_CONFIRMADA",
+          balanceCentavos: user.balance,
+          transaction: result.tx,
+          destination: userSummary(destination),
+          receiptOrderId: result.order.id,
+          externalOrderId: result.order.id,
+          order: result.order,
+        });
+      } catch (error) {
+        if (error.message === "INSUFFICIENT_BALANCE") {
+          return badRequest("Saldo contabil insuficiente para concluir a transferencia.", "INSUFFICIENT_BALANCE", { balanceCentavos: user.balance });
+        }
+        return badRequest(error.message, error.message);
+      }
     }
     if (path === "/user/deposit") {
       user.balance += amount;
@@ -1212,9 +1493,13 @@ async function handleApi(request) {
   if (request.method === "GET" && path === "/admin/transactions") {
     return json(state.transactions.map((tx) => hydrateTransaction(tx, state.users[tx.username] || user)));
   }
-  if (request.method === "GET" && path === "/admin/ledger/balance-sheet") return json({ totalAssets: 0, totalLiabilities: 0, equity: 0, reserves: [] });
-  if (request.method === "GET" && path === "/admin/ledger/validate-chain") return json({ valid: true, message: "Ledger demonstrativo do ChatGPT Sites." });
-  if (request.method === "GET" && path.startsWith("/admin/ledger/entries")) return json({ content: [] });
+  if (request.method === "GET" && path === "/admin/ledger/balance-sheet") {
+    const totalClientBalances = Object.values(state.users).reduce((sum, item) => sum + Number(item.balance || 0), 0);
+    const ledgerNet = state.ledgerEntries.reduce((sum, entry) => sum + Number(entry.signedAmountCentavos || 0), 0);
+    return json({ totalAssets: totalClientBalances, totalLiabilities: totalClientBalances, equity: 0, ledgerNet, reserves: [] });
+  }
+  if (request.method === "GET" && path === "/admin/ledger/validate-chain") return json(validateSitesLedger());
+  if (request.method === "GET" && path.startsWith("/admin/ledger/entries")) return json({ content: state.ledgerEntries, audit: state.ledgerAudit });
   if (request.method === "GET" && path.startsWith("/admin/analysis/document")) return json(state.documentAnalyses);
   if (request.method === "POST" && path === "/admin/analysis/document") {
     const body = await request.json().catch(() => ({}));
@@ -1232,76 +1517,21 @@ async function handleApi(request) {
       if (bravusDestination.username === origin.username) {
         return json("Nao e permitido transferir para a propria conta Bravus.", { status: 400 });
       }
-      if (origin.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });
-      origin.balance -= amount;
-      bravusDestination.balance += amount;
-      consumeCreditIfAvailable(origin, amount);
-      const tx = {
-        id: state.transactions.length + 1,
-        username: origin.username,
-        type: "TRANSFER_OUT",
-        amount,
-        description: body.description || "Transferencia interna admin Bravus",
-        destinationAccount: bravusDestination.accountNumber,
-        status: "COMPLETED",
-        createdAt: now(),
-      };
-      const incomingTx = {
-        id: state.transactions.length + 2,
-        username: bravusDestination.username,
-        type: "TRANSFER_IN",
-        amount,
-        description: body.description || "Transferencia recebida Bravus",
-        destinationAccount: origin.accountNumber,
-        status: "COMPLETED",
-        createdAt: now(),
-      };
-      state.transactions.unshift(tx);
-      state.transactions.unshift(incomingTx);
-      const idempotencyKey = "sites-admin-bravus-internal-" + Date.now();
-      const payer = partyForUser(origin);
-      const beneficiary = partyForUser(bravusDestination);
-      const order = {
-        id: state.externalTransfers.length + 1,
-        username: origin.username,
-        payerUsername: origin.username,
-        beneficiaryUsername: bravusDestination.username,
-        transactionId: tx.id,
-        amountCentavos: amount,
-        channel: body.channel || "PIX",
-        currency: "BRL",
-        beneficiaryName: bravusDestination.fullName,
-        beneficiaryDocument: bravusDestination.cpf,
-        bankCode: "999",
-        ispb: "99999999",
-        agency: "0001",
-        accountNumber: bravusDestination.accountNumber,
-        accountDigit: null,
-        accountType: bravusDestination.accountType,
-        pixKey: bravusDestination.cpf || bravusDestination.email,
-        pixKeyType: bravusDestination.cpf ? "CPF" : "EMAIL",
-        description: body.description || null,
-        provider: "BRAVUS_INTERNAL_LEDGER",
-        providerTransferId: idempotencyKey,
-        idempotencyKey,
-        status: "COMPLETED",
-        settlementStatus: "LIQUIDADA_CONFIRMADA",
-        receiptKind: "COMPROVANTE_LIQUIDACAO_CONFIRMADA",
-        destinationNetwork: "INTERNAL_BRAVUS",
-        destinationParticipantCode: "BRAVUS-INTERNAL",
-        destinationConfirmationId: idempotencyKey,
-        destinationConfirmedAt: now(),
-        settlementMessage: "Liquidacao interna confirmada no ledger Bravus, sem uso de Celcoin.",
-        errorMessage: null,
-        rawResponse: "{\\"provider\\":\\"BRAVUS_INTERNAL_LEDGER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
-        createdAt: now(),
-      };
-      order.payer = payer;
-      order.beneficiary = beneficiary;
-      applyTransferParties(tx, payer, beneficiary, "PAYER", order.id);
-      applyTransferParties(incomingTx, payer, beneficiary, "BENEFICIARY", order.id);
-      state.externalTransfers.unshift(order);
-      return json(order);
+      try {
+        const result = commitInternalTransfer({
+          payer: origin,
+          beneficiary: bravusDestination,
+          amount,
+          description: body.description || "Transferencia interna admin Bravus",
+          channel: body.channel || "PIX",
+          idempotencyKey: request.headers.get("idempotency-key") || ("sites-admin-bravus-internal-" + Date.now()),
+          source: "ADMIN",
+        });
+        return json(result.order);
+      } catch (error) {
+        if (error.message === "INSUFFICIENT_BALANCE") return json("Saldo contabil do usuario insuficiente.", { status: 400 });
+        return json(error.message, { status: 400 });
+      }
     }
     if (availableCreditFor(origin) < amount) return json("Saldo escritural liberado insuficiente.", { status: 400 });
     if (origin.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });

@@ -8,13 +8,14 @@ import com.bravus.bank.external.ExternalTransferEntity;
 import com.bravus.bank.external.ExternalTransferRepository;
 import com.bravus.bank.ledger.repo.CreditGrantRepository;
 import com.bravus.bank.ledger.service.CreditService;
-import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
@@ -243,7 +244,7 @@ public class UserController {
     }
     
     @PostMapping("/transfer")
-    @Transactional
+    @Transactional(isolation = Isolation.SERIALIZABLE)
     public ResponseEntity<?> transfer(@RequestBody @Valid TransactionRequest request) {
         if (!"TRANSFER_OUT".equals(request.type())) {
             return transactionError("Tipo de transacao invalido para transferencia.", "INVALID_TRANSACTION_TYPE");
@@ -252,10 +253,6 @@ public class UserController {
         String username = SecurityContextHolder.getContext().getAuthentication().getName();
         UserEntity fromUser = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("User not found"));
-        
-        if (fromUser.getBalance() < request.amount()) {
-            return transactionError("Saldo contabil insuficiente para concluir a transferencia.", "INSUFFICIENT_BALANCE");
-        }
         
         UserEntity toUser = findTransferDestination(request.destinationAccount()).orElse(null);
         
@@ -267,6 +264,29 @@ public class UserController {
         
         if (fromUser.getId().equals(toUser.getId())) {
             return transactionError("Nao e permitido transferir para a propria conta Bravus.", "SELF_TRANSFER");
+        }
+
+        List<UserEntity> lockedUsers = userRepository.findAllByIdInOrderByIdForUpdate(List.of(fromUser.getId(), toUser.getId()));
+        if (lockedUsers.size() != 2) {
+            return transactionError("Nao foi possivel bloquear as duas contas da transferencia.", "ACCOUNT_LOCK_FAILED");
+        }
+        Long fromUserId = fromUser.getId();
+        Long toUserId = toUser.getId();
+        fromUser = lockedUsers.stream()
+                .filter(u -> u.getId().equals(fromUserId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("Conta de origem nao bloqueada."));
+        toUser = lockedUsers.stream()
+                .filter(u -> u.getId().equals(toUserId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("Conta de destino nao bloqueada."));
+
+        if (!Boolean.TRUE.equals(fromUser.getIsActive()) || !Boolean.TRUE.equals(toUser.getIsActive())) {
+            return transactionError("Conta de origem ou destino esta inativa.", "ACCOUNT_INACTIVE");
+        }
+
+        if (fromUser.getBalance() == null || fromUser.getBalance() < request.amount()) {
+            return transactionError("Saldo contabil insuficiente para concluir a transferencia.", "INSUFFICIENT_BALANCE");
         }
         
         // Update balances
