@@ -1,32 +1,32 @@
 #!/bin/bash
 set -e
 
-echo "🔧 CORRIGINDO BACKEND BRAVUS BANK"
+echo "CORRIGINDO BACKEND BRAVUS BANK"
 echo ""
 
 cd ~/banco-digital/bravus-bank
 
-echo "1️⃣ Parando containers..."
+echo "1. Parando containers sem remover volumes..."
 docker-compose down
 
 echo ""
-echo "2️⃣ Limpando volumes antigos..."
-docker-compose down -v
+echo "2. Preservando volumes de banco..."
+echo "   Nao execute docker-compose down -v em correcao normal: isso apaga saldos, usuarios e transacoes locais."
 
 echo ""
-echo "3️⃣ Removendo imagem antiga..."
+echo "3. Removendo imagem antiga..."
 docker rmi bravus-bank 2>/dev/null || true
 
 echo ""
-echo "4️⃣ Rebuild completo..."
+echo "4. Rebuild completo..."
 docker build --no-cache -t bravus-bank .
 
 echo ""
-echo "5️⃣ Iniciando containers..."
+echo "5. Iniciando containers..."
 docker-compose up -d
 
 echo ""
-echo "6️⃣ Aguardando 40 segundos para inicialização..."
+echo "6. Aguardando 40 segundos para inicializacao..."
 for i in {40..1}; do
     echo -ne "\rAguardando... $i segundos "
     sleep 1
@@ -34,7 +34,7 @@ done
 echo ""
 
 echo ""
-echo "✅ TESTANDO LOGIN..."
+echo "TESTANDO LOGIN..."
 echo ""
 curl -X POST http://localhost:9000/api/auth/login \
   -H "Content-Type: application/json" \
@@ -42,7 +42,7 @@ curl -X POST http://localhost:9000/api/auth/login \
 
 echo ""
 echo ""
-echo "✨ Se viu um 'token' acima, funcionou!"
+echo "Se viu um 'token' acima, funcionou."
 echo ""
 echo "Agora execute:"
 echo "  cd ~/banco-digital/bravus-bank-frontend && npm run dev"

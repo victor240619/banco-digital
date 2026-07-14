@@ -71,7 +71,7 @@ docker-compose logs -f db
 docker-compose down
 
 # Parar e remover volumes (reset completo)
-docker-compose down -v
+docker-compose down  # preserva volumes; use -v somente apos backup e reset intencional
 
 # Verificar status dos containers
 docker-compose ps
@@ -197,7 +197,7 @@ docker-compose logs bravus-bank
 docker-compose ps
 
 # Reiniciar do zero
-docker-compose down -v
+docker-compose down  # preserva volumes; use -v somente apos backup e reset intencional
 docker-compose up -d
 ```
 

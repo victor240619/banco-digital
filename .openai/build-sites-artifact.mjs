@@ -66,6 +66,70 @@ function command(file, args) {
 
 const sourceCommitSha = await command("git", ["rev-parse", "HEAD"]);
 const rawPublicUrl = `https://raw.githubusercontent.com/victor240619/banco-digital/${sourceCommitSha}/bravus-bank-frontend/public`;
+const snapshotUrl = process.env.BRAVUS_SITES_SNAPSHOT_URL || "https://bravus-bank-240619.victor2406.chatgpt.site";
+
+async function fetchLiveJson(path, token = "sites-admin-token") {
+  const url = new URL(path, snapshotUrl).toString();
+  try {
+    const response = await fetch(url, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      throw new Error(`snapshot ${path} returned ${response.status}`);
+    }
+    return response.json();
+  } catch (error) {
+    const curl = process.platform === "win32" ? "curl.exe" : "curl";
+    const tlsArgs = process.platform === "win32" ? ["--ssl-no-revoke"] : [];
+    const body = await command(curl, ["-fsSL", ...tlsArgs, "-H", `authorization: Bearer ${token}`, url]);
+    return JSON.parse(body);
+  }
+}
+
+function rolesForSnapshotUser(user) {
+  return String(user.username || "").includes("admin")
+    ? ["ROLE_ADMIN"]
+    : ["ROLE_USER"];
+}
+
+async function loadLiveSeed() {
+  try {
+    const [users, transactions, externalTransfers, globalRailParticipants] = await Promise.all([
+      fetchLiveJson("/api/admin/users"),
+      fetchLiveJson("/api/admin/transactions"),
+      fetchLiveJson("/api/admin/ledger/external-transfers"),
+      fetchLiveJson("/api/admin/global-rail/participants"),
+    ]);
+    const usersByUsername = {};
+    for (const user of Array.isArray(users) ? users : []) {
+      if (!user?.username) continue;
+      usersByUsername[user.username] = {
+        ...user,
+        roles: Array.isArray(user.roles) ? user.roles : rolesForSnapshotUser(user),
+      };
+    }
+    return {
+      capturedAt: new Date().toISOString(),
+      source: snapshotUrl,
+      users: usersByUsername,
+      transactions: Array.isArray(transactions) ? transactions : [],
+      externalTransfers: Array.isArray(externalTransfers) ? externalTransfers : [],
+      globalRailParticipants: Array.isArray(globalRailParticipants) ? globalRailParticipants : [],
+    };
+  } catch (error) {
+    console.warn(`Sites live snapshot unavailable: ${error.message}`);
+    return {
+      capturedAt: null,
+      source: snapshotUrl,
+      users: {},
+      transactions: [],
+      externalTransfers: [],
+      globalRailParticipants: [],
+    };
+  }
+}
+
+const liveSeed = await loadLiveSeed();
 
 const files = {};
 for (const file of await walk(distDir)) {
@@ -81,6 +145,7 @@ files["/"] = files["/index.html"];
 
 const entrypoint = `const buildTarget = "bravus-sites-api-v11";
 const files = ${JSON.stringify(files)};
+const liveSeed = ${JSON.stringify(liveSeed)};
 const now = () => new Date().toISOString();
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -138,12 +203,14 @@ const admin = {
   roles: ["ROLE_ADMIN"],
 };
 const state = globalThis.__bravusState || (globalThis.__bravusState = {
-  users: { joao, francisca, admin },
-  transactions: [],
-  externalTransfers: [],
+  users: { joao, francisca, admin, ...(liveSeed.users || {}) },
+  transactions: Array.isArray(liveSeed.transactions) ? [...liveSeed.transactions] : [],
+  externalTransfers: Array.isArray(liveSeed.externalTransfers) ? [...liveSeed.externalTransfers] : [],
   documentAnalyses: [],
   kycEvidence: {},
-  globalRailParticipants: [{
+  globalRailParticipants: Array.isArray(liveSeed.globalRailParticipants) && liveSeed.globalRailParticipants.length
+    ? [...liveSeed.globalRailParticipants]
+    : [{
     id: 1,
     participantCode: "BRAVUS-INTERNAL",
     legalName: "Bravus Premium Bank",
@@ -163,7 +230,13 @@ const state = globalThis.__bravusState || (globalThis.__bravusState = {
     updatedAt: now(),
   }],
 });
+state.users.joao = { ...joao, ...(state.users.joao || {}) };
 state.users.francisca = { ...francisca, ...(state.users.francisca || {}) };
+state.users.admin = { ...admin, ...(state.users.admin || {}) };
+if (state.users.joao && state.users.joao.balance < joaoCreditGrant.valorConcedido) {
+  joaoCreditGrant.valorUsado = Math.max(joaoCreditGrant.valorUsado, joaoCreditGrant.valorConcedido - state.users.joao.balance);
+  joaoCreditGrant.valorDisponivel = Math.max(0, joaoCreditGrant.valorConcedido - joaoCreditGrant.valorUsado);
+}
 state.documentAnalyses = Array.isArray(state.documentAnalyses) ? state.documentAnalyses : [];
 state.kycEvidence = state.kycEvidence || {};
 

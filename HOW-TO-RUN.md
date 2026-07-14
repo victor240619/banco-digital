@@ -1,18 +1,14 @@
-# 🚀 Como rodar o Bravus Bank (dev)
+# Como rodar o Bravus Bank em desenvolvimento
 
-Guia rápido pra subir o sistema completo (backend + frontend) localmente.
+Guia rapido para subir backend e frontend localmente sem perder dados.
 
----
+## Pre-requisitos
 
-## ✅ Pré-requisitos
+- Docker com Docker Compose v2 (`docker compose version`)
+- Node.js 18+ e npm
+- Git
 
-- **Docker** + **Docker Compose v2** (`docker compose version`)
-- **Node.js 18+** e **npm** (pro frontend)
-- **Git**
-
----
-
-## 🐳 Backend (API Spring Boot + Postgres)
+## Backend: API Spring Boot + Postgres
 
 ```bash
 cd bravus-bank
@@ -22,71 +18,71 @@ chmod +x dev-up.sh
 
 O script:
 
-1. Cria `.env` automaticamente a partir do `.env.example` (se não existir).
-2. Gera um `JWT_SECRET` forte aleatório.
+1. Cria `.env` automaticamente a partir do `.env.example`, se nao existir.
+2. Gera um `JWT_SECRET` forte aleatorio.
 3. Sobe DB + API com Docker Compose.
 4. Aguarda o health-check e mostra as URLs.
 
-**Para parar:** `docker compose down`
-**Para resetar o banco:** `docker compose down -v` (apaga o volume)
+Para parar sem perder dados:
 
-### URLs
+```bash
+docker compose down
+```
 
-| Serviço | URL |
+Atencao: `docker compose down -v` apaga o volume do Postgres e remove usuarios, saldos e transacoes locais. Use somente quando a intencao for resetar tudo, depois de backup.
+
+## URLs
+
+| Servico | URL |
 |---|---|
 | API | http://localhost:9000 |
 | Health | http://localhost:9000/actuator/health |
 | Postgres | `localhost:5432` (db: `bravus` / user: `bravus` / pass: `bravus`) |
 
-### 👤 Usuários de teste (criados via migration)
+## Usuarios de teste via migration
 
-| Usuário | Senha | Role |
+| Usuario | Senha | Role |
 |---|---|---|
 | `admin` | `admin123` | `ROLE_ADMIN` |
-| `user`  | `user123`  | `ROLE_USER` |
+| `user` | `user123` | `ROLE_USER` |
 
----
-
-## 💻 Frontend (React + Vite + Tailwind)
+## Frontend: React + Vite + Tailwind
 
 ```bash
 cd bravus-bank-frontend
 npm install
-cp .env.example .env   # (opcional) ajusta VITE_API_URL se a API não for localhost:9000
+cp .env.example .env
 npm run dev
 ```
 
-Abre em → http://localhost:5173
+Abre em http://localhost:5173.
 
----
+## Troubleshooting
 
-## 🔥 Troubleshooting
+`JWT_SECRET nao definido`: rode `./dev-up.sh` ou edite `.env`.
 
-**`JWT_SECRET nao definido`** → rode `./dev-up.sh` (gera automaticamente) ou edite `.env`.
+`port 5432 already allocated`: ja existe um Postgres local nessa porta. Pare-o ou mude a porta no `docker-compose.yml`.
 
-**`port 5432 already allocated`** → você já tem um Postgres rodando local. Pare-o ou mude a porta no `docker-compose.yml`.
+`Invalid username or password`: confira `docker compose logs db` e `docker compose logs bravus-bank`. Nao use `docker compose down -v` como primeira correcao, porque isso apaga o banco local. Restaure um backup ou rode uma migracao corretiva quando houver dados reais.
 
-**Login falha com `Invalid username or password`** → migração V4 não rodou. Confira `docker compose logs db` e `docker compose logs bravus-bank`. Pra forçar reset: `docker compose down -v && ./dev-up.sh`.
+Erro de CORS no frontend: confira `CORS_ORIGIN` no `.env` do backend.
 
-**Erro de CORS no frontend** → confira `CORS_ORIGIN` no `.env` do backend. Se rodar o front em outra porta, ajuste.
+API nao sobe (`Connection refused`): veja `docker compose logs bravus-bank -f`.
 
-**API não sobe (`Connection refused`)** → veja `docker compose logs bravus-bank -f`. Causas comuns:
-- Postgres ainda não healthy (espere 30s)
-- Falta `JWT_SECRET`
-- Conflito de porta 9000
+Causas comuns:
 
----
+- Postgres ainda nao esta healthy.
+- Falta `JWT_SECRET`.
+- Conflito de porta 9000.
 
-## 🧪 Teste rápido da API
+## Teste rapido da API
 
 ```bash
-# Health
 curl http://localhost:9000/actuator/health
 
-# Login
 curl -X POST http://localhost:9000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin123"}'
 ```
 
-Você deve receber um JSON com `token`, `username`, `roles`, etc.
+Voce deve receber um JSON com `token`, `username` e `roles`.

@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.math.BigDecimal;
+import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.util.HashSet;
 import java.util.Set;
@@ -33,6 +34,7 @@ public class LocalDevDataConfig {
     private static final long CUSTOMER_INITIAL_CREDIT_CENTAVOS = 89_000_000L;
     private static final BigDecimal CUSTOMER_INITIAL_CREDIT_ANNUAL_INTEREST = new BigDecimal("24.00");
     private static final String CUSTOMER_INITIAL_CREDIT_MARKER = "BRAVUS_LOCAL_JOAO_CREDIT_890000";
+    private static final Path LOCAL_DATA_MARKER = Path.of("data", ".local-bank-protection.properties");
 
     @Bean
     ApplicationRunner seedLocalAdmin(RoleRepository roleRepo,
@@ -42,6 +44,9 @@ public class LocalDevDataConfig {
                                      CreditService creditService,
                                      JdbcTemplate jdbcTemplate) {
         return args -> {
+            LocalBankDataProtection dataProtection = new LocalBankDataProtection(LOCAL_DATA_MARKER);
+            dataProtection.verifyCurrentCounts(jdbcTemplate);
+
             ensureLocalLedgerBase(jdbcTemplate);
 
             RoleEntity adminRole = roleRepo.findByName("ROLE_ADMIN").orElseGet(() -> {
@@ -68,7 +73,9 @@ public class LocalDevDataConfig {
             admin.setPassword(passwordEncoder.encode(ADMIN_PASSWORD));
             admin.setFullName("Administrador Bravus Local");
             setAccountNumberIfAvailable(admin, userRepo, "0000000003");
-            admin.setBalance(0L);
+            if (admin.getBalance() == null) {
+                admin.setBalance(0L);
+            }
             admin.setIsActive(true);
             admin.setStatusKyc("APROVADO_AUTO");
             Set<RoleEntity> roles = new HashSet<>();
@@ -102,6 +109,7 @@ public class LocalDevDataConfig {
             customer = userRepo.save(customer);
 
             ensureJoaoInitialCredit(customer, admin, grantRepo, creditService);
+            dataProtection.rememberCurrentCounts(jdbcTemplate);
         };
     }
 
