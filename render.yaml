@@ -3,12 +3,23 @@
 # https://render.com/docs/blueprint-spec
 # ============================================================
 
+databases:
+  - name: bravus-bank-db
+    plan: basic-256mb
+    diskSizeGB: 1
+    region: oregon
+    databaseName: bravus
+    user: bravus
+    postgresMajorVersion: "17"
+    storageAutoscalingEnabled: false
+    ipAllowList: []
+
 services:
   # --- Backend (Spring Boot) ---
   - type: web
     name: bravus-bank-api
     runtime: docker
-    plan: free
+    plan: starter
     region: oregon                # Oregon é o que tem mais capacidade no Free
     dockerfilePath: ./bravus-bank/Dockerfile
     dockerContext: ./bravus-bank
@@ -20,12 +31,18 @@ services:
         value: prod
       - key: PORT
         value: "9000"
-      - key: DB_URL
-        sync: false               # Settado manualmente no dashboard
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bravus-bank-db
+          property: connectionString
       - key: DB_USER
-        sync: false
+        fromDatabase:
+          name: bravus-bank-db
+          property: user
       - key: DB_PASSWORD
-        sync: false
+        fromDatabase:
+          name: bravus-bank-db
+          property: password
       - key: JWT_SECRET
         generateValue: true       # Render gera um secret seguro automaticamente
       - key: BRAVUS_BIOMETRIC_KEY
@@ -33,6 +50,6 @@ services:
       - key: BRAVUS_PASSWORD_RESET_GLOBAL_LIMIT
         value: "300"
       - key: CORS_ORIGIN
-        sync: false               # URL do frontend depois do deploy
+        value: "https://bravus-bank-240619.victor2406.chatgpt.site"
       - key: JAVA_TOOL_OPTIONS
         value: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=70.0"

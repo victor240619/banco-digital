@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowDownToLine, ArrowUpFromLine, ArrowRightLeft, Wallet, Eye, EyeOff,
@@ -40,6 +40,13 @@ const txSignClass = (type) =>
   ['DEPOSIT', 'TRANSFER_IN'].includes(type) ? 'text-emerald-300' : 'text-red-300';
 const txSign = (type) =>
   ['DEPOSIT', 'TRANSFER_IN'].includes(type) ? '+' : '-';
+
+const createIdempotencyKey = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `bravus-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+};
 
 const EMPTY_FORM = {
   amount: '',
@@ -613,6 +620,7 @@ export default function UserDashboard() {
   const [resolvedRecipient, setResolvedRecipient] = useState(null);
   const [resolveLoading, setResolveLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const internalTransferAttempt = useRef(null);
 
   const user = authService.getCurrentUser();
   const location = useLocation();
@@ -734,9 +742,24 @@ export default function UserDashboard() {
         return setError('Informe banco, agência e conta para TED.');
       }
     }
-      if (kind === 'transfer' && form.transferMode === 'external' && !['PIX', 'TED'].includes(form.channel) && !form.accountNumber) {
-        return setError('Informe a conta beneficiaria para o canal selecionado.');
+    if (kind === 'transfer' && form.transferMode === 'external' && !['PIX', 'TED'].includes(form.channel) && !form.accountNumber) {
+      return setError('Informe a conta beneficiaria para o canal selecionado.');
+    }
+    let transferIdempotencyKey = null;
+    if (kind === 'transfer' && form.transferMode === 'internal') {
+      const fingerprint = JSON.stringify([
+        amountCentavos,
+        resolvedRecipient.accountNumber,
+        form.description?.trim() || '',
+      ]);
+      if (internalTransferAttempt.current?.fingerprint !== fingerprint) {
+        internalTransferAttempt.current = {
+          fingerprint,
+          key: createIdempotencyKey(),
+        };
       }
+      transferIdempotencyKey = internalTransferAttempt.current.key;
+    }
     setSubmitting(true);
     try {
       let message =
@@ -746,7 +769,13 @@ export default function UserDashboard() {
       if (kind === 'deposit') await userService.deposit(amountCentavos, form.description);
       if (kind === 'withdraw') await userService.withdraw(amountCentavos, form.description);
       if (kind === 'transfer' && form.transferMode === 'internal') {
-        const { data } = await userService.transfer(amountCentavos, resolvedRecipient.accountNumber, form.description);
+        const { data } = await userService.transfer(
+          amountCentavos,
+          resolvedRecipient.accountNumber,
+          form.description,
+          transferIdempotencyKey,
+        );
+        internalTransferAttempt.current = null;
         if (data?.provider === 'BRAVUS_INTERNAL_LEDGER') {
           message = 'Transferencia Bravus liquidada na hora.';
         }

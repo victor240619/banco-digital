@@ -35,4 +35,5 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=70.0 -XX:+UseSerial
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
   CMD curl -fs http://localhost:${PORT}/actuator/health || exit 1
 
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -Dserver.port=${PORT} -jar app.jar"]
+# Render provides a standard postgresql:// private URL; JDBC needs the jdbc: prefix.
+ENTRYPOINT ["sh", "-c", "if [ -n \"$DATABASE_URL\" ]; then export DB_URL=\"jdbc:${DATABASE_URL}\"; fi; exec java $JAVA_OPTS -Dserver.port=${PORT} -jar app.jar"]

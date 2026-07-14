@@ -1,5 +1,6 @@
 import axios from 'axios';
 import {
+  BRAVUS_PRODUCTION_API_URL,
   MOBILE_APP_API_URL,
   getAppClientChannel,
   getAppClientHeader,
@@ -15,7 +16,7 @@ const resolveApiUrl = () => {
   if (hostname === '127.0.0.1') return 'http://127.0.0.1:9000/api';
   if (hostname === 'localhost') return 'http://localhost:9000/api';
 
-  return '/api';
+  return BRAVUS_PRODUCTION_API_URL;
 };
 
 const API_URL = resolveApiUrl();
@@ -143,9 +144,11 @@ export const userService = {
     api.post('/user/deposit', { type: 'DEPOSIT', amount, description }),
   withdraw: (amount, description) =>
     api.post('/user/withdraw', { type: 'WITHDRAWAL', amount, description }),
-  transfer: (amount, destinationAccount, description) =>
+  transfer: (amount, destinationAccount, description, idempotencyKey) =>
     api.post('/user/transfer', {
       type: 'TRANSFER_OUT', amount, destinationAccount, description,
+    }, {
+      headers: { 'Idempotency-Key': idempotencyKey },
     }),
   externalTransfer: (payload) => api.post('/user/external-transfers', payload),
 };

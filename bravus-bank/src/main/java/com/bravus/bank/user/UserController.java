@@ -6,23 +6,21 @@ import com.bravus.bank.db.repo.TransactionRepository;
 import com.bravus.bank.db.repo.UserRepository;
 import com.bravus.bank.external.ExternalTransferEntity;
 import com.bravus.bank.external.ExternalTransferRepository;
-import com.bravus.bank.ledger.repo.CreditGrantRepository;
-import com.bravus.bank.ledger.service.CreditService;
+import com.bravus.bank.user.transfer.DuplicateInternalTransferRequestException;
+import com.bravus.bank.user.transfer.InternalTransferException;
+import com.bravus.bank.user.transfer.PersistentInternalTransferService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 @RestController
@@ -32,19 +30,16 @@ public class UserController {
     private final UserRepository userRepository;
     private final TransactionRepository transactionRepository;
     private final ExternalTransferRepository externalTransferRepository;
-    private final CreditGrantRepository creditGrantRepository;
-    private final CreditService creditService;
+    private final PersistentInternalTransferService persistentInternalTransferService;
     
     public UserController(UserRepository userRepository,
                           TransactionRepository transactionRepository,
                           ExternalTransferRepository externalTransferRepository,
-                          CreditGrantRepository creditGrantRepository,
-                          CreditService creditService) {
+                          PersistentInternalTransferService persistentInternalTransferService) {
         this.userRepository = userRepository;
         this.transactionRepository = transactionRepository;
         this.externalTransferRepository = externalTransferRepository;
-        this.creditGrantRepository = creditGrantRepository;
-        this.creditService = creditService;
+        this.persistentInternalTransferService = persistentInternalTransferService;
     }
     
     public record UserProfileResponse(
@@ -244,101 +239,50 @@ public class UserController {
     }
     
     @PostMapping("/transfer")
-    @Transactional(isolation = Isolation.SERIALIZABLE)
-    public ResponseEntity<?> transfer(@RequestBody @Valid TransactionRequest request) {
+    public ResponseEntity<?> transfer(
+            @RequestBody @Valid TransactionRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         if (!"TRANSFER_OUT".equals(request.type())) {
             return transactionError("Tipo de transacao invalido para transferencia.", "INVALID_TRANSACTION_TYPE");
         }
-        
+
         String username = SecurityContextHolder.getContext().getAuthentication().getName();
-        UserEntity fromUser = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("User not found"));
-        
-        UserEntity toUser = findTransferDestination(request.destinationAccount()).orElse(null);
-        
-        if (toUser == null) {
-            return transactionError(
-                    "Destino Bravus nao encontrado. Para outros bancos, use Pagamentos/Pix ou Outros bancos.",
-                    "BRAVUS_DESTINATION_NOT_FOUND");
+        try {
+            PersistentInternalTransferService.TransferResult result = persistentInternalTransferService.transfer(
+                    username,
+                    request.destinationAccount(),
+                    request.amount(),
+                    request.description(),
+                    idempotencyKey);
+            return transferResponse(result);
+        } catch (DuplicateInternalTransferRequestException duplicate) {
+            PersistentInternalTransferService.TransferResult result = persistentInternalTransferService
+                    .findCompletedAfterConcurrentDuplicate(
+                            duplicate.getUserId(),
+                            duplicate.getIdempotencyKey(),
+                            duplicate.getDestinationUserId(),
+                            duplicate.getAmountCentavos())
+                    .orElseThrow(() -> new InternalTransferException(
+                            "TRANSFER_PENDING_RETRY",
+                            "A transferencia ainda esta sendo processada. Tente novamente com a mesma chave."));
+            return transferResponse(result);
+        } catch (InternalTransferException exception) {
+            return transactionError(exception.getMessage(), exception.getCode());
         }
-        
-        if (fromUser.getId().equals(toUser.getId())) {
-            return transactionError("Nao e permitido transferir para a propria conta Bravus.", "SELF_TRANSFER");
-        }
+    }
 
-        List<UserEntity> lockedUsers = userRepository.findAllByIdInOrderByIdForUpdate(List.of(fromUser.getId(), toUser.getId()));
-        if (lockedUsers.size() != 2) {
-            return transactionError("Nao foi possivel bloquear as duas contas da transferencia.", "ACCOUNT_LOCK_FAILED");
-        }
-        Long fromUserId = fromUser.getId();
-        Long toUserId = toUser.getId();
-        fromUser = lockedUsers.stream()
-                .filter(u -> u.getId().equals(fromUserId))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Conta de origem nao bloqueada."));
-        toUser = lockedUsers.stream()
-                .filter(u -> u.getId().equals(toUserId))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Conta de destino nao bloqueada."));
-
-        if (!Boolean.TRUE.equals(fromUser.getIsActive()) || !Boolean.TRUE.equals(toUser.getIsActive())) {
-            return transactionError("Conta de origem ou destino esta inativa.", "ACCOUNT_INACTIVE");
-        }
-
-        if (fromUser.getBalance() == null || fromUser.getBalance() < request.amount()) {
-            return transactionError("Saldo contabil insuficiente para concluir a transferencia.", "INSUFFICIENT_BALANCE");
-        }
-        
-        // Update balances
-        fromUser.setBalance(fromUser.getBalance() - request.amount());
-        toUser.setBalance(toUser.getBalance() + request.amount());
-        userRepository.save(fromUser);
-        userRepository.save(toUser);
-        
-        // Create transaction records
-        TransactionEntity outTransaction = new TransactionEntity();
-        outTransaction.setUser(fromUser);
-        outTransaction.setType("TRANSFER_OUT");
-        outTransaction.setAmount(request.amount());
-        outTransaction.setDescription(request.description() != null ? request.description() : "Transfer");
-        outTransaction.setDestinationAccount(toUser.getAccountNumber());
-        outTransaction.setStatus("COMPLETED");
-        outTransaction = transactionRepository.save(outTransaction);
-
-        consumeCreditIfAvailable(
-                fromUser,
-                request.amount(),
-                outTransaction.getId(),
-                username,
-                "Transferencia interna Bravus para " + toUser.getAccountNumber());
-        
-        TransactionEntity inTransaction = new TransactionEntity();
-        inTransaction.setUser(toUser);
-        inTransaction.setType("TRANSFER_IN");
-        inTransaction.setAmount(request.amount());
-        inTransaction.setDescription(request.description() != null ? request.description() : "Transfer received");
-        inTransaction.setDestinationAccount(fromUser.getAccountNumber());
-        inTransaction.setStatus("COMPLETED");
-        transactionRepository.save(inTransaction);
-
-        ExternalTransferEntity order = createInternalReceiptOrder(
-                fromUser,
-                toUser,
-                outTransaction,
-                request.amount(),
-                request.description(),
-                username);
-        
+    private ResponseEntity<?> transferResponse(PersistentInternalTransferService.TransferResult result) {
         return ResponseEntity.ok(Map.of(
                 "message", "Transferencia interna Bravus liquidada.",
                 "status", "COMPLETED",
                 "provider", "BRAVUS_INTERNAL_LEDGER",
                 "settlementStatus", "LIQUIDADA_CONFIRMADA",
-                "balanceCentavos", fromUser.getBalance(),
-                "transactionId", outTransaction.getId(),
-                "destinationAccount", toUser.getAccountNumber(),
-                "receiptOrderId", order.getId(),
-                "externalOrderId", order.getId()
+                "balanceCentavos", result.balanceCentavos(),
+                "transactionId", result.transactionOutId(),
+                "destinationAccount", result.destinationAccount(),
+                "receiptOrderId", result.receiptOrderId(),
+                "externalOrderId", result.receiptOrderId(),
+                "idempotentReplay", result.idempotentReplay()
         ));
     }
 
@@ -417,48 +361,6 @@ public class UserController {
                     tx.getAmount());
         }
         return Optional.empty();
-    }
-
-    private ExternalTransferEntity createInternalReceiptOrder(UserEntity fromUser,
-                                                             UserEntity toUser,
-                                                             TransactionEntity transaction,
-                                                             Long amount,
-                                                             String description,
-                                                             String requestedByUsername) {
-        UserEntity requestedBy = userRepository.findByUsername(requestedByUsername).orElse(fromUser);
-        String idempotencyKey = "bravus-internal-" + UUID.randomUUID();
-        ExternalTransferEntity order = new ExternalTransferEntity();
-        order.setUser(fromUser);
-        order.setRequestedBy(requestedBy);
-        order.setTransactionId(transaction.getId());
-        order.setAmountCentavos(amount);
-        order.setChannel("PIX");
-        order.setCurrency("BRL");
-        order.setBeneficiaryName(toUser.getFullName() != null ? toUser.getFullName() : toUser.getUsername());
-        order.setBeneficiaryDocument(digits(toUser.getCpf()));
-        order.setBankCode("999");
-        order.setIspb("99999999");
-        order.setAgency(toUser.getAgencia() != null ? toUser.getAgencia() : "0001");
-        order.setAccountNumber(toUser.getAccountNumber());
-        order.setAccountDigit(null);
-        order.setAccountType(toUser.getAccountType() != null ? toUser.getAccountType() : "CORRENTE");
-        order.setPixKey(toUser.getChavePix() != null ? toUser.getChavePix() : toUser.getCpf());
-        order.setPixKeyType(toUser.getTipoChavePix() != null ? toUser.getTipoChavePix() : "CPF");
-        order.setDescription(description);
-        order.setProvider("BRAVUS_INTERNAL_LEDGER");
-        order.setProviderTransferId(idempotencyKey);
-        order.setIdempotencyKey(idempotencyKey);
-        order.setStatus("COMPLETED");
-        order.setSettlementStatus("LIQUIDADA_CONFIRMADA");
-        order.setReceiptKind("COMPROVANTE_LIQUIDACAO_CONFIRMADA");
-        order.setDestinationNetwork("INTERNAL_BRAVUS");
-        order.setDestinationParticipantCode("BRAVUS-INTERNAL");
-        order.setDestinationConfirmationId(idempotencyKey);
-        order.setDestinationConfirmedAt(OffsetDateTime.now());
-        order.setSettlementMessage("Liquidacao interna confirmada no ledger Bravus.");
-        order.setErrorMessage(null);
-        order.setRawResponse("{\"provider\":\"BRAVUS_INTERNAL_LEDGER\",\"status\":\"COMPLETED\",\"settlement\":\"INTERNAL_LEDGER\"}");
-        return externalTransferRepository.save(order);
     }
 
     private TransferDestinationResponse toDestinationResponse(UserEntity user) {
@@ -587,27 +489,4 @@ public class UserController {
                 .or(() -> userRepository.findByChavePix(raw));
     }
 
-    private void consumeCreditIfAvailable(UserEntity user,
-                                          Long amount,
-                                          Long transactionId,
-                                          String createdBy,
-                                          String note) {
-        Long availableCredit = creditGrantRepository.sumAvailableByUser(user.getId());
-        if (availableCredit == null || availableCredit <= 0) {
-            return;
-        }
-        long coveredByCredit = Math.min(amount, availableCredit);
-        if (coveredByCredit <= 0) {
-            return;
-        }
-
-        CreditService.UseCommand use = new CreditService.UseCommand();
-        use.userId = user.getId();
-        use.valor = coveredByCredit;
-        use.tipo = "TRANSFERENCIA_INTERNA";
-        use.transactionId = transactionId;
-        use.criadoPor = createdBy;
-        use.observacao = note;
-        creditService.useCredit(use);
-    }
 }
