@@ -6,7 +6,7 @@ import {
   Send, Landmark, CreditCard, Percent,
   FileText, Barcode, CalendarDays, LineChart, UserCheck, UsersRound,
   ClipboardCheck, ShieldCheck, Smartphone, Building2, List, Grid3X3,
-  Download, Share2, ArrowLeft,
+  Download, Share2, ArrowLeft, Menu, X, Home, User, KeyRound, LogOut,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -119,7 +119,19 @@ const DIRECT_ROUTE_META = {
   '/dashboard/withdraw': { label: 'Saque', Icon: ArrowUpFromLine },
   '/dashboard/saque': { label: 'Saque', Icon: ArrowUpFromLine },
   '/dashboard/transfer': { label: 'Transferência', Icon: ArrowRightLeft },
+  '/dashboard/perfil': { label: 'Perfil', Icon: User },
+  '/dashboard/trocar-senha': { label: 'Trocar senha', Icon: KeyRound },
 };
+
+const ACCOUNT_MENU_ITEMS = [
+  { label: 'Visão geral', route: '/dashboard', Icon: Home },
+  { label: 'Perfil', route: '/dashboard/perfil', Icon: User },
+  { label: 'Saldos e extratos', route: '/dashboard/extratos', Icon: FileText },
+  { label: 'Transferências', route: '/dashboard/transferencias', Icon: ArrowRightLeft },
+  { label: 'Pix', route: '/dashboard/pix', Icon: Send },
+  { label: 'Segurança', route: '/dashboard/seguranca', Icon: ShieldCheck },
+  { label: 'Trocar senha', route: '/dashboard/trocar-senha', Icon: KeyRound },
+];
 
 const routeStateForPath = (pathname) => {
   const path = pathname.replace(/\/+$/, '') || '/dashboard';
@@ -145,6 +157,8 @@ const routeStateForPath = (pathname) => {
     '/dashboard/favorecidos': { tab: 'overview', activeModule: 'beneficiaries' },
     '/dashboard/limites': { tab: 'overview', activeModule: 'limits' },
     '/dashboard/seguranca': { tab: 'overview', activeModule: 'security' },
+    '/dashboard/perfil': { tab: 'profile', activeModule: 'profile' },
+    '/dashboard/trocar-senha': { tab: 'change-password', activeModule: 'change-password' },
   };
   return states[path] || states['/dashboard'];
 };
@@ -614,6 +628,7 @@ export default function UserDashboard() {
   const [success, setSuccess] = useState('');
   const [showBalance, setShowBalance] = useState(true);
   const [portalView, setPortalView] = useState('icons');
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [activeModule, setActiveModule] = useState(initialRouteState.activeModule);
 
   const [tab, setTab] = useState(initialRouteState.tab);
@@ -625,6 +640,7 @@ export default function UserDashboard() {
   const accountRefreshInFlight = useRef(null);
   const accountDataSignature = useRef('');
   const lastAccountRefreshAt = useRef(0);
+  const accountMenuRef = useRef(null);
 
   const user = authService.getCurrentUser();
   const location = useLocation();
@@ -635,6 +651,7 @@ export default function UserDashboard() {
     const route = routeStateForPath(location.pathname);
     setTab(route.tab);
     setActiveModule(route.activeModule);
+    setAccountMenuOpen(false);
     if (route.transferMode) {
       setForm({
         ...EMPTY_FORM,
@@ -646,6 +663,21 @@ export default function UserDashboard() {
     }
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [location.pathname]);
+  useEffect(() => {
+    if (!accountMenuOpen) return undefined;
+    const closeOnOutsideClick = (event) => {
+      if (!accountMenuRef.current?.contains(event.target)) setAccountMenuOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setAccountMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [accountMenuOpen]);
   useEffect(() => {
     if (success || error) {
       const t = setTimeout(() => { setSuccess(''); setError(''); }, 4500);
@@ -1018,6 +1050,19 @@ export default function UserDashboard() {
     return navigate(route);
   };
 
+  const handleAccountLogout = async () => {
+    let logoutStatus = { serverRevoked: true };
+    try {
+      logoutStatus = await authService.logout();
+    } finally {
+      setAccountMenuOpen(false);
+      navigate('/login', { replace: true });
+    }
+    if (!logoutStatus.serverRevoked && window.setGlobalError) {
+      window.setGlobalError('A conta saiu deste aparelho, mas a conexão impediu a revogação remota. Entre novamente para renovar a segurança da sessão.');
+    }
+  };
+
   const Tab = ({ id, label, icon: Icon }) => (
     <button
       onClick={() => navigateToTab(id)}
@@ -1032,6 +1077,71 @@ export default function UserDashboard() {
 
   return (
     <main className="container-app native-safe-bottom min-w-0 space-y-4 py-4 sm:space-y-6 sm:py-8 lg:py-10">
+      <div className="relative z-30 flex justify-end" ref={accountMenuRef}>
+        <button
+          type="button"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] text-ink-100 transition hover:bg-white/[0.12]"
+          onClick={() => setAccountMenuOpen((open) => !open)}
+          aria-label={accountMenuOpen ? 'Fechar menu da conta' : 'Abrir menu da conta'}
+          aria-expanded={accountMenuOpen}
+          aria-haspopup="menu"
+          title="Menu da conta"
+        >
+          {accountMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
+
+        <AnimatePresence>
+          {accountMenuOpen && (
+            <motion.div
+              role="menu"
+              initial={{ opacity: 0, y: -8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.98 }}
+              className="absolute right-0 top-14 w-[min(19rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-white/10 bg-ink-900 p-2 shadow-2xl"
+            >
+              <div className="border-b border-white/10 px-3 py-3">
+                <div className="truncate text-sm font-semibold text-white">{profile?.fullName || user?.fullName || user?.username}</div>
+                <div className="mt-0.5 truncate text-xs text-ink-400">Conta {accountNumber}</div>
+              </div>
+              <div className="py-2">
+                {ACCOUNT_MENU_ITEMS.map(({ label, route, Icon }) => {
+                  const active = normalizedDashboardPath === route;
+                  return (
+                    <button
+                      key={route}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAccountMenuOpen(false);
+                        navigate(route);
+                      }}
+                      className={cn(
+                        'flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm transition',
+                        active ? 'bg-amber-300/15 text-amber-100' : 'text-ink-200 hover:bg-white/[0.07] hover:text-white'
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="border-t border-white/10 pt-2">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={handleAccountLogout}
+                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-red-200 transition hover:bg-red-400/10 hover:text-red-100"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sair da conta
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
       {profile?.identityEvidenceRequired && (
         <section className="flex flex-col gap-4 rounded-lg border border-gold-400/30 bg-gold-400/10 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
@@ -1288,6 +1398,14 @@ export default function UserDashboard() {
             onSuccess={setSuccess}
             onError={setError}
           />
+        )}
+
+        {tab === 'profile' && (
+          <UserProfilePanel user={user} profile={profile} me={me} />
+        )}
+
+        {tab === 'change-password' && (
+          <UserPasswordChangePanel onSuccess={setSuccess} onError={setError} />
         )}
 
         {/* Forms */}
@@ -1671,6 +1789,146 @@ export default function UserDashboard() {
         )}
       </AnimatePresence>
     </main>
+  );
+}
+
+function UserProfilePanel({ user, profile, me }) {
+  const bank = me?.dadosBancarios || {};
+  const fields = [
+    ['Nome completo', profile?.fullName || user?.fullName || '-'],
+    ['CPF', profile?.cpf || user?.cpf || me?.cpf || '-'],
+    ['E-mail', profile?.email || user?.email || '-'],
+    ['Telefone', profile?.phone || user?.phone || '-'],
+    ['Agência', bank.agencia || profile?.agencia || '0001'],
+    ['Conta', bank.contaFormatada || bank.conta || profile?.accountNumber || '-'],
+    ['Tipo de conta', bank.tipoConta || profile?.accountType || 'CORRENTE'],
+    ['Status', profile?.active === false ? 'Bloqueada' : 'Ativa'],
+  ];
+
+  return (
+    <section className="card-premium max-w-4xl overflow-hidden">
+      <div className="border-b border-white/10 px-5 py-5 sm:px-6">
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-amber-300/15 text-amber-200">
+            <User className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 className="title-md">Dados do perfil</h2>
+            <p className="mt-1 text-sm text-ink-400">Informações vinculadas à sua conta Bravus.</p>
+          </div>
+        </div>
+      </div>
+      <dl className="grid sm:grid-cols-2">
+        {fields.map(([label, value]) => (
+          <div key={label} className="min-w-0 border-b border-white/10 px-5 py-4 sm:px-6 sm:odd:border-r">
+            <dt className="text-xs uppercase tracking-[0.14em] text-ink-400">{label}</dt>
+            <dd className="mt-1 break-words text-sm font-medium text-white">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function UserPasswordChangePanel({ onSuccess, onError }) {
+  const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmation: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const strongPassword = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,128}$/;
+
+  const updatePassword = (field, value) => setPasswords((current) => ({ ...current, [field]: value }));
+
+  const submitPasswordChange = async (event) => {
+    event.preventDefault();
+    onError('');
+    onSuccess('');
+    if (!passwords.currentPassword) {
+      onError('Informe sua senha atual.');
+      return;
+    }
+    if (!strongPassword.test(passwords.newPassword)) {
+      onError('A nova senha deve ter no mínimo 8 caracteres, com letra maiúscula, minúscula e número.');
+      return;
+    }
+    if (passwords.newPassword !== passwords.confirmation) {
+      onError('A confirmação da nova senha não confere.');
+      return;
+    }
+    try {
+      setSubmitting(true);
+      await userService.changePassword({
+        currentPassword: passwords.currentPassword,
+        newPassword: passwords.newPassword,
+      });
+      setPasswords({ currentPassword: '', newPassword: '', confirmation: '' });
+      onSuccess('Senha alterada com segurança. As outras sessões da conta foram encerradas.');
+    } catch (err) {
+      onError(operationErrorMessage(err, 'Não foi possível alterar a senha.'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <section className="card-premium max-w-2xl p-5 sm:p-6">
+      <div className="flex items-start gap-3">
+        <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-amber-300/15 text-amber-200">
+          <KeyRound className="h-5 w-5" />
+        </span>
+        <div>
+          <h2 className="title-md">Trocar senha</h2>
+          <p className="mt-1 text-sm text-ink-400">Confirme a senha atual e defina uma nova senha forte.</p>
+        </div>
+      </div>
+
+      <form className="mt-6 space-y-4" onSubmit={submitPasswordChange}>
+        <div>
+          <label className="form-label" htmlFor="current-password">Senha atual</label>
+          <input
+            id="current-password"
+            type="password"
+            autoComplete="current-password"
+            className="form-input"
+            value={passwords.currentPassword}
+            onChange={(event) => updatePassword('currentPassword', event.target.value)}
+            maxLength={128}
+            required
+          />
+        </div>
+        <div>
+          <label className="form-label" htmlFor="new-password">Nova senha</label>
+          <input
+            id="new-password"
+            type="password"
+            autoComplete="new-password"
+            className="form-input"
+            value={passwords.newPassword}
+            onChange={(event) => updatePassword('newPassword', event.target.value)}
+            minLength={8}
+            maxLength={128}
+            required
+          />
+          <p className="mt-2 text-xs text-ink-400">Use 8 ou mais caracteres, com maiúscula, minúscula e número.</p>
+        </div>
+        <div>
+          <label className="form-label" htmlFor="confirm-password">Confirmar nova senha</label>
+          <input
+            id="confirm-password"
+            type="password"
+            autoComplete="new-password"
+            className="form-input"
+            value={passwords.confirmation}
+            onChange={(event) => updatePassword('confirmation', event.target.value)}
+            minLength={8}
+            maxLength={128}
+            required
+          />
+        </div>
+        <button type="submit" className="btn-primary w-full justify-center" disabled={submitting}>
+          <KeyRound className="h-4 w-4" />
+          {submitting ? 'Alterando senha...' : 'Alterar senha'}
+        </button>
+      </form>
+    </section>
   );
 }
 

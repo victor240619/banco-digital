@@ -172,6 +172,7 @@ export const userService = {
   getMe: () => api.get('/user/me'),
   getBalance: () => api.get('/user/balance'),
   getTransactions: () => api.get('/user/transactions'),
+  changePassword: (payload) => api.post('/user/password/change', payload),
   verifyIdentityFace: (faceImage) => api.post('/user/kyc/face-check', {
     faceImage,
     biometricChallenge: 'FACE_CAMERA_CAPTURE_V1',

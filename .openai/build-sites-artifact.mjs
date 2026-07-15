@@ -3010,6 +3010,44 @@ async function handleApi(request) {
     return json({ status: "SIGNED_OUT" }, { headers: { "cache-control": "no-store" } });
   }
 
+  if (request.method === "POST" && path === "/user/password/change") {
+    const body = await request.json().catch(() => ({}));
+    const currentPassword = String(body.currentPassword || "");
+    const newPassword = String(body.newPassword || "");
+    if (!currentPassword) {
+      return badRequest("Informe a senha atual.", "CURRENT_PASSWORD_REQUIRED");
+    }
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$/.test(newPassword)) {
+      return badRequest("Use no minimo 8 caracteres, com letra maiuscula, minuscula e numero.", "WEAK_PASSWORD");
+    }
+    if (!await verifyPassword(currentPassword, user.passwordCredential)) {
+      return badRequest("A senha atual esta incorreta.", "CURRENT_PASSWORD_INVALID");
+    }
+    if (await verifyPassword(newPassword, user.passwordCredential)) {
+      return badRequest("A nova senha deve ser diferente da senha atual.", "PASSWORD_REUSE");
+    }
+
+    user.passwordCredential = await createPasswordCredential(newPassword);
+    user.credentialUpdatedAt = now();
+    user.initialCredentialExpiresAt = null;
+    state.registrationAudit.unshift({
+      id: crypto.randomUUID(),
+      eventType: "CREDENTIAL_PASSWORD_CHANGED_IN_ACCOUNT",
+      actor: user.username,
+      subjectHash: null,
+      detail: "Senha alterada pelo usuario autenticado dentro da propria conta.",
+      createdAt: now(),
+    });
+    state.registrationAudit = state.registrationAudit.slice(0, 500);
+
+    const auth = request.headers.get("authorization") || "";
+    const currentToken = auth.replace(/^Bearer\\s+/i, "").trim();
+    for (const [token, session] of Object.entries(state.sessions)) {
+      if (session?.username === user.username && token !== currentToken) delete state.sessions[token];
+    }
+    return json({ status: "PASSWORD_CHANGED" }, { headers: { "cache-control": "no-store" } });
+  }
+
   if (request.method === "POST" && path === "/user/kyc/face-check") {
     return json({
       status: "DISABLED",

@@ -1219,6 +1219,44 @@ assert.equal(revoked.response.status, 401, "admin password reset must revoke pri
 worker = await loadWorker("restart-after-password-reset");
 const finalLogin = await call(worker, "POST", "/auth/login", { body: { username: "52998224725", password: "SenhaFinal456" } });
 assert.equal(finalLogin.response.status, 200, "new password must survive worker restart");
+const secondFinalLogin = await call(worker, "POST", "/auth/login", { body: { username: "52998224725", password: "SenhaFinal456" } });
+assert.equal(secondFinalLogin.response.status, 200, "user must be able to hold a second active session before changing the password");
+const unauthorizedInAccountPasswordChange = await call(worker, "POST", "/user/password/change", {
+  body: { currentPassword: "SenhaFinal456", newPassword: "SenhaInterna789" },
+});
+assert.equal(unauthorizedInAccountPasswordChange.response.status, 401, "in-account password change must require authentication");
+const weakInAccountPasswordChange = await call(worker, "POST", "/user/password/change", {
+  token: finalLogin.data.token,
+  body: { currentPassword: "SenhaFinal456", newPassword: "fraca" },
+});
+assert.equal(weakInAccountPasswordChange.response.status, 400);
+assert.equal(weakInAccountPasswordChange.data.code, "WEAK_PASSWORD");
+const wrongCurrentPasswordChange = await call(worker, "POST", "/user/password/change", {
+  token: finalLogin.data.token,
+  body: { currentPassword: "SenhaErrada456", newPassword: "SenhaInterna789" },
+});
+assert.equal(wrongCurrentPasswordChange.response.status, 400);
+assert.equal(wrongCurrentPasswordChange.data.code, "CURRENT_PASSWORD_INVALID");
+const reusedInAccountPassword = await call(worker, "POST", "/user/password/change", {
+  token: finalLogin.data.token,
+  body: { currentPassword: "SenhaFinal456", newPassword: "SenhaFinal456" },
+});
+assert.equal(reusedInAccountPassword.response.status, 400);
+assert.equal(reusedInAccountPassword.data.code, "PASSWORD_REUSE");
+const changedInAccountPassword = await call(worker, "POST", "/user/password/change", {
+  token: finalLogin.data.token,
+  body: { currentPassword: "SenhaFinal456", newPassword: "SenhaInterna789" },
+});
+assert.equal(changedInAccountPassword.response.status, 200, JSON.stringify(changedInAccountPassword.data));
+assert.equal(changedInAccountPassword.data.status, "PASSWORD_CHANGED");
+assert.equal((await call(worker, "GET", "/user/profile", { token: finalLogin.data.token })).response.status, 200, "current session must survive its own password change");
+assert.equal((await call(worker, "GET", "/user/profile", { token: secondFinalLogin.data.token })).response.status, 401, "other sessions must be revoked after a password change");
+const rejectedOldPassword = await call(worker, "POST", "/auth/login", { body: { username: "52998224725", password: "SenhaFinal456" } });
+assert.equal(rejectedOldPassword.response.status, 400, "old password must stop working immediately");
+assert.equal(database.stateRow.payload.includes("SenhaInterna789"), false, "the new user password must never be persisted in plaintext");
+worker = await loadWorker("restart-after-in-account-password-change");
+const changedPasswordLogin = await call(worker, "POST", "/auth/login", { body: { username: "52998224725", password: "SenhaInterna789" } });
+assert.equal(changedPasswordLogin.response.status, 200, "in-account password change must survive worker restart");
 const finalAdminLogin = await call(worker, "POST", "/auth/login", { body: { username: "admin@bravusbank.com", password: "6run0955" } });
 const finalAdminToken = finalAdminLogin.data.token;
 const persistence = await call(worker, "GET", "/admin/persistence/status", { token: finalAdminToken });
@@ -1325,6 +1363,7 @@ console.log(JSON.stringify({
   restartVerified: true,
   idempotencyVerified: true,
   passwordResetVerified: true,
+  inAccountPasswordChangeVerified: true,
   masterCreditReserveVerified: true,
   masterCreditGrantLifecycleVerified: true,
   masterCreditKycAuthorizationVerified: true,
