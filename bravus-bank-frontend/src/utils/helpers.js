@@ -21,6 +21,13 @@ export const formatCurrencyExact = (amountInCents) => {
   return `${negative ? '-' : ''}R$ ${grouped},${fraction}`;
 };
 
+export const reaisToCentavosExact = (value) => {
+  const raw = String(value ?? '').trim().replace(',', '.');
+  if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) return null;
+  const [whole, fraction = ''] = raw.split('.');
+  return (BigInt(whole) * 100n + BigInt(fraction.padEnd(2, '0'))).toString();
+};
+
 export const formatDate = (dateString) => {
   if (!dateString) return '';
 

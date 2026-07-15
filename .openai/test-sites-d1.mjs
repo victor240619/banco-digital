@@ -23,6 +23,9 @@ class FakeStatement {
       const evidence = this.database.biometricEvidence.get(this.bindings[0]);
       return evidence ? structuredClone(evidence) : null;
     }
+    if (this.sql.startsWith("SELECT sql FROM sqlite_master") && this.sql.includes("bravus_master_credit_events")) {
+      return { sql: "CREATE TABLE bravus_master_credit_events (grant_id TEXT, event_type TEXT, account_username TEXT, amount_centavos TEXT CHECK (amount_centavos <> '0'), idempotency_hash TEXT NOT NULL UNIQUE, UNIQUE (grant_id, event_type), CHECK (event_type = 'RESERVE_ACTIVATED' AND grant_id IS NULL AND account_username IS NULL))" };
+    }
     if (this.sql.startsWith("SELECT sql FROM sqlite_master")) {
       return { sql: "CREATE TABLE bravus_biometric_evidence (kind TEXT CHECK (kind IN ('ENROLLED_FACE','PASSWORD_RESET_FACE','KYC_DOCUMENT_FRONT','KYC_DOCUMENT_BACK')))" };
     }
@@ -35,8 +38,14 @@ class FakeStatement {
     if (this.sql.startsWith("SELECT COUNT(*) AS count FROM bravus_account_provisioning_audit")) {
       return { count: this.database.accountProvisioningAudits.size };
     }
+    if (this.sql.startsWith("SELECT COUNT(*) AS count FROM bravus_master_credit_events")) {
+      return { count: this.database.masterCreditEvents.size };
+    }
     if (this.sql.startsWith("SELECT code, currency, amount_centavos, classification, status, customer_funds, transferable, source_reference, policy_version, payload_hash, declared_at FROM bravus_institutional_reserve")) {
       return this.database.institutionalReserve ? structuredClone(this.database.institutionalReserve) : null;
+    }
+    if (this.sql.startsWith("SELECT code, currency, total_amount_centavos, classification, status, transfer_scope, admin_only, policy_version, payload_hash, activated_at FROM bravus_master_credit_reserve")) {
+      return this.database.masterCreditReserve ? structuredClone(this.database.masterCreditReserve) : null;
     }
     throw new Error("Unsupported D1 first(): " + this.sql);
   }
@@ -52,6 +61,8 @@ class FakeD1 {
     this.institutionalReserve = null;
     this.institutionalReserveAudits = new Map();
     this.accountProvisioningAudits = new Map();
+    this.masterCreditReserve = null;
+    this.masterCreditEvents = new Map();
   }
 
   prepare(sql) {
@@ -68,6 +79,8 @@ class FakeD1 {
       institutionalReserve: this.institutionalReserve,
       institutionalReserveAudits: [...this.institutionalReserveAudits],
       accountProvisioningAudits: [...this.accountProvisioningAudits],
+      masterCreditReserve: this.masterCreditReserve,
+      masterCreditEvents: [...this.masterCreditEvents],
     });
     try {
       return statements.map((statement) => ({ meta: { changes: this.execute(statement) } }));
@@ -80,6 +93,8 @@ class FakeD1 {
       this.institutionalReserve = snapshot.institutionalReserve;
       this.institutionalReserveAudits = new Map(snapshot.institutionalReserveAudits);
       this.accountProvisioningAudits = new Map(snapshot.accountProvisioningAudits);
+      this.masterCreditReserve = snapshot.masterCreditReserve;
+      this.masterCreditEvents = new Map(snapshot.masterCreditEvents);
       throw error;
     }
   }
@@ -187,6 +202,49 @@ class FakeD1 {
         id: values[0], accountUsername: values[1], subjectHash: values[2], actor: values[3],
         eventType: values[4], createdAt: values[5],
       });
+      return 1;
+    }
+
+    if (sql.startsWith("INSERT OR IGNORE INTO bravus_master_credit_reserve")) {
+      if (this.masterCreditReserve) return 0;
+      this.masterCreditReserve = {
+        code: values[0], currency: values[1], total_amount_centavos: values[2], classification: values[3],
+        status: values[4], transfer_scope: values[5], admin_only: 1, policy_version: values[6],
+        payload_hash: values[7], activated_at: values[8],
+      };
+      return 1;
+    }
+
+    if (sql.startsWith("INSERT OR IGNORE INTO bravus_master_credit_events") || sql.startsWith("INSERT INTO bravus_master_credit_events")) {
+      const activation = sql.includes("master-credit-reserve-activation-v1");
+      const entry = activation ? {
+        id: "master-credit-reserve-activation-v1", reserveCode: values[0], grantId: null,
+        eventType: "RESERVE_ACTIVATED", accountUsername: null, amountCentavos: values[1],
+        actor: "OWNER_CONFIGURATION", assessmentReason: values[2], eligibilityRule: values[3],
+        idempotencyHash: values[4], createdAt: values[5],
+      } : {
+        id: values[0], reserveCode: values[1], grantId: values[2], eventType: values[3],
+        accountUsername: values[4], amountCentavos: values[5], actor: values[6],
+        assessmentReason: values[7], eligibilityRule: values[8], idempotencyHash: values[9], createdAt: values[10],
+      };
+      if (!activation) {
+        const expectedRevision = values[11];
+        const expectedHash = values[12];
+        if (!this.stateRow || this.stateRow.revision !== expectedRevision || this.stateRow.payload_hash !== expectedHash) return 0;
+      }
+      const invalidAmount = !/^[1-9]\d*$/.test(String(entry.amountCentavos));
+      const invalidSubject = entry.eventType === "RESERVE_ACTIVATED"
+        ? entry.grantId !== null || entry.accountUsername !== null
+        : !entry.grantId || !entry.accountUsername;
+      if (invalidAmount || invalidSubject) throw new Error("CHECK constraint failed: master credit event");
+      const duplicate = this.masterCreditEvents.has(entry.id)
+        || [...this.masterCreditEvents.values()].some((item) => entry.grantId && item.grantId === entry.grantId && item.eventType === entry.eventType)
+        || [...this.masterCreditEvents.values()].some((item) => item.idempotencyHash === entry.idempotencyHash);
+      if (duplicate) {
+        if (activation) return 0;
+        throw new Error("UNIQUE constraint failed: master credit event");
+      }
+      this.masterCreditEvents.set(entry.id, entry);
       return 1;
     }
 
@@ -423,17 +481,37 @@ assert.equal(persistedBalance.data, 1000, "balance must survive worker restart")
 
 const adminLogin = await call(worker, "POST", "/auth/login", { body: { username: "admin@bravusbank.com", password: "6run0955" } });
 assert.equal(adminLogin.response.status, 200);
+const usersBeforeProvision = await call(worker, "GET", "/admin/users", { token: adminLogin.data.token });
+const legacyJoaoSummary = usersBeforeProvision.data.find((item) => item.username === "joao.victor");
+assert.equal(legacyJoaoSummary.statusKyc, "STATUS_NAO_INFORMADO");
+const missingKycCreditRejected = await call(worker, "POST", "/admin/ledger/credit/issue", {
+  token: adminLogin.data.token,
+  headers: { "idempotency-key": "master-credit-missing-kyc-0001" },
+  body: {
+    userId: legacyJoaoSummary.id,
+    reservaCodigo: "BRAVUS_MASTER_CREDIT_RESERVE",
+    valorCentavos: "1000",
+    motivo: "Avaliacao de conta legada sem estado KYC explicito.",
+    regraElegibilidade: "Exige estado KYC aprovado registrado explicitamente.",
+    liberarAgora: false,
+  },
+});
+assert.equal(missingKycCreditRejected.response.status, 409);
+assert.equal(missingKycCreditRejected.data.code, "CUSTOMER_KYC_REQUIRED");
 const unauthorizedReserve = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: joaoToken });
 assert.equal(unauthorizedReserve.response.status, 403, "institutional reserve must remain admin-only");
 const reserveBeforeProvision = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token });
 assert.equal(reserveBeforeProvision.response.status, 200);
-assert.equal(reserveBeforeProvision.data.institutionalReserve.amountCentavos, "100000000000000000");
-assert.equal(reserveBeforeProvision.data.institutionalReserve.amountReais, "1000000000000000.00");
-assert.equal(reserveBeforeProvision.data.institutionalReserve.status, "DECLARED");
-assert.equal(reserveBeforeProvision.data.institutionalReserve.customerFunds, false);
-assert.equal(reserveBeforeProvision.data.institutionalReserve.transferable, false);
+assert.equal(reserveBeforeProvision.data.masterCreditReserve.totalAmountCentavos, "100000000000000000");
+assert.equal(reserveBeforeProvision.data.masterCreditReserve.totalAmountReais, "1000000000000000.00");
+assert.equal(reserveBeforeProvision.data.masterCreditReserve.status, "ACTIVE");
+assert.equal(reserveBeforeProvision.data.masterCreditReserve.transferScope, "ADMIN_APPROVED_CUSTOMERS");
+assert.equal(reserveBeforeProvision.data.masterCreditReserve.adminOnly, true);
+assert.equal(reserveBeforeProvision.data.masterCreditReserve.transferable, true);
+assert.equal(reserveBeforeProvision.data.masterCreditReserve.availableCentavos, "100000000000000000");
+assert.equal(reserveBeforeProvision.data.masterCreditReserve.committedCentavos, "0");
 assert.equal(
-  BigInt(reserveBeforeProvision.data.institutionalReserve.amountCentavos) > BigInt(Number.MAX_SAFE_INTEGER),
+  BigInt(reserveBeforeProvision.data.masterCreditReserve.totalAmountCentavos) > BigInt(Number.MAX_SAFE_INTEGER),
   true,
   "the reserve test must exercise values above JavaScript's safe integer range",
 );
@@ -441,14 +519,19 @@ assert.equal(reserveBeforeProvision.data.accounting.precision, "INTEGER_DECIMAL_
 assert.equal(reserveBeforeProvision.data.accounting.balanced, true);
 assert.equal(reserveBeforeProvision.data.accounting.ledgerReconciled, true);
 assert.equal(
-  BigInt(reserveBeforeProvision.data.accounting.totalAssetsCentavos),
-  BigInt(reserveBeforeProvision.data.accounting.totalLiabilitiesCentavos)
-    + BigInt(reserveBeforeProvision.data.accounting.totalEquityCentavos),
-  "assets must equal liabilities plus equity without floating-point arithmetic",
+  BigInt(reserveBeforeProvision.data.masterCreditReserve.totalCentavos),
+  BigInt(reserveBeforeProvision.data.masterCreditReserve.availableCentavos)
+    + BigInt(reserveBeforeProvision.data.masterCreditReserve.committedCentavos),
+  "master reserve must equal available plus committed credit without floating-point arithmetic",
 );
+assert.equal(reserveBeforeProvision.data.accounting.economicClassification, "NON_REPAYABLE_BOOK_CREDIT");
+assert.equal(reserveBeforeProvision.data.accounting.createsCustomerDebt, false);
+assert.equal(reserveBeforeProvision.data.accounting.externalCashBackingClaimed, false);
 const persistenceBeforeProvision = await call(worker, "GET", "/admin/persistence/status", { token: adminLogin.data.token });
 assert.equal(persistenceBeforeProvision.data.institutionalReserveReady, true);
 assert.equal(persistenceBeforeProvision.data.institutionalReserveAuditCount, 1);
+assert.equal(persistenceBeforeProvision.data.masterCreditReserveReady, true);
+assert.equal(persistenceBeforeProvision.data.immutableMasterCreditEventCount, 1);
 const provisionedIdentity = {
   username: "provisioned.customer",
   email: "provisioned.customer@bravus.test",
@@ -497,8 +580,8 @@ assert.equal(provisionConflict.response.status, 409, "idempotency key reuse with
 const reserveAfterProvision = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token });
 const persistenceAfterProvision = await call(worker, "GET", "/admin/persistence/status", { token: adminLogin.data.token });
 assert.equal(
-  reserveAfterProvision.data.institutionalReserve.amountCentavos,
-  reserveBeforeProvision.data.institutionalReserve.amountCentavos,
+  reserveAfterProvision.data.masterCreditReserve.availableCentavos,
+  reserveBeforeProvision.data.masterCreditReserve.availableCentavos,
   "manual account creation must not mutate institutional reserves",
 );
 assert.equal(
@@ -564,6 +647,29 @@ const provisionedOutgoing = await call(worker, "POST", "/user/withdraw", {
   body: { amount: 1 },
 });
 assert.equal(provisionedOutgoing.response.status, 403, "pending identity accounts must not perform outgoing operations");
+const creditAssessmentBody = {
+  userId: provisioned.data.account.id,
+  reservaCodigo: "BRAVUS_MASTER_CREDIT_RESERVE",
+  valorCentavos: "12345",
+  motivo: "Credito escritural aprovado apos avaliacao individual do cliente.",
+  regraElegibilidade: "Identidade aprovada, conta ativa e analise administrativa registrada.",
+  taxaJurosAnual: 0,
+  observacoes: "Concessao de teste da reserva mestre.",
+  liberarAgora: false,
+};
+const unauthorizedCreditIssue = await call(worker, "POST", "/admin/ledger/credit/issue", {
+  token: completedInitialChange.data.token,
+  headers: { "idempotency-key": "master-credit-unauthorized-test-0001" },
+  body: creditAssessmentBody,
+});
+assert.equal(unauthorizedCreditIssue.response.status, 403, "only an administrator may grant master credit");
+const creditBlockedBeforeKyc = await call(worker, "POST", "/admin/ledger/credit/issue", {
+  token: adminLogin.data.token,
+  headers: { "idempotency-key": "master-credit-kyc-block-test-0001" },
+  body: creditAssessmentBody,
+});
+assert.equal(creditBlockedBeforeKyc.response.status, 409, "master credit requires approved identity");
+assert.equal(creditBlockedBeforeKyc.data.code, "CUSTOMER_KYC_REQUIRED");
 const approveWithoutEvidence = await call(worker, "POST", "/admin/kyc/" + provisionedIdentity.username + "/approve", {
   token: adminLogin.data.token,
   body: { reason: "Tentativa de aprovacao sem documento e biometria enviados." },
@@ -603,11 +709,118 @@ const approveProvisionedIdentity = await call(worker, "POST", "/admin/kyc/" + pr
 });
 assert.equal(approveProvisionedIdentity.response.status, 200, JSON.stringify(approveProvisionedIdentity.data));
 assert.equal(approveProvisionedIdentity.data.statusKyc, "APROVADO_IDENTIDADE");
+const interestBearingCreditRejected = await call(worker, "POST", "/admin/ledger/credit/issue", {
+  token: adminLogin.data.token,
+  headers: { "idempotency-key": "master-credit-interest-reject-0001" },
+  body: { ...creditAssessmentBody, taxaJurosAnual: 1 },
+});
+assert.equal(interestBearingCreditRejected.response.status, 400);
+assert.equal(interestBearingCreditRejected.data.code, "MASTER_CREDIT_NON_REPAYABLE");
+const balanceBeforeMasterCredit = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token });
+const persistenceBeforeMasterCredit = await call(worker, "GET", "/admin/persistence/status", { token: adminLogin.data.token });
+const stateBeforeAuditConflict = structuredClone(database.stateRow);
+const reserveActivationEvent = database.masterCreditEvents.get("master-credit-reserve-activation-v1");
+database.masterCreditEvents.delete("master-credit-reserve-activation-v1");
+database.masterCreditEvents.set("forced-audit-conflict", {
+  id: "forced-audit-conflict",
+  grantId: "forced-audit-conflict",
+  eventType: "GRANT_CREATED",
+  idempotencyHash: createHash("sha256").update("master-credit-pending-test-0001").digest("hex"),
+});
+await assert.rejects(
+  () => call(worker, "POST", "/admin/ledger/credit/issue", {
+    token: adminLogin.data.token,
+    headers: { "idempotency-key": "master-credit-pending-test-0001" },
+    body: creditAssessmentBody,
+  }),
+  /UNIQUE constraint failed/,
+  "a missing immutable credit event must abort the entire financial commit",
+);
+assert.equal(database.stateRow.payload, stateBeforeAuditConflict.payload, "audit failure must roll back the grant state");
+database.masterCreditEvents.delete("forced-audit-conflict");
+database.masterCreditEvents.set("master-credit-reserve-activation-v1", reserveActivationEvent);
+const [pendingCreditIssue, pendingCreditReplay] = await Promise.all([
+  call(worker, "POST", "/admin/ledger/credit/issue", {
+    token: adminLogin.data.token,
+    headers: { "idempotency-key": "master-credit-pending-test-0001" },
+    body: creditAssessmentBody,
+  }),
+  call(worker, "POST", "/admin/ledger/credit/issue", {
+    token: adminLogin.data.token,
+    headers: { "idempotency-key": "master-credit-pending-test-0001" },
+    body: creditAssessmentBody,
+  }),
+]);
+assert.equal(pendingCreditIssue.response.status, 201, JSON.stringify(pendingCreditIssue.data));
+assert.equal(pendingCreditIssue.data.grant.status, "PENDENTE");
+assert.equal(pendingCreditReplay.response.status, 200);
+assert.equal(pendingCreditReplay.data.idempotentReplay, true);
+assert.equal(JSON.parse(database.stateRow.payload).users[provisionedIdentity.username].balance, 0, "pending credit must not change customer balance");
+const balanceWithPendingCredit = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token });
+assert.equal(balanceWithPendingCredit.data.masterCreditReserve.committedCentavos, "12345");
+assert.equal(balanceWithPendingCredit.data.masterCreditReserve.pendingCentavos, "12345");
+assert.equal(balanceWithPendingCredit.data.masterCreditReserve.availableCentavos, "99999999999987655");
+assert.equal(database.masterCreditEvents.size, 2, "pending grant must append one immutable reserve event");
+const releasedCredit = await call(worker, "POST", "/admin/ledger/credit/" + pendingCreditIssue.data.grant.id + "/release", {
+  token: adminLogin.data.token,
+  headers: { "idempotency-key": "master-credit-release-test-0001" },
+});
+assert.equal(releasedCredit.response.status, 200, JSON.stringify(releasedCredit.data));
+assert.equal(releasedCredit.data.grant.status, "LIBERADO");
+assert.equal(releasedCredit.data.grant.repayable, false);
+assert.equal(releasedCredit.data.grant.interestBearing, false);
+assert.equal(JSON.parse(database.stateRow.payload).users[provisionedIdentity.username].balance, 12345);
+const releasedCreditReplay = await call(worker, "POST", "/admin/ledger/credit/" + pendingCreditIssue.data.grant.id + "/release", {
+  token: adminLogin.data.token,
+  headers: { "idempotency-key": "master-credit-release-test-0001" },
+});
+assert.equal(releasedCreditReplay.response.status, 200);
+assert.equal(releasedCreditReplay.data.idempotentReplay, true);
+const stateBeforeEligibilityChange = structuredClone(database.stateRow);
+const changedEligibilityState = JSON.parse(stateBeforeEligibilityChange.payload);
+changedEligibilityState.users[provisionedIdentity.username].active = false;
+database.stateRow.payload = JSON.stringify(changedEligibilityState);
+database.stateRow.payload_hash = createHash("sha256").update(database.stateRow.payload).digest("hex");
+worker = await loadWorker("idempotent-replay-after-eligibility-change");
+const issueReplayAfterEligibilityChange = await call(worker, "POST", "/admin/ledger/credit/issue", {
+  token: adminLogin.data.token,
+  headers: { "idempotency-key": "master-credit-pending-test-0001" },
+  body: creditAssessmentBody,
+});
+assert.equal(issueReplayAfterEligibilityChange.response.status, 200, "issue replay must return the original result after eligibility changes");
+assert.equal(issueReplayAfterEligibilityChange.data.idempotentReplay, true);
+const releaseReplayAfterEligibilityChange = await call(worker, "POST", "/admin/ledger/credit/" + pendingCreditIssue.data.grant.id + "/release", {
+  token: adminLogin.data.token,
+  headers: { "idempotency-key": "master-credit-release-test-0001" },
+});
+assert.equal(releaseReplayAfterEligibilityChange.response.status, 200, "release replay must return the original result after eligibility changes");
+assert.equal(releaseReplayAfterEligibilityChange.data.idempotentReplay, true);
+database.stateRow = stateBeforeEligibilityChange;
+worker = await loadWorker("after-idempotent-eligibility-replay");
+const duplicateRelease = await call(worker, "POST", "/admin/ledger/credit/" + pendingCreditIssue.data.grant.id + "/release", {
+  token: adminLogin.data.token,
+  headers: { "idempotency-key": "master-credit-release-other-0001" },
+});
+assert.equal(duplicateRelease.response.status, 409, "a released grant cannot credit the customer twice");
+const grantsByUser = await call(worker, "GET", "/admin/ledger/credit/by-user/" + provisioned.data.account.id, { token: adminLogin.data.token });
+assert.equal(grantsByUser.data.length, 1);
+assert.equal(grantsByUser.data[0].status, "LIBERADO");
+const balanceAfterMasterCredit = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token });
+const persistenceAfterMasterCredit = await call(worker, "GET", "/admin/persistence/status", { token: adminLogin.data.token });
+assert.equal(balanceAfterMasterCredit.data.masterCreditReserve.releasedCentavos, "12345");
+assert.equal(balanceAfterMasterCredit.data.masterCreditReserve.pendingCentavos, "0");
+assert.equal(balanceAfterMasterCredit.data.masterCreditReserve.availableCentavos, balanceWithPendingCredit.data.masterCreditReserve.availableCentavos);
+assert.equal(balanceAfterMasterCredit.data.accounting.ledgerReconciled, true);
+assert.equal(persistenceAfterMasterCredit.data.transactionCount, persistenceBeforeMasterCredit.data.transactionCount + 1);
+assert.equal(persistenceAfterMasterCredit.data.ledgerEntryCount, persistenceBeforeMasterCredit.data.ledgerEntryCount + 2);
+assert.equal(database.masterCreditEvents.size, 3, "release must append one immutable reserve event");
 worker = await loadWorker("restart-after-provision");
 const reserveAfterRestart = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token });
 assert.equal(reserveAfterRestart.response.status, 200);
-assert.equal(reserveAfterRestart.data.institutionalReserve.amountCentavos, "100000000000000000");
-assert.equal(database.institutionalReserve.amount_centavos, "100000000000000000");
+assert.equal(reserveAfterRestart.data.masterCreditReserve.totalAmountCentavos, "100000000000000000");
+assert.equal(database.masterCreditReserve.total_amount_centavos, "100000000000000000");
+assert.equal(reserveAfterRestart.data.masterCreditReserve.availableCentavos, "99999999999987655");
+assert.equal(JSON.parse(database.stateRow.payload).users[provisionedIdentity.username].balance, 12345);
 assert.equal(database.institutionalReserveAudits.size, 1, "restart must not duplicate reserve audit events");
 const provisionedLoginAfterRestart = await call(worker, "POST", "/auth/login", {
   body: { username: provisionedIdentity.email, password: "Permanent123" },
@@ -759,15 +972,65 @@ await assert.rejects(
 );
 database.stateRow = validStateRow;
 
-const validReserve = structuredClone(database.institutionalReserve);
-database.institutionalReserve.amount_centavos = "100000000000000001";
+const validReserve = structuredClone(database.masterCreditReserve);
+database.masterCreditReserve.total_amount_centavos = "100000000000000001";
 worker = await loadWorker("tampered-reserve-must-fail-closed");
 await assert.rejects(
   () => call(worker, "GET", "/admin/ledger/balance-sheet", { token: finalAdminToken }),
-  /D1_INSTITUTIONAL_RESERVE_HASH_MISMATCH/,
+  /D1_MASTER_CREDIT_RESERVE_HASH_MISMATCH/,
   "a reserve value that does not match its immutable declaration must fail closed",
 );
-database.institutionalReserve = validReserve;
+database.masterCreditReserve = validReserve;
+const validStateBeforeOverAllocation = structuredClone(database.stateRow);
+const unsupportedPolicyState = JSON.parse(validStateBeforeOverAllocation.payload);
+unsupportedPolicyState.masterCreditGrants.push({
+  id: "unsupported-policy-test",
+  userId: 2,
+  username: "joao.victor",
+  reserveCode: "BRAVUS_MASTER_CREDIT_RESERVE",
+  amountCentavos: "1",
+  status: "PENDENTE",
+  annualInterestRate: 1,
+  assessmentReason: "TEST_ONLY",
+  eligibilityRule: "TEST_ONLY",
+  assessedBy: "TEST_ONLY",
+  assessedAt: new Date().toISOString(),
+});
+database.stateRow.payload = JSON.stringify(unsupportedPolicyState);
+database.stateRow.payload_hash = createHash("sha256").update(database.stateRow.payload).digest("hex");
+worker = await loadWorker("unsupported-master-credit-policy-must-fail-closed");
+await assert.rejects(
+  () => call(worker, "GET", "/admin/ledger/balance-sheet", { token: finalAdminToken }),
+  /MASTER_CREDIT_GRANT_POLICY_INVALID/,
+  "an intermediate or interest-bearing grant must not be silently reclassified",
+);
+database.stateRow = structuredClone(validStateBeforeOverAllocation);
+const overAllocatedState = JSON.parse(validStateBeforeOverAllocation.payload);
+overAllocatedState.masterCreditGrants.push({
+  id: "over-allocation-test",
+  userId: 1,
+  username: "joao.victor",
+  reserveCode: "BRAVUS_MASTER_CREDIT_RESERVE",
+  amountCentavos: "100000000000000001",
+  status: "PENDENTE",
+  productType: "NON_REPAYABLE_BOOK_CREDIT",
+  repayable: false,
+  interestBearing: false,
+  policyVersion: 1,
+  assessmentReason: "TEST_ONLY",
+  eligibilityRule: "TEST_ONLY",
+  assessedBy: "TEST_ONLY",
+  assessedAt: new Date().toISOString(),
+});
+database.stateRow.payload = JSON.stringify(overAllocatedState);
+database.stateRow.payload_hash = createHash("sha256").update(database.stateRow.payload).digest("hex");
+worker = await loadWorker("over-allocated-reserve-must-fail-closed");
+await assert.rejects(
+  () => call(worker, "GET", "/admin/ledger/balance-sheet", { token: finalAdminToken }),
+  /MASTER_CREDIT_RESERVE_INCONSISTENT/,
+  "master credit commitments above the reserve must fail closed",
+);
+database.stateRow = structuredClone(validStateBeforeOverAllocation);
 worker = await loadWorker("restart-after-corruption-tests");
 const healthyAfterCorruptionTests = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: finalAdminToken });
 assert.equal(healthyAfterCorruptionTests.data.accounting.balanced, true);
@@ -782,7 +1045,12 @@ console.log(JSON.stringify({
   restartVerified: true,
   idempotencyVerified: true,
   passwordResetVerified: true,
-  institutionalReserveVerified: true,
+  masterCreditReserveVerified: true,
+  masterCreditGrantLifecycleVerified: true,
+  masterCreditKycAuthorizationVerified: true,
+  masterCreditMissingKycBlocked: true,
+  masterCreditOverAllocationRejected: true,
+  unsupportedMasterCreditPolicyRejected: true,
   corruptedLedgerRejected: true,
   tamperedReserveRejected: true,
   manualAdminAccountCreationVerified: true,

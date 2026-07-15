@@ -13,7 +13,7 @@ import {
   adminService, analysisService, caymanRailService,
   externalTransferService, globalRailService, kycAdminService, ledgerAdminService, passwordResetAdminService, unifiedSearchService,
 } from '../services/api';
-import { formatCurrency, formatCurrencyExact, formatDate, getTransactionTypeLabel } from '../utils/helpers';
+import { formatCurrency, formatCurrencyExact, formatDate, getTransactionTypeLabel, reaisToCentavosExact } from '../utils/helpers';
 import { cn } from '../lib/cn';
 
 // ============ Helpers ============
@@ -302,41 +302,68 @@ export default function AdminDashboard() {
 // 1) Balanço do banco
 // ===========================================================
 function ExactBankView({ bs, chain, stats }) {
-  const reserve = bs.institutionalReserve;
+  const reserve = bs.masterCreditReserve;
   const accounting = bs.accounting;
   const ledgerValid = chainIsValid(chain);
-  const balanceValid = accounting?.balanced === true;
+  const balanceValid = accounting?.balanced === true && reserve?.balanced === true;
 
   return (
     <div className="space-y-6">
-      <section className="card-premium p-6" aria-labelledby="institutional-reserve-title">
+      <section className="card-premium p-6" aria-labelledby="master-credit-reserve-title">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-amber-300">
               <Vault className="h-5 w-5" />
-              <span className="text-xs uppercase tracking-widest">Reserva institucional</span>
+              <span className="text-xs uppercase tracking-widest">Reserva Mestre</span>
             </div>
-            <h2 id="institutional-reserve-title" className="mt-3 font-display text-2xl font-bold text-white break-words">
-              {brlExact(reserve.amountCentavos)}
+            <h2 id="master-credit-reserve-title" className="mt-3 font-display text-2xl font-bold text-white break-words">
+              {brlExact(reserve.totalCentavos)}
             </h2>
-            <p className="mt-2 text-sm text-ink-300">Reserva declarada pelo Bravus, separada dos saldos dos clientes e sem classificação de lastro externo verificado.</p>
+            <p className="mt-2 text-sm text-ink-300">Crédito escritural interno destinado exclusivamente a concessões administrativas para clientes avaliados.</p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
             <span className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-amber-200">{reserve.status}</span>
-            <span className="rounded-lg border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-emerald-200">Não transferível</span>
+            <span className="rounded-lg border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-emerald-200">Transferível pelo admin</span>
             <span className="rounded-lg border border-sky-400/25 bg-sky-400/10 px-3 py-2 text-sky-200">Precisão inteira</span>
           </div>
         </div>
       </section>
 
-      <div className="grid md:grid-cols-3 gap-4">
+      <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <KpiCard icon={Vault} label="Disponível para concessão" value={brlExact(reserve.availableCentavos)}
+                 accent="bg-emerald-400/15 text-emerald-300" hint="Reserva ainda não comprometida" />
+        <KpiCard icon={ListChecks} label="Crédito comprometido" value={brlExact(reserve.committedCentavos)}
+                 accent="bg-amber-400/15 text-amber-300" hint="Pendente mais liberado" />
+        <KpiCard icon={Banknote} label="Crédito liberado" value={brlExact(reserve.releasedCentavos)}
+                 accent="bg-sky-400/15 text-sky-300" hint="Já creditado aos clientes" />
         <KpiCard icon={Users} label="Clientes" value={stats?.totalUsers ?? 0}
-                 accent="bg-sky-400/15 text-sky-300" hint="Contas persistidas no D1" />
-        <KpiCard icon={Banknote} label="Saldos de clientes" value={brlExact(accounting.totalLiabilitiesCentavos)}
-                 accent="bg-amber-400/15 text-amber-300" hint="Passivo separado da reserva" />
+                 accent="bg-violet-400/15 text-violet-300" hint={brlExact(accounting.totalLiabilitiesCentavos) + ' em saldos'} />
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        <ExactSheetCard
+          title="RESERVA DISPONÍVEL"
+          total={reserve.availableCentavos}
+          color="text-emerald-300"
+          lines={[{ code: reserve.code, name: reserve.name, amountCentavos: reserve.availableCentavos }]}
+        />
+        <ExactSheetCard
+          title="CREDITOS COMPROMETIDOS"
+          total={reserve.committedCentavos}
+          color="text-amber-300"
+          lines={[
+            { code: 'MASTER_CREDIT_PENDING', name: 'Em avaliação para liberação', amountCentavos: reserve.pendingCentavos },
+            { code: 'MASTER_CREDIT_RELEASED', name: 'Liberados aos clientes', amountCentavos: reserve.releasedCentavos },
+          ]}
+        />
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
         <KpiCard icon={Link2} label="Saldo do ledger" value={brlExact(accounting.ledgerNetCentavos)}
                  accent={ledgerValid ? 'bg-emerald-400/15 text-emerald-300' : 'bg-red-400/15 text-red-300'}
                  hint={`${chainCount(chain)} transferências conferidas`} />
+        <KpiCard icon={Coins} label="Crédito pendente" value={brlExact(reserve.pendingCentavos)}
+                 accent="bg-orange-400/15 text-orange-300" hint="Ainda não altera o saldo do cliente" />
       </div>
 
       <div className={cn(
@@ -358,31 +385,13 @@ function ExactBankView({ bs, chain, stats }) {
         <div className="max-w-xl text-xs text-ink-400">{chainMessage(chain)}</div>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        <ExactSheetCard
-          title="ATIVO"
-          total={accounting.totalAssetsCentavos}
-          color="text-emerald-300"
-          lines={[{ code: reserve.code, name: reserve.name, amountCentavos: reserve.amountCentavos }]}
-        />
-        <ExactSheetCard
-          title="PASSIVO + PATRIMÔNIO"
-          total={accounting.totalAssetsCentavos}
-          color="text-amber-300"
-          lines={[
-            { code: 'CLIENT_LIABILITIES', name: 'Saldos dos clientes', amountCentavos: accounting.totalLiabilitiesCentavos },
-            { code: 'BRAVUS_EQUITY', name: 'Patrimônio líquido Bravus', amountCentavos: accounting.totalEquityCentavos },
-          ]}
-        />
-      </div>
-
       <div className={cn(
         'card-premium p-4 text-sm text-center',
         balanceValid ? 'text-emerald-300' : 'text-red-300'
       )}>
         {balanceValid
-          ? `Balanço equilibrado: ${brlExact(accounting.totalAssetsCentavos)}`
-          : 'Balanço institucional desbalanceado e requer revisão administrativa.'}
+          ? `Reserva conciliada: ${brlExact(reserve.availableCentavos)} disponível + ${brlExact(reserve.committedCentavos)} comprometido`
+          : 'Reserva Mestre ou ledger desbalanceado; concessões devem permanecer bloqueadas.'}
       </div>
     </div>
   );
@@ -414,7 +423,7 @@ function BankView({ bs, chain, stats }) {
   if (!bs) {
     return <div className="card-premium p-8 text-center text-ink-300">Carregando balanço…</div>;
   }
-  if (bs.institutionalReserve && bs.accounting) {
+  if (bs.masterCreditReserve && bs.accounting) {
     return <ExactBankView bs={bs} chain={chain} stats={stats} />;
   }
   const reserva = bs.reservaMestre || {};
@@ -1195,20 +1204,21 @@ function DocumentAnalysisView({ analyses, users = [], onSuccess, onError }) {
 // ===========================================================
 function CreditView({ users, bs, onSuccess, onError }) {
   const [form, setForm] = useState({
-    userId: '', reservaCodigo: 'CREDITO_PESSOAL', valorReais: '', motivo: '',
-    regraElegibilidade: '', taxaJurosAnual: '', observacoes: '', liberarAgora: false,
+    userId: '', reservaCodigo: 'BRAVUS_MASTER_CREDIT_RESERVE', valorReais: '', motivo: '',
+    regraElegibilidade: '', observacoes: '', liberarAgora: false,
   });
   const [submitting, setSubmitting] = useState(false);
   const [grants, setGrants] = useState([]);
+  const submitLock = useRef(false);
+  const issueAttempt = useRef(null);
+  const releaseAttempts = useRef(new Map());
 
-  const reservas = bs?.reservasInternas || [];
-  const userOptions = users.filter((u) => !u.roles?.some?.((r) => r.includes?.('ADMIN')));
-
-  useEffect(() => {
-    if (reservas.length > 0 && !reservas.some((r) => r.codigo === form.reservaCodigo)) {
-      setForm((current) => ({ ...current, reservaCodigo: reservas[0].codigo }));
-    }
-  }, [reservas, form.reservaCodigo]);
+  const masterReserve = bs?.masterCreditReserve;
+  const userOptions = users.filter((u) =>
+    !u.roles?.some?.((r) => r.includes?.('ADMIN'))
+    && u.active !== false
+    && ['APROVADO_AUTO', 'APROVADO_IDENTIDADE'].includes(u.statusKyc)
+  );
 
   useEffect(() => {
     if (!form.userId) {
@@ -1222,42 +1232,63 @@ function CreditView({ users, bs, onSuccess, onError }) {
 
   async function submit(e) {
     e.preventDefault();
+    if (submitLock.current) return;
     if (!form.userId)  return onError('Selecione um usuário.');
-    if (!form.valorReais || parseFloat(form.valorReais) <= 0) return onError('Informe um valor válido.');
-    if (!form.motivo) return onError('Informe o motivo da concessão.');
+    const valorCentavos = reaisToCentavosExact(form.valorReais);
+    if (!valorCentavos || BigInt(valorCentavos) <= 0n) return onError('Informe um valor válido com até duas casas decimais.');
+    if (form.motivo.trim().length < 10) return onError('Descreva o motivo da avaliação com pelo menos 10 caracteres.');
+    if (form.regraElegibilidade.trim().length < 10) return onError('Registre o critério de elegibilidade aplicado.');
+    if (!globalThis.crypto?.randomUUID) return onError('Este dispositivo não oferece geração segura de identificadores. Atualize o aplicativo.');
+    const payload = {
+      userId: parseInt(form.userId),
+      reservaCodigo: form.reservaCodigo,
+      valorCentavos,
+      motivo: form.motivo.trim(),
+      regraElegibilidade: form.regraElegibilidade.trim(),
+      observacoes: form.observacoes.trim() || null,
+      liberarAgora: form.liberarAgora,
+    };
+    const fingerprint = JSON.stringify(payload);
+    if (issueAttempt.current?.fingerprint !== fingerprint) {
+      issueAttempt.current = { fingerprint, key: `master-credit-${globalThis.crypto.randomUUID()}` };
+    }
+    submitLock.current = true;
     setSubmitting(true);
     try {
-      await ledgerAdminService.issueCredit({
-        userId: parseInt(form.userId),
-        reservaCodigo: form.reservaCodigo,
-        valorCentavos: Math.round(parseFloat(form.valorReais) * 100),
-        motivo: form.motivo,
-        regraElegibilidade: form.regraElegibilidade || null,
-        taxaJurosAnual: form.taxaJurosAnual ? parseFloat(form.taxaJurosAnual) : 0,
-        observacoes: form.observacoes || null,
-        liberarAgora: form.liberarAgora,
-      });
+      await ledgerAdminService.issueCredit(payload, issueAttempt.current.key);
       onSuccess(form.liberarAgora
-        ? `Credito de R$ ${form.valorReais} emitido e liberado.`
-        : `Credito de R$ ${form.valorReais} emitido como pendente.`);
+        ? `Crédito de R$ ${form.valorReais} emitido e liberado.`
+        : `Crédito de R$ ${form.valorReais} emitido como pendente.`);
       setForm({ ...form, valorReais: '', motivo: '', observacoes: '' });
+      issueAttempt.current = null;
       const { data } = await ledgerAdminService.grantsByUser(form.userId);
       setGrants(Array.isArray(data) ? data : []);
     } catch (err) {
       onError(err?.response?.data?.message || err?.response?.data || 'Falha na concessão.');
-    } finally { setSubmitting(false); }
+    } finally {
+      submitLock.current = false;
+      setSubmitting(false);
+    }
   }
 
   async function releaseGrant(id) {
+    if (submitLock.current) return;
+    if (!globalThis.crypto?.randomUUID) return onError('Este dispositivo não oferece geração segura de identificadores. Atualize o aplicativo.');
+    if (!releaseAttempts.current.has(id)) releaseAttempts.current.set(id, `master-release-${globalThis.crypto.randomUUID()}`);
+    submitLock.current = true;
     setSubmitting(true);
     try {
-      await ledgerAdminService.releaseCredit(id);
-      onSuccess(`Credito escritural #${id} liberado.`);
+      await ledgerAdminService.releaseCredit(id, releaseAttempts.current.get(id));
+      releaseAttempts.current.delete(id);
+      onSuccess(`Crédito escritural #${id} liberado.`);
       const { data } = await ledgerAdminService.grantsByUser(form.userId);
       setGrants(Array.isArray(data) ? data : []);
     } catch (err) {
-      onError(err?.response?.data?.message || err?.response?.data || 'Falha ao liberar credito.');
-    } finally { setSubmitting(false); }
+      onError(err?.response?.data?.message || err?.response?.data || 'Falha ao liberar crédito.');
+    } finally {
+      submitLock.current = false;
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -1265,7 +1296,7 @@ function CreditView({ users, bs, onSuccess, onError }) {
       <form onSubmit={submit} className="card-premium p-6 lg:col-span-2 space-y-4">
         <div className="flex items-center gap-2 mb-2">
           <Coins className="h-5 w-5 text-amber-300" />
-          <h3 className="font-display text-lg font-semibold">Emitir credito escritural</h3>
+          <h3 className="font-display text-lg font-semibold">Emitir crédito escritural</h3>
         </div>
 
         <div className="grid md:grid-cols-2 gap-4">
@@ -1273,6 +1304,7 @@ function CreditView({ users, bs, onSuccess, onError }) {
             <select className="input-premium w-full" value={form.userId}
                     onChange={(e) => setForm({ ...form, userId: e.target.value })}>
               <option value="">— selecionar —</option>
+              {userOptions.length === 0 && <option value="" disabled>Nenhum cliente com identidade aprovada</option>}
               {userOptions.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.fullName || u.username} (@{u.username})
@@ -1282,13 +1314,10 @@ function CreditView({ users, bs, onSuccess, onError }) {
           </Field>
 
           <Field label="Reserva de origem">
-            <select className="input-premium w-full" value={form.reservaCodigo}
-                    onChange={(e) => setForm({ ...form, reservaCodigo: e.target.value })}>
-              {reservas.map((r) => (
-                <option key={r.codigo} value={r.codigo}>
-                  {r.nome} — disp. {brl(r.valorDisponivel)}
-                </option>
-              ))}
+            <select className="input-premium w-full" value={form.reservaCodigo} disabled>
+              <option value="BRAVUS_MASTER_CREDIT_RESERVE">
+                Reserva Mestre — disp. {brlExact(masterReserve?.availableCentavos || '0')}
+              </option>
             </select>
           </Field>
 
@@ -1298,23 +1327,20 @@ function CreditView({ users, bs, onSuccess, onError }) {
                    onChange={(e) => setForm({ ...form, valorReais: e.target.value })} />
           </Field>
 
-          <Field label="Taxa de juros anual (%)">
-            <input type="number" step="0.01" min="0" className="input-premium w-full"
-                   value={form.taxaJurosAnual}
-                   onChange={(e) => setForm({ ...form, taxaJurosAnual: e.target.value })}
-                   placeholder="0.00" />
-          </Field>
+          <div className="rounded-lg border border-sky-400/20 bg-sky-400/10 px-4 py-3 text-sm text-sky-100">
+            Concessão escritural sem dívida, parcelas ou juros para o cliente.
+          </div>
 
           <Field label="Motivo" full>
-            <input className="input-premium w-full" value={form.motivo}
+            <input className="input-premium w-full" value={form.motivo} minLength={10} maxLength={500} required
                    onChange={(e) => setForm({ ...form, motivo: e.target.value })}
-                   placeholder="Ex.: Linha de crédito promocional — abertura de conta" />
+                   placeholder="Descreva a avaliação e a finalidade da concessão" />
           </Field>
 
           <Field label="Regra de elegibilidade" full>
-            <input className="input-premium w-full" value={form.regraElegibilidade}
+            <input className="input-premium w-full" value={form.regraElegibilidade} minLength={10} maxLength={500} required
                    onChange={(e) => setForm({ ...form, regraElegibilidade: e.target.value })}
-                   placeholder="Ex.: KYC automatico aprovado + nivel PREMIUM" />
+                   placeholder="Ex.: identidade aprovada, renda conferida e limite avaliado" />
           </Field>
 
           <Field label="Observações" full>
@@ -1333,21 +1359,21 @@ function CreditView({ users, bs, onSuccess, onError }) {
         </div>
 
         <button type="submit" disabled={submitting} className="btn-primary w-full">
-          {submitting ? 'Emitindo...' : <><Send className="h-4 w-4" /> Emitir credito escritural</>}
+          {submitting ? 'Emitindo...' : <><Send className="h-4 w-4" /> Emitir crédito escritural</>}
         </button>
       </form>
 
       <div className="space-y-4">
         <div className="card-premium p-5">
-          <h4 className="text-xs uppercase tracking-widest text-ink-400 mb-3">Creditos do usuario</h4>
+          <h4 className="text-xs uppercase tracking-widest text-ink-400 mb-3">Créditos do usuário</h4>
           <div className="space-y-2">
-            {grants.length === 0 && <div className="text-sm text-ink-400">Selecione um usuario para ver emissoes.</div>}
+            {grants.length === 0 && <div className="text-sm text-ink-400">Selecione um usuário para ver emissões.</div>}
             {grants.slice(0, 6).map((g) => (
               <div key={g.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <div className="text-sm font-medium">#{g.id} · {g.status}</div>
-                    <div className="text-xs text-ink-400">{brl(g.valorConcedido)} · disp. {brl(g.valorDisponivel)}</div>
+                    <div className="text-sm font-medium" title={g.id}>#{String(g.id).slice(0, 8)} · {g.status}</div>
+                    <div className="text-xs text-ink-400">{brlExact(g.amountCentavos || g.valorConcedido)}</div>
                   </div>
                   {g.status === 'PENDENTE' && (
                     <button type="button" className="btn-secondary !py-1.5 !px-2.5" onClick={() => releaseGrant(g.id)} disabled={submitting}>
@@ -1362,17 +1388,17 @@ function CreditView({ users, bs, onSuccess, onError }) {
         <div className="card-premium p-5">
           <h4 className="text-xs uppercase tracking-widest text-ink-400 mb-3">Regras de emissão</h4>
           <ul className="text-sm text-ink-200 space-y-2">
-            <li>• Emissao pendente nao altera saldo do cliente</li>
-            <li>• Liberacao gera <b>LedgerEntry</b> com hash SHA-256</li>
-            <li>• Debito 1.2.1 / Credito 2.1.1 (partidas dobradas)</li>
-            <li>• Bloqueia se a reserva escolhida nao tiver saldo</li>
-            <li>• Limita pela capacidade total (10× capital base)</li>
-            <li>• Cria <b>CreditGrant</b> rastreavel por usuario</li>
+            <li>• Emissão pendente não altera saldo do cliente</li>
+            <li>• Somente clientes ativos com identidade aprovada</li>
+            <li>• Liberação debita a reserva e credita o cliente no mesmo commit</li>
+            <li>• Toda concessão exige motivo e critério de elegibilidade</li>
+            <li>• Repetições usam idempotência e não duplicam o crédito</li>
+            <li>• Eventos e partidas contábeis permanecem imutáveis</li>
           </ul>
         </div>
         <div className="card-premium p-5">
           <h4 className="text-xs uppercase tracking-widest text-ink-400 mb-2">Reserva Mestre</h4>
-          <div className="text-2xl font-mono font-bold tabular-nums">{brl(bs?.reservaMestre?.disponivelEmissao)}</div>
+          <div className="text-2xl font-mono font-bold tabular-nums break-words">{brlExact(masterReserve?.availableCentavos || '0')}</div>
           <div className="text-xs text-ink-400 mt-1">disponível para nova emissão</div>
         </div>
       </div>

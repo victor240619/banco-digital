@@ -3,10 +3,10 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 
 const database = new DatabaseSync(":memory:");
-const migration = async (path) => {
+const migration = async (path, target = database) => {
   const sql = await readFile(path, "utf8");
   for (const statement of sql.split("--> statement-breakpoint")) {
-    if (statement.trim()) database.exec(statement);
+    if (statement.trim()) target.exec(statement);
   }
 };
 
@@ -71,6 +71,107 @@ assert.throws(
   /immutable/i,
 );
 
+assert.equal(journal.entries.some((entry) => entry.tag === "0003_master_credit_reserve"), true);
+await migration("drizzle/0003_master_credit_reserve.sql");
+await migration("drizzle/0003_master_credit_reserve.sql");
+assert.equal(journal.entries.some((entry) => entry.tag === "0004_harden_master_credit_events"), true);
+await migration("drizzle/0004_harden_master_credit_events.sql");
+await migration("drizzle/0004_harden_master_credit_events.sql");
+const masterReserve = database.prepare("SELECT * FROM bravus_master_credit_reserve WHERE code = ?")
+  .get("BRAVUS_MASTER_CREDIT_RESERVE");
+assert.equal(masterReserve.total_amount_centavos, "100000000000000000");
+assert.equal(masterReserve.classification, "MASTER_BOOK_CREDIT");
+assert.equal(masterReserve.status, "ACTIVE");
+assert.equal(masterReserve.transfer_scope, "ADMIN_APPROVED_CUSTOMERS");
+assert.equal(masterReserve.admin_only, 1);
+assert.equal(database.prepare("SELECT COUNT(*) AS count FROM bravus_master_credit_events").get().count, 1);
+const insertMasterEvent = database.prepare(`
+  INSERT INTO bravus_master_credit_events
+    (id, reserve_code, grant_id, event_type, account_username, amount_centavos, actor,
+     assessment_reason, eligibility_rule, idempotency_hash, created_at)
+  VALUES (?, 'BRAVUS_MASTER_CREDIT_RESERVE', ?, ?, ?, ?, 'admin', 'avaliacao', 'regra', ?, '2026-01-02T00:00:00Z')
+`);
+assert.throws(
+  () => insertMasterEvent.run("invalid-zero", "grant-zero", "GRANT_CREATED", "new.user", "0", "hash-zero"),
+  /constraint/i,
+);
+assert.throws(
+  () => insertMasterEvent.run("invalid-activation", "grant-linked", "RESERVE_ACTIVATED", "new.user", "1", "hash-activation"),
+  /constraint/i,
+);
+assert.throws(
+  () => insertMasterEvent.run(
+    "invalid-idempotency", "grant-duplicate-hash", "GRANT_CREATED", "new.user", "1",
+    "9b210dda96d850f85bcd09a80d5e6b988b66593860b141d4bb688195c0abd022",
+  ),
+  /unique/i,
+);
+assert.throws(
+  () => database.prepare("UPDATE bravus_master_credit_reserve SET total_amount_centavos = ? WHERE code = ?")
+    .run("1", "BRAVUS_MASTER_CREDIT_RESERVE"),
+  /immutable/i,
+);
+assert.throws(
+  () => database.prepare("DELETE FROM bravus_master_credit_events WHERE id = ?").run("master-credit-reserve-activation-v1"),
+  /immutable/i,
+);
+
+const legacyMasterDatabase = new DatabaseSync(":memory:");
+legacyMasterDatabase.exec(`
+  CREATE TABLE bravus_master_credit_reserve (
+    code TEXT PRIMARY KEY NOT NULL
+  );
+  INSERT INTO bravus_master_credit_reserve (code) VALUES ('BRAVUS_MASTER_CREDIT_RESERVE');
+  CREATE TABLE bravus_master_credit_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    reserve_code TEXT NOT NULL,
+    grant_id TEXT,
+    event_type TEXT NOT NULL CHECK (event_type IN ('RESERVE_ACTIVATED', 'GRANT_CREATED', 'GRANT_RELEASED')),
+    account_username TEXT,
+    amount_centavos TEXT NOT NULL CHECK (
+      length(amount_centavos) BETWEEN 1 AND 40
+      AND amount_centavos NOT GLOB '*[^0-9]*'
+    ),
+    actor TEXT NOT NULL,
+    assessment_reason TEXT NOT NULL,
+    eligibility_rule TEXT,
+    idempotency_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  INSERT INTO bravus_master_credit_events (
+    id, reserve_code, grant_id, event_type, account_username, amount_centavos,
+    actor, assessment_reason, eligibility_rule, idempotency_hash, created_at
+  ) VALUES (
+    'legacy-activation', 'BRAVUS_MASTER_CREDIT_RESERVE', NULL, 'RESERVE_ACTIVATED', NULL,
+    '100000000000000000', 'OWNER_CONFIGURATION', 'ativacao legada', 'regra legada',
+    'legacy-activation-hash', '2026-01-01T00:00:00Z'
+  );
+`);
+await migration("drizzle/0004_harden_master_credit_events.sql", legacyMasterDatabase);
+await migration("drizzle/0004_harden_master_credit_events.sql", legacyMasterDatabase);
+assert.equal(legacyMasterDatabase.prepare("SELECT COUNT(*) AS count FROM bravus_master_credit_events").get().count, 1);
+const legacyInsertMasterEvent = legacyMasterDatabase.prepare(`
+  INSERT INTO bravus_master_credit_events
+    (id, reserve_code, grant_id, event_type, account_username, amount_centavos, actor,
+     assessment_reason, eligibility_rule, idempotency_hash, created_at)
+  VALUES (?, 'BRAVUS_MASTER_CREDIT_RESERVE', ?, 'GRANT_CREATED', 'legacy.user', ?,
+    'admin', 'avaliacao', 'regra', ?, '2026-01-02T00:00:00Z')
+`);
+assert.throws(
+  () => legacyInsertMasterEvent.run("legacy-invalid-zero", "legacy-zero", "0", "legacy-zero-hash"),
+  /constraint/i,
+);
+legacyInsertMasterEvent.run("legacy-valid", "legacy-valid-grant", "1", "legacy-unique-hash");
+assert.throws(
+  () => legacyInsertMasterEvent.run("legacy-duplicate", "legacy-duplicate-grant", "1", "legacy-unique-hash"),
+  /unique/i,
+);
+assert.throws(
+  () => legacyMasterDatabase.prepare("UPDATE bravus_master_credit_events SET actor = 'changed' WHERE id = 'legacy-valid'").run(),
+  /immutable/i,
+);
+legacyMasterDatabase.close();
+
 database.close();
 console.log(JSON.stringify({
   result: "ok",
@@ -82,4 +183,8 @@ console.log(JSON.stringify({
   journalDiscoveryVerified: true,
   idempotentMigrationVerified: true,
   immutableAccountProvisioningAuditVerified: true,
+  masterCreditReserveVerified: true,
+  immutableMasterCreditEventsVerified: true,
+  masterCreditEventConstraintsVerified: true,
+  legacyMasterCreditSchemaUpgradeVerified: true,
 }));

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { formatCurrencyExact } from "../bravus-bank-frontend/src/utils/helpers.js";
+import { formatCurrencyExact, reaisToCentavosExact } from "../bravus-bank-frontend/src/utils/helpers.js";
 
 assert.equal(
   formatCurrencyExact("100000000000000000"),
@@ -8,9 +8,13 @@ assert.equal(
 );
 assert.equal(formatCurrencyExact("1000"), "R$ 10,00");
 assert.equal(formatCurrencyExact("-105"), "-R$ 1,05");
+assert.equal(reaisToCentavosExact("123.45"), "12345");
+assert.equal(reaisToCentavosExact("123,4"), "12340");
+assert.equal(reaisToCentavosExact("1.234"), null);
 
 console.log(JSON.stringify({
   result: "ok",
-  institutionalReserve: formatCurrencyExact("100000000000000000"),
+  masterCreditReserve: formatCurrencyExact("100000000000000000"),
   exactIntegerFormattingVerified: true,
+  exactInputParsingVerified: true,
 }));

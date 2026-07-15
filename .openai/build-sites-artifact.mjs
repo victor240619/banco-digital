@@ -202,7 +202,7 @@ for (const file of await walk(distDir)) {
 }
 files["/"] = files["/index.html"];
 
-const entrypoint = `const buildTarget = "bravus-sites-api-d1-v1";
+const entrypoint = `const buildTarget = "bravus-sites-api-d1-v2";
 const files = ${JSON.stringify(files)};
 const liveSeed = ${JSON.stringify(liveSeed)};
 const now = () => new Date().toISOString();
@@ -219,6 +219,19 @@ const institutionalReserveSeed = Object.freeze({
   policyVersion: 1,
   payloadHash: "15fd35def62b676d26bea6568134e5dd059000d2998edd60ec3a2e0992f3e2fa",
   declaredAt: "2026-07-15T00:00:00-03:00",
+});
+const masterCreditReserveSeed = Object.freeze({
+  code: "BRAVUS_MASTER_CREDIT_RESERVE",
+  name: "Reserva Mestre de Credito Escritural",
+  totalAmountCentavos: "100000000000000000",
+  currency: "BRL",
+  classification: "MASTER_BOOK_CREDIT",
+  status: "ACTIVE",
+  transferScope: "ADMIN_APPROVED_CUSTOMERS",
+  adminOnly: true,
+  policyVersion: 1,
+  payloadHash: "9b210dda96d850f85bcd09a80d5e6b988b66593860b141d4bb688195c0abd022",
+  activatedAt: "2026-07-15T00:00:00-03:00",
 });
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -333,6 +346,7 @@ let currentEnv = null;
 let pendingBiometricWrites = [];
 let pendingKycAuditWrites = [];
 let pendingAccountProvisionAuditWrites = [];
+let pendingMasterCreditEventWrites = [];
 let persistenceMeta = { backend: "D1", revision: 0, payloadHash: null, updatedAt: null };
 
 function normalizeState(candidate) {
@@ -362,6 +376,8 @@ function normalizeState(candidate) {
   next.registrationFaceChecks = Array.isArray(next.registrationFaceChecks) ? next.registrationFaceChecks : [];
   next.registrationAudit = Array.isArray(next.registrationAudit) ? next.registrationAudit : [];
   next.accountProvisioningRequests = Array.isArray(next.accountProvisioningRequests) ? next.accountProvisioningRequests : [];
+  next.masterCreditGrants = Array.isArray(next.masterCreditGrants) ? next.masterCreditGrants : [];
+  next.masterCreditRequests = Array.isArray(next.masterCreditRequests) ? next.masterCreditRequests : [];
   next.initialPasswordChallenges = Array.isArray(next.initialPasswordChallenges) ? next.initialPasswordChallenges : [];
   next.initialPasswordReissues = Array.isArray(next.initialPasswordReissues) ? next.initialPasswordReissues : [];
   next.kycEnrollmentChecks = Array.isArray(next.kycEnrollmentChecks) ? next.kycEnrollmentChecks : [];
@@ -661,10 +677,12 @@ function userSummary(user) {
     accountNumber: user.accountNumber,
     accountType: user.accountType,
     balance: user.balance,
-    statusKyc: user.statusKyc || "APROVADO_AUTO",
+    statusKyc: user.statusKyc || "STATUS_NAO_INFORMADO",
     credentialState: user.credentialState || "ACTIVE",
     identityEvidenceRequired: user.statusKyc === "PENDENTE_VALIDACAO_IDENTIDADE" && !user.kycAnalysisId,
-    isActive: true,
+    roles: user.roles,
+    active: user.active !== false,
+    isActive: user.active !== false,
     createdAt: user.createdAt || "2026-07-12T00:00:00-03:00",
   };
 }
@@ -1270,12 +1288,16 @@ function syncJoaoCreditGrantFromBalance() {
 }
 
 function ledgerPairForTransaction(tx) {
-  const transferId = "sites-transaction-" + tx.id + "-" + tx.type;
+  const transferId = tx.masterCreditGrantId
+    ? "master-credit-grant-" + tx.masterCreditGrantId
+    : "sites-transaction-" + tx.id + "-" + tx.type;
   if (hasBalancedLedger(transferId)) return;
   const amount = Number(tx.amount || 0);
   const user = state.users[tx.username];
   if (!user || !amount || amount <= 0) return;
-  const bank = { username: "BRAVUS_LEDGER", accountNumber: "BRAVUS-LEDGER" };
+  const bank = tx.masterCreditGrantId
+    ? { username: masterCreditReserveSeed.code, accountNumber: "MASTER-CREDIT-RESERVE" }
+    : { username: "BRAVUS_LEDGER", accountNumber: "BRAVUS-LEDGER" };
   const isCreditToUser = tx.type === "DEPOSIT";
   const debitUser = isCreditToUser ? bank : user;
   const creditUser = isCreditToUser ? user : bank;
@@ -1292,7 +1314,7 @@ function ledgerPairForTransaction(tx) {
       entryType: "credit",
       signedAmountCentavos: amount,
       currency: "BRL",
-      reason: "TRANSACTION_RECONCILIATION",
+      reason: tx.masterCreditGrantId ? "MASTER_CREDIT_GRANT" : "TRANSACTION_RECONCILIATION",
       createdAt,
     },
     {
@@ -1304,7 +1326,7 @@ function ledgerPairForTransaction(tx) {
       entryType: "debit",
       signedAmountCentavos: -amount,
       currency: "BRL",
-      reason: "TRANSACTION_RECONCILIATION",
+      reason: tx.masterCreditGrantId ? "MASTER_CREDIT_GRANT" : "TRANSACTION_RECONCILIATION",
       createdAt,
     }
   );
@@ -1602,6 +1624,10 @@ function canUseOutgoingBanking(user) {
   return status === "APROVADO_AUTO" || status === "APROVADO_IDENTIDADE";
 }
 
+function hasExplicitApprovedKyc(user) {
+  return user?.statusKyc === "APROVADO_AUTO" || user?.statusKyc === "APROVADO_IDENTIDADE";
+}
+
 function outgoingKycBlocked(user) {
   return json({
     message: "Sua conta pode consultar e receber valores, mas operacoes de saida aguardam a validacao de identidade.",
@@ -1849,6 +1875,20 @@ function enqueueApi(task) {
   return run;
 }
 
+function masterCreditEventSchemaReady(sql) {
+  const normalized = String(sql || "")
+    .split(String.fromCharCode(96)).join("")
+    .replace(/\"/g, "")
+    .replace(/\\s+/g, " ")
+    .toLowerCase();
+  const uniqueIdempotency = normalized.includes("idempotency_hash text not null unique")
+    || normalized.includes("unique (idempotency_hash)");
+  return uniqueIdempotency
+    && normalized.includes("amount_centavos <> '0'")
+    && normalized.includes("grant_id is null and account_username is null")
+    && normalized.includes("unique (grant_id, event_type)");
+}
+
 async function ensureD1Schema(db) {
   if (d1SchemaReady) return;
   await db.batch([
@@ -1860,6 +1900,8 @@ async function ensureD1Schema(db) {
     db.prepare("CREATE TABLE IF NOT EXISTS bravus_institutional_reserve (code TEXT PRIMARY KEY NOT NULL, currency TEXT NOT NULL CHECK (currency = 'BRL'), amount_centavos TEXT NOT NULL CHECK (length(amount_centavos) BETWEEN 1 AND 40 AND amount_centavos NOT GLOB '*[^0-9]*'), classification TEXT NOT NULL CHECK (classification = 'INSTITUTIONAL'), status TEXT NOT NULL CHECK (status IN ('DECLARED','VERIFIED','SUSPENDED')), customer_funds INTEGER NOT NULL CHECK (customer_funds = 0), transferable INTEGER NOT NULL CHECK (transferable = 0), source_reference TEXT NOT NULL, policy_version INTEGER NOT NULL CHECK (policy_version >= 1), payload_hash TEXT NOT NULL, declared_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS bravus_institutional_reserve_audit (id TEXT PRIMARY KEY NOT NULL, reserve_code TEXT NOT NULL, event_type TEXT NOT NULL CHECK (event_type IN ('RESERVE_DECLARED','RESERVE_VERIFIED','RESERVE_SUSPENDED')), amount_centavos TEXT NOT NULL, status TEXT NOT NULL, actor TEXT NOT NULL, reason TEXT NOT NULL, payload_hash TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (reserve_code) REFERENCES bravus_institutional_reserve(code))"),
     db.prepare("CREATE TABLE IF NOT EXISTS bravus_account_provisioning_audit (id TEXT PRIMARY KEY NOT NULL, account_username TEXT NOT NULL, subject_hash TEXT NOT NULL, actor TEXT NOT NULL, event_type TEXT NOT NULL CHECK (event_type = 'ACCOUNT_PROVISIONED_PENDING_IDENTITY'), created_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS bravus_master_credit_reserve (code TEXT PRIMARY KEY NOT NULL, currency TEXT NOT NULL CHECK (currency = 'BRL'), total_amount_centavos TEXT NOT NULL CHECK (length(total_amount_centavos) BETWEEN 1 AND 40 AND total_amount_centavos NOT GLOB '*[^0-9]*'), classification TEXT NOT NULL CHECK (classification = 'MASTER_BOOK_CREDIT'), status TEXT NOT NULL CHECK (status = 'ACTIVE'), transfer_scope TEXT NOT NULL CHECK (transfer_scope = 'ADMIN_APPROVED_CUSTOMERS'), admin_only INTEGER NOT NULL CHECK (admin_only = 1), policy_version INTEGER NOT NULL CHECK (policy_version >= 1), payload_hash TEXT NOT NULL, activated_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS bravus_master_credit_events (id TEXT PRIMARY KEY NOT NULL, reserve_code TEXT NOT NULL, grant_id TEXT, event_type TEXT NOT NULL CHECK (event_type IN ('RESERVE_ACTIVATED','GRANT_CREATED','GRANT_RELEASED')), account_username TEXT, amount_centavos TEXT NOT NULL CHECK (length(amount_centavos) BETWEEN 1 AND 40 AND amount_centavos NOT GLOB '*[^0-9]*' AND amount_centavos <> '0' AND (amount_centavos = '0' OR substr(amount_centavos, 1, 1) <> '0')), actor TEXT NOT NULL, assessment_reason TEXT NOT NULL, eligibility_rule TEXT, idempotency_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, FOREIGN KEY (reserve_code) REFERENCES bravus_master_credit_reserve(code), UNIQUE (grant_id, event_type), CHECK ((event_type = 'RESERVE_ACTIVATED' AND grant_id IS NULL AND account_username IS NULL) OR (event_type IN ('GRANT_CREATED','GRANT_RELEASED') AND grant_id IS NOT NULL AND account_username IS NOT NULL)))"),
     db.prepare("CREATE INDEX IF NOT EXISTS bravus_kyc_audit_username_created_idx ON bravus_kyc_audit (username, created_at)"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_ledger_entries_no_update BEFORE UPDATE ON bravus_ledger_entries BEGIN SELECT RAISE(ABORT, 'Ledger entries are immutable; create a compensating entry'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_ledger_entries_no_delete BEFORE DELETE ON bravus_ledger_entries BEGIN SELECT RAISE(ABORT, 'Ledger entries are immutable; create a compensating entry'); END"),
@@ -1875,6 +1917,10 @@ async function ensureD1Schema(db) {
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_institutional_reserve_audit_no_delete BEFORE DELETE ON bravus_institutional_reserve_audit BEGIN SELECT RAISE(ABORT, 'Institutional reserve audit is immutable'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_account_provisioning_audit_no_update BEFORE UPDATE ON bravus_account_provisioning_audit BEGIN SELECT RAISE(ABORT, 'Account provisioning audit is immutable'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_account_provisioning_audit_no_delete BEFORE DELETE ON bravus_account_provisioning_audit BEGIN SELECT RAISE(ABORT, 'Account provisioning audit is immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_master_credit_reserve_no_update BEFORE UPDATE ON bravus_master_credit_reserve BEGIN SELECT RAISE(ABORT, 'Master credit reserve is immutable; use audited grant events'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_master_credit_reserve_no_delete BEFORE DELETE ON bravus_master_credit_reserve BEGIN SELECT RAISE(ABORT, 'Master credit reserve is immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_master_credit_events_no_update BEFORE UPDATE ON bravus_master_credit_events BEGIN SELECT RAISE(ABORT, 'Master credit events are immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_master_credit_events_no_delete BEFORE DELETE ON bravus_master_credit_events BEGIN SELECT RAISE(ABORT, 'Master credit events are immutable'); END"),
   ]);
   await db.batch([
     db.prepare("INSERT OR IGNORE INTO bravus_institutional_reserve (code, currency, amount_centavos, classification, status, customer_funds, transferable, source_reference, policy_version, payload_hash, declared_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)")
@@ -1899,6 +1945,27 @@ async function ensureD1Schema(db) {
         institutionalReserveSeed.payloadHash,
         institutionalReserveSeed.declaredAt,
       ),
+    db.prepare("INSERT OR IGNORE INTO bravus_master_credit_reserve (code, currency, total_amount_centavos, classification, status, transfer_scope, admin_only, policy_version, payload_hash, activated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)")
+      .bind(
+        masterCreditReserveSeed.code,
+        masterCreditReserveSeed.currency,
+        masterCreditReserveSeed.totalAmountCentavos,
+        masterCreditReserveSeed.classification,
+        masterCreditReserveSeed.status,
+        masterCreditReserveSeed.transferScope,
+        masterCreditReserveSeed.policyVersion,
+        masterCreditReserveSeed.payloadHash,
+        masterCreditReserveSeed.activatedAt,
+      ),
+    db.prepare("INSERT OR IGNORE INTO bravus_master_credit_events (id, reserve_code, grant_id, event_type, account_username, amount_centavos, actor, assessment_reason, eligibility_rule, idempotency_hash, created_at) VALUES ('master-credit-reserve-activation-v1', ?, NULL, 'RESERVE_ACTIVATED', NULL, ?, 'OWNER_CONFIGURATION', ?, ?, ?, ?)")
+      .bind(
+        masterCreditReserveSeed.code,
+        masterCreditReserveSeed.totalAmountCentavos,
+        "Reserva mestre de credito escritural ativada para concessoes administrativas avaliadas.",
+        "KYC aprovado e avaliacao administrativa registrada.",
+        masterCreditReserveSeed.payloadHash,
+        masterCreditReserveSeed.activatedAt,
+      ),
   ]);
   let evidenceSchema = await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bravus_biometric_evidence'").first();
   let evidenceSchemaSql = String(evidenceSchema?.sql || "");
@@ -1919,6 +1986,24 @@ async function ensureD1Schema(db) {
   }
   if (!evidenceSchemaSql.includes("KYC_DOCUMENT_FRONT") || !evidenceSchemaSql.includes("KYC_DOCUMENT_BACK")) {
     throw new Error("D1_KYC_EVIDENCE_SCHEMA_NOT_READY");
+  }
+  let masterEventSchema = await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bravus_master_credit_events'").first();
+  if (!masterCreditEventSchemaReady(masterEventSchema?.sql)) {
+    await db.batch([
+      db.prepare("DROP TRIGGER IF EXISTS bravus_master_credit_events_no_update"),
+      db.prepare("DROP TRIGGER IF EXISTS bravus_master_credit_events_no_delete"),
+      db.prepare("DROP TABLE IF EXISTS bravus_master_credit_events_v2"),
+      db.prepare("CREATE TABLE bravus_master_credit_events_v2 (id TEXT PRIMARY KEY NOT NULL, reserve_code TEXT NOT NULL, grant_id TEXT, event_type TEXT NOT NULL CHECK (event_type IN ('RESERVE_ACTIVATED','GRANT_CREATED','GRANT_RELEASED')), account_username TEXT, amount_centavos TEXT NOT NULL CHECK (length(amount_centavos) BETWEEN 1 AND 40 AND amount_centavos NOT GLOB '*[^0-9]*' AND amount_centavos <> '0' AND substr(amount_centavos, 1, 1) <> '0'), actor TEXT NOT NULL, assessment_reason TEXT NOT NULL, eligibility_rule TEXT, idempotency_hash TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (reserve_code) REFERENCES bravus_master_credit_reserve(code), UNIQUE (grant_id, event_type), UNIQUE (idempotency_hash), CHECK ((event_type = 'RESERVE_ACTIVATED' AND grant_id IS NULL AND account_username IS NULL) OR (event_type IN ('GRANT_CREATED','GRANT_RELEASED') AND grant_id IS NOT NULL AND account_username IS NOT NULL)))"),
+      db.prepare("INSERT INTO bravus_master_credit_events_v2 (id, reserve_code, grant_id, event_type, account_username, amount_centavos, actor, assessment_reason, eligibility_rule, idempotency_hash, created_at) SELECT id, reserve_code, grant_id, event_type, account_username, amount_centavos, actor, assessment_reason, eligibility_rule, idempotency_hash, created_at FROM bravus_master_credit_events"),
+      db.prepare("DROP TABLE bravus_master_credit_events"),
+      db.prepare("ALTER TABLE bravus_master_credit_events_v2 RENAME TO bravus_master_credit_events"),
+      db.prepare("CREATE TRIGGER bravus_master_credit_events_no_update BEFORE UPDATE ON bravus_master_credit_events BEGIN SELECT RAISE(ABORT, 'Master credit events are immutable'); END"),
+      db.prepare("CREATE TRIGGER bravus_master_credit_events_no_delete BEFORE DELETE ON bravus_master_credit_events BEGIN SELECT RAISE(ABORT, 'Master credit events are immutable'); END"),
+    ]);
+    masterEventSchema = await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bravus_master_credit_events'").first();
+  }
+  if (!masterCreditEventSchemaReady(masterEventSchema?.sql)) {
+    throw new Error("D1_MASTER_CREDIT_EVENT_SCHEMA_NOT_READY");
   }
   d1SchemaReady = true;
 }
@@ -1968,6 +2053,157 @@ async function loadInstitutionalReserve(db) {
     payloadHash: row.payload_hash,
     declaredAt: row.declared_at,
   };
+}
+
+async function loadMasterCreditReserve(db) {
+  const row = await db.prepare("SELECT code, currency, total_amount_centavos, classification, status, transfer_scope, admin_only, policy_version, payload_hash, activated_at FROM bravus_master_credit_reserve WHERE code = ?")
+    .bind(masterCreditReserveSeed.code)
+    .first();
+  if (!row) throw new Error("D1_MASTER_CREDIT_RESERVE_NOT_FOUND");
+  const canonical = [
+    row.code, row.currency, row.total_amount_centavos, row.classification, row.status,
+    row.transfer_scope, row.policy_version,
+  ].join("|");
+  const payloadHash = await sha256Text(canonical);
+  if (payloadHash !== row.payload_hash) throw new Error("D1_MASTER_CREDIT_RESERVE_HASH_MISMATCH");
+  if (Number(row.admin_only) !== 1) throw new Error("D1_MASTER_CREDIT_RESERVE_SCOPE_INVALID");
+  return {
+    code: row.code,
+    name: masterCreditReserveSeed.name,
+    currency: row.currency,
+    totalAmountCentavos: String(row.total_amount_centavos),
+    totalAmountReais: centavosToReaisString(row.total_amount_centavos),
+    classification: row.classification,
+    status: row.status,
+    transferScope: row.transfer_scope,
+    adminOnly: true,
+    transferable: true,
+    transferMode: "ADMIN_CREDIT_GRANT_ONLY",
+    policyVersion: Number(row.policy_version),
+    payloadHash: row.payload_hash,
+    activatedAt: row.activated_at,
+  };
+}
+
+function masterCreditAllocation(reserve) {
+  const total = exactCentavos(reserve.totalAmountCentavos, "master_credit_total");
+  let committed = 0n;
+  let released = 0n;
+  for (const grant of state.masterCreditGrants) {
+    validateMasterCreditGrantPolicy(grant);
+    const amount = exactCentavos(grant.amountCentavos, "master_credit_grant");
+    committed += amount;
+    if (grant.status === "LIBERADO") released += amount;
+  }
+  const available = total - committed;
+  if (available < 0n || released > committed) throw new Error("MASTER_CREDIT_RESERVE_INCONSISTENT");
+  return {
+    totalCentavos: total.toString(),
+    availableCentavos: available.toString(),
+    committedCentavos: committed.toString(),
+    releasedCentavos: released.toString(),
+    pendingCentavos: (committed - released).toString(),
+    balanced: total === available + committed,
+  };
+}
+
+function validateMasterCreditGrantPolicy(grant) {
+  if (grant?.productType !== "NON_REPAYABLE_BOOK_CREDIT"
+    || grant.repayable !== false
+    || grant.interestBearing !== false
+    || Number(grant.policyVersion) !== 1) {
+    throw new Error("MASTER_CREDIT_GRANT_POLICY_INVALID");
+  }
+}
+
+async function validateMasterCreditAudit(db, pendingEventCount = 0) {
+  const row = await db.prepare("SELECT COUNT(*) AS count FROM bravus_master_credit_events").first();
+  const actual = Number(row?.count || 0);
+  const released = state.masterCreditGrants.filter((grant) => grant.status === "LIBERADO").length;
+  const expected = 1 + state.masterCreditGrants.length + released;
+  return {
+    actual,
+    expected,
+    pendingEventCount,
+    valid: actual + pendingEventCount === expected,
+  };
+}
+
+function masterCreditGrantView(grant) {
+  validateMasterCreditGrantPolicy(grant);
+  return {
+    id: grant.id,
+    userId: grant.userId,
+    username: grant.username,
+    reserveCode: grant.reserveCode,
+    amountCentavos: grant.amountCentavos,
+    valorConcedido: grant.amountCentavos,
+    valorDisponivel: grant.status === "PENDENTE" ? grant.amountCentavos : "0",
+    status: grant.status,
+    assessmentReason: grant.assessmentReason,
+    eligibilityRule: grant.eligibilityRule,
+    notes: grant.notes,
+    productType: grant.productType,
+    repayable: grant.repayable,
+    interestBearing: grant.interestBearing,
+    policyVersion: grant.policyVersion,
+    assessedBy: grant.assessedBy,
+    assessedAt: grant.assessedAt,
+    releasedAt: grant.releasedAt || null,
+    transactionId: grant.transactionId || null,
+  };
+}
+
+async function releaseMasterCreditGrant(grant, beneficiary, actor, idempotencyKey) {
+  const releaseRequestHash = await sha256Text(idempotencyKey + "|" + grant.id + "|release");
+  if (grant.status === "LIBERADO") {
+    if (grant.releaseRequestHash === releaseRequestHash) return { grant, idempotentReplay: true };
+    throw new Error("MASTER_CREDIT_ALREADY_RELEASED");
+  }
+  const amount = exactCentavos(grant.amountCentavos, "master_credit_release");
+  const nextBalance = exactCentavos(beneficiary.balance, "beneficiary_balance") + amount;
+  if (nextBalance > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("CUSTOMER_BALANCE_PRECISION_LIMIT");
+  const createdAt = now();
+  const transaction = {
+    id: nextNumericId(state.transactions),
+    username: beneficiary.username,
+    type: "DEPOSIT",
+    amount: Number(amount),
+    description: "Credito escritural concedido pela Reserva Mestre Bravus",
+    destinationAccount: beneficiary.accountNumber,
+    status: "COMPLETED",
+    createdAt,
+    masterCreditGrantId: grant.id,
+    reserveCode: masterCreditReserveSeed.code,
+  };
+  beneficiary.balance = Number(nextBalance);
+  state.transactions.unshift(transaction);
+  ledgerPairForTransaction(transaction);
+  grant.status = "LIBERADO";
+  grant.releasedAt = createdAt;
+  grant.releasedBy = actor;
+  grant.transactionId = transaction.id;
+  grant.releaseRequestHash = releaseRequestHash;
+  pendingMasterCreditEventWrites.push({
+    id: crypto.randomUUID(),
+    grantId: grant.id,
+    eventType: "GRANT_RELEASED",
+    accountUsername: beneficiary.username,
+    amountCentavos: grant.amountCentavos,
+    actor,
+    assessmentReason: grant.assessmentReason,
+    eligibilityRule: grant.eligibilityRule,
+    idempotencyHash: releaseRequestHash,
+    createdAt,
+  });
+  state.ledgerAudit.unshift({
+    status: "MASTER_CREDIT_GRANT_RELEASED",
+    grantId: grant.id,
+    transactionId: transaction.id,
+    actor,
+    createdAt,
+  });
+  return { grant, idempotentReplay: false };
 }
 
 function ledgerMirrorStatement(db, entry, revision, payloadHash) {
@@ -2032,6 +2268,25 @@ function accountProvisionAuditWriteStatement(db, entry, revision, payloadHash) {
     );
 }
 
+function masterCreditEventWriteStatement(db, entry, revision, payloadHash) {
+  return db.prepare("INSERT INTO bravus_master_credit_events (id, reserve_code, grant_id, event_type, account_username, amount_centavos, actor, assessment_reason, eligibility_rule, idempotency_hash, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM bravus_state WHERE id = 1 AND revision = ? AND payload_hash = ?")
+    .bind(
+      entry.id,
+      masterCreditReserveSeed.code,
+      entry.grantId,
+      entry.eventType,
+      entry.accountUsername,
+      entry.amountCentavos,
+      entry.actor,
+      entry.assessmentReason,
+      entry.eligibilityRule || null,
+      entry.idempotencyHash,
+      entry.createdAt,
+      revision,
+      payloadHash,
+    );
+}
+
 async function loadOrCreateD1State(db) {
   await ensureD1Schema(db);
   let row = await db.prepare("SELECT revision, payload, payload_hash, updated_at FROM bravus_state WHERE id = 1").first();
@@ -2063,6 +2318,11 @@ async function persistD1State(db, previous, request, actor) {
   if (!validation.valid) {
     throw new Error("D1_FINANCIAL_VALIDATION_FAILED");
   }
+  const masterReserve = await loadMasterCreditReserve(db);
+  const masterAllocation = masterCreditAllocation(masterReserve);
+  if (!masterAllocation.balanced) throw new Error("D1_MASTER_CREDIT_ALLOCATION_FAILED");
+  const masterAudit = await validateMasterCreditAudit(db, pendingMasterCreditEventWrites.length);
+  if (!masterAudit.valid) throw new Error("D1_MASTER_CREDIT_AUDIT_MISMATCH");
 
   const payload = JSON.stringify(state);
   const payloadHash = await sha256Text(payload);
@@ -2089,6 +2349,7 @@ async function persistD1State(db, previous, request, actor) {
     ...pendingBiometricWrites.map((evidence) => biometricWriteStatement(db, evidence, nextRevision, payloadHash)),
     ...pendingKycAuditWrites.map((entry) => kycAuditWriteStatement(db, entry, nextRevision, payloadHash)),
     ...pendingAccountProvisionAuditWrites.map((entry) => accountProvisionAuditWriteStatement(db, entry, nextRevision, payloadHash)),
+    ...pendingMasterCreditEventWrites.map((entry) => masterCreditEventWriteStatement(db, entry, nextRevision, payloadHash)),
   ];
   const results = await db.batch(statements);
   const changed = Number(results?.[0]?.meta?.changes || 0);
@@ -2122,6 +2383,7 @@ async function handlePersistedApi(request, env) {
       pendingBiometricWrites = [];
       pendingKycAuditWrites = [];
       pendingAccountProvisionAuditWrites = [];
+      pendingMasterCreditEventWrites = [];
       persistenceMeta = {
         backend: "D1",
         revision: Number(previous.revision),
@@ -2964,6 +3226,148 @@ async function handleApi(request) {
     return json({ message: "Forbidden" }, { status: 403 });
   }
 
+  const grantsByUserMatch = path.match(/^\\/admin\\/ledger\\/credit\\/by-user\\/(\\d+)$/);
+  if (request.method === "GET" && grantsByUserMatch) {
+    const userId = Number(grantsByUserMatch[1]);
+    return json(state.masterCreditGrants
+      .filter((grant) => Number(grant.userId) === userId)
+      .map(masterCreditGrantView));
+  }
+
+  if (request.method === "POST" && path === "/admin/ledger/credit/issue") {
+    const body = await request.json().catch(() => ({}));
+    const idempotencyKey = String(request.headers.get("idempotency-key") || "").trim();
+    if (idempotencyKey.length < 16 || idempotencyKey.length > 150) {
+      return badRequest("Informe uma chave de idempotencia valida.", "IDEMPOTENCY_KEY_REQUIRED");
+    }
+    const requestedUserId = Number(body.userId);
+    if (String(body.reservaCodigo || masterCreditReserveSeed.code) !== masterCreditReserveSeed.code) {
+      return badRequest("Reserva mestre de origem invalida.", "MASTER_CREDIT_RESERVE_INVALID");
+    }
+    let amount;
+    try {
+      amount = exactCentavos(body.valorCentavos ?? body.amountCentavos, "master_credit_issue");
+    } catch {
+      return badRequest("Informe o valor em centavos inteiros.", "MASTER_CREDIT_AMOUNT_INVALID");
+    }
+    if (amount <= 0n || amount > BigInt(Number.MAX_SAFE_INTEGER)) {
+      return badRequest("Valor fora do limite de precisao por concessao.", "MASTER_CREDIT_AMOUNT_INVALID");
+    }
+    const assessmentReason = String(body.motivo || body.assessmentReason || "").trim();
+    const eligibilityRule = String(body.regraElegibilidade || body.eligibilityRule || "").trim();
+    const notes = String(body.observacoes || body.notes || "").trim();
+    const annualInterestRate = Number(body.taxaJurosAnual ?? body.annualInterestRate ?? 0);
+    const releaseNow = body.liberarAgora === true || body.releaseNow === true;
+    if (assessmentReason.length < 10 || assessmentReason.length > 500) {
+      return badRequest("Registre o motivo detalhado da avaliacao.", "MASTER_CREDIT_ASSESSMENT_REQUIRED");
+    }
+    if (eligibilityRule.length < 10 || eligibilityRule.length > 500) {
+      return badRequest("Registre o criterio de elegibilidade aplicado.", "MASTER_CREDIT_ELIGIBILITY_REQUIRED");
+    }
+    if (!Number.isFinite(annualInterestRate) || annualInterestRate !== 0) {
+      return badRequest("Esta concessao escritural nao gera divida nem juros.", "MASTER_CREDIT_NON_REPAYABLE");
+    }
+    const fingerprint = await sha256Text([
+      String(requestedUserId), amount.toString(), assessmentReason, eligibilityRule,
+      notes, releaseNow ? "1" : "0", passwordPepper(),
+    ].join("|"));
+    const previousRequest = state.masterCreditRequests.find((item) => item.idempotencyKey === idempotencyKey);
+    if (previousRequest) {
+      if (previousRequest.fingerprint !== fingerprint) {
+        return json({ message: "Chave de idempotencia reutilizada com dados diferentes.", code: "IDEMPOTENCY_CONFLICT" }, { status: 409 });
+      }
+      const previousGrant = state.masterCreditGrants.find((grant) => grant.id === previousRequest.grantId);
+      if (!previousGrant) return json({ message: "Concessao anterior inconsistente.", code: "MASTER_CREDIT_INCONSISTENT" }, { status: 409 });
+      return json({ grant: masterCreditGrantView(previousGrant), idempotentReplay: true });
+    }
+    const beneficiary = Object.values(state.users).find((item) => Number(item.id) === requestedUserId);
+    if (!beneficiary || beneficiary.roles?.includes("ROLE_ADMIN")) {
+      return json({ message: "Cliente nao encontrado.", code: "CUSTOMER_NOT_FOUND" }, { status: 404 });
+    }
+    if (beneficiary.active === false) {
+      return json({ message: "A conta do cliente esta inativa.", code: "CUSTOMER_INACTIVE" }, { status: 409 });
+    }
+    if (!hasExplicitApprovedKyc(beneficiary)) {
+      return json({ message: "A concessao exige identidade aprovada.", code: "CUSTOMER_KYC_REQUIRED" }, { status: 409 });
+    }
+    if (releaseNow && exactCentavos(beneficiary.balance, "beneficiary_balance") + amount > BigInt(Number.MAX_SAFE_INTEGER)) {
+      return badRequest("O saldo resultante excederia o limite de precisao da conta.", "CUSTOMER_BALANCE_PRECISION_LIMIT");
+    }
+    const reserve = await loadMasterCreditReserve(currentEnv.DB);
+    const allocation = masterCreditAllocation(reserve);
+    if (amount > exactCentavos(allocation.availableCentavos, "master_credit_available")) {
+      return json({ message: "Saldo insuficiente na Reserva Mestre.", code: "MASTER_CREDIT_RESERVE_INSUFFICIENT" }, { status: 409 });
+    }
+    const createdAt = now();
+    const grant = {
+      id: crypto.randomUUID(),
+      userId: beneficiary.id,
+      username: beneficiary.username,
+      reserveCode: masterCreditReserveSeed.code,
+      amountCentavos: amount.toString(),
+      status: "PENDENTE",
+      assessmentReason,
+      eligibilityRule,
+      notes: notes || null,
+      productType: "NON_REPAYABLE_BOOK_CREDIT",
+      repayable: false,
+      interestBearing: false,
+      policyVersion: 1,
+      assessedBy: user.username,
+      assessedAt: createdAt,
+      createdAt,
+    };
+    state.masterCreditGrants.unshift(grant);
+    state.masterCreditRequests.unshift({ idempotencyKey, fingerprint, grantId: grant.id, actor: user.username, createdAt });
+    pendingMasterCreditEventWrites.push({
+      id: crypto.randomUUID(),
+      grantId: grant.id,
+      eventType: "GRANT_CREATED",
+      accountUsername: beneficiary.username,
+      amountCentavos: grant.amountCentavos,
+      actor: user.username,
+      assessmentReason,
+      eligibilityRule,
+      idempotencyHash: await sha256Text(idempotencyKey),
+      createdAt,
+    });
+    if (releaseNow) {
+      try {
+        await releaseMasterCreditGrant(grant, beneficiary, user.username, idempotencyKey);
+      } catch (error) {
+        return json({ message: "Nao foi possivel liberar o credito.", code: error.message }, { status: 409 });
+      }
+    }
+    return json({ grant: masterCreditGrantView(grant), idempotentReplay: false }, { status: 201, headers: { "cache-control": "no-store" } });
+  }
+
+  const releaseMasterCreditMatch = path.match(/^\\/admin\\/ledger\\/credit\\/([^/]+)\\/release$/);
+  if (request.method === "POST" && releaseMasterCreditMatch) {
+    const idempotencyKey = String(request.headers.get("idempotency-key") || "").trim();
+    if (idempotencyKey.length < 16 || idempotencyKey.length > 150) {
+      return badRequest("Informe uma chave de idempotencia valida.", "IDEMPOTENCY_KEY_REQUIRED");
+    }
+    const grant = state.masterCreditGrants.find((item) => item.id === decodeURIComponent(releaseMasterCreditMatch[1]));
+    if (!grant) return json({ message: "Concessao nao encontrada.", code: "MASTER_CREDIT_GRANT_NOT_FOUND" }, { status: 404 });
+    const releaseRequestHash = await sha256Text(idempotencyKey + "|" + grant.id + "|release");
+    if (grant.status === "LIBERADO") {
+      if (grant.releaseRequestHash === releaseRequestHash) {
+        return json({ grant: masterCreditGrantView(grant), idempotentReplay: true }, { headers: { "cache-control": "no-store" } });
+      }
+      return json({ message: "A concessao ja foi liberada por outra solicitacao.", code: "MASTER_CREDIT_ALREADY_RELEASED" }, { status: 409 });
+    }
+    const beneficiary = state.users[grant.username];
+    if (!beneficiary || beneficiary.active === false || !hasExplicitApprovedKyc(beneficiary)) {
+      return json({ message: "O cliente precisa estar ativo e com identidade aprovada.", code: "CUSTOMER_NOT_ELIGIBLE" }, { status: 409 });
+    }
+    try {
+      const result = await releaseMasterCreditGrant(grant, beneficiary, user.username, idempotencyKey);
+      return json({ grant: masterCreditGrantView(result.grant), idempotentReplay: result.idempotentReplay }, { headers: { "cache-control": "no-store" } });
+    } catch (error) {
+      return json({ message: "A concessao ja foi liberada por outra solicitacao.", code: error.message }, { status: 409 });
+    }
+  }
+
   if (request.method === "POST" && path === "/admin/accounts/provision") {
     const body = await request.json().catch(() => ({}));
     const idempotencyKey = String(request.headers.get("idempotency-key") || "").trim();
@@ -3092,18 +3496,29 @@ async function handleApi(request) {
     let institutionalReserveReady = false;
     let institutionalReserveAuditCount = null;
     let immutableAccountProvisioningAuditCount = null;
+    let masterCreditReserveReady = false;
+    let immutableMasterCreditEventCount = null;
+    let masterCreditAuditReconciled = false;
+    let masterCreditExpectedEventCount = null;
     try {
       const evidenceSchema = await currentEnv.DB.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bravus_biometric_evidence'").first();
       const kycAuditCount = await currentEnv.DB.prepare("SELECT COUNT(*) AS count FROM bravus_kyc_audit").first();
       const reserve = await loadInstitutionalReserve(currentEnv.DB);
       const reserveAuditCount = await currentEnv.DB.prepare("SELECT COUNT(*) AS count FROM bravus_institutional_reserve_audit").first();
       const provisioningAuditCount = await currentEnv.DB.prepare("SELECT COUNT(*) AS count FROM bravus_account_provisioning_audit").first();
+      const masterReserve = await loadMasterCreditReserve(currentEnv.DB);
+      const masterEventCount = await currentEnv.DB.prepare("SELECT COUNT(*) AS count FROM bravus_master_credit_events").first();
+      const masterAudit = await validateMasterCreditAudit(currentEnv.DB);
       const schemaSql = String(evidenceSchema?.sql || "");
       kycEvidenceSchemaReady = schemaSql.includes("KYC_DOCUMENT_FRONT") && schemaSql.includes("KYC_DOCUMENT_BACK");
       immutableKycAuditCount = Number(kycAuditCount?.count || 0);
       institutionalReserveReady = reserve.amountCentavos === "100000000000000000" && reserve.status === "DECLARED";
       institutionalReserveAuditCount = Number(reserveAuditCount?.count || 0);
       immutableAccountProvisioningAuditCount = Number(provisioningAuditCount?.count || 0);
+      masterCreditReserveReady = masterReserve.totalAmountCentavos === "100000000000000000" && masterReserve.status === "ACTIVE";
+      immutableMasterCreditEventCount = Number(masterEventCount?.count || 0);
+      masterCreditAuditReconciled = masterAudit.valid;
+      masterCreditExpectedEventCount = masterAudit.expected;
     } catch {
       kycEvidenceSchemaReady = false;
       institutionalReserveReady = false;
@@ -3121,6 +3536,10 @@ async function handleApi(request) {
       institutionalReserveReady,
       institutionalReserveAuditCount,
       immutableAccountProvisioningAuditCount,
+      masterCreditReserveReady,
+      immutableMasterCreditEventCount,
+      masterCreditAuditReconciled,
+      masterCreditExpectedEventCount,
     });
   }
 
@@ -3274,9 +3693,11 @@ async function handleApi(request) {
     return json(state.transactions.map((tx) => hydrateTransaction(tx, state.users[tx.username] || user)));
   }
   if (request.method === "GET" && path === "/admin/ledger/balance-sheet") {
-    const reserve = await loadInstitutionalReserve(currentEnv.DB);
+    const reserve = await loadMasterCreditReserve(currentEnv.DB);
+    const allocation = masterCreditAllocation(reserve);
+    const masterReserve = { ...reserve, ...allocation };
     const ledgerValidation = validateSitesLedger();
-    const reserveCentavos = exactCentavos(reserve.amountCentavos, "institutional_reserve");
+    const masterAudit = await validateMasterCreditAudit(currentEnv.DB);
     const clientLiabilitiesCentavos = Object.values(state.users).reduce(
       (sum, item) => sum + exactCentavos(item.balance, "client_balance"),
       0n,
@@ -3285,28 +3706,39 @@ async function handleApi(request) {
       (sum, entry) => sum + exactCentavos(entry.signedAmountCentavos, "ledger_entry"),
       0n,
     );
-    const equityCentavos = reserveCentavos - clientLiabilitiesCentavos;
-    const equationBalanced = reserveCentavos === clientLiabilitiesCentavos + equityCentavos;
     const accounting = {
       amountUnit: "CENTAVOS",
       precision: "INTEGER_DECIMAL_STRING",
-      totalAssetsCentavos: reserveCentavos.toString(),
       totalLiabilitiesCentavos: clientLiabilitiesCentavos.toString(),
-      totalEquityCentavos: equityCentavos.toString(),
       ledgerNetCentavos: ledgerNetCentavos.toString(),
-      equationBalanced,
       ledgerReconciled: ledgerValidation.valid && ledgerNetCentavos === 0n,
-      balanced: equationBalanced && ledgerValidation.valid && ledgerNetCentavos === 0n,
+      masterAllocationBalanced: allocation.balanced,
+      masterCreditAuditReconciled: masterAudit.valid,
+      economicClassification: "NON_REPAYABLE_BOOK_CREDIT",
+      createsCustomerDebt: false,
+      externalCashBackingClaimed: false,
+      balanced: allocation.balanced && masterAudit.valid && ledgerValidation.valid && ledgerNetCentavos === 0n,
     };
     return json({
-      contractVersion: 2,
+      contractVersion: 3,
       amountUnit: "CENTAVOS",
-      totalAssets: accounting.totalAssetsCentavos,
       totalLiabilities: accounting.totalLiabilitiesCentavos,
-      equity: accounting.totalEquityCentavos,
       ledgerNet: accounting.ledgerNetCentavos,
-      reserves: [reserve],
-      institutionalReserve: reserve,
+      reserves: [masterReserve],
+      masterCreditReserve: masterReserve,
+      reservaMestre: {
+        codigo: masterReserve.code,
+        nome: masterReserve.name,
+        saldoTotalCentavos: masterReserve.totalCentavos,
+        disponivelEmissaoCentavos: masterReserve.availableCentavos,
+        comprometidoCentavos: masterReserve.committedCentavos,
+        liberadoCentavos: masterReserve.releasedCentavos,
+      },
+      reservasInternas: [{
+        codigo: masterReserve.code,
+        nome: masterReserve.name,
+        valorDisponivelCentavos: masterReserve.availableCentavos,
+      }],
       accounting,
     }, { headers: { "cache-control": "no-store" } });
   }

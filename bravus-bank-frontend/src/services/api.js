@@ -232,8 +232,12 @@ export const ledgerAdminService = {
     api.get(`/admin/ledger/entries?page=${page}&size=${size}`),
   grantsByUser: (userId) => api.get(`/admin/ledger/credit/by-user/${userId}`),
   grantCredit: (payload) => api.post('/admin/ledger/credit/grant', payload),
-  issueCredit: (payload) => api.post('/admin/ledger/credit/issue', payload),
-  releaseCredit: (grantId) => api.post(`/admin/ledger/credit/${grantId}/release`),
+  issueCredit: (payload, idempotencyKey) => api.post('/admin/ledger/credit/issue', payload, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  }),
+  releaseCredit: (grantId, idempotencyKey) => api.post(`/admin/ledger/credit/${grantId}/release`, {}, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  }),
 };
 
 export const passwordResetAdminService = {
