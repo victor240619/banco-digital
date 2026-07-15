@@ -1773,6 +1773,26 @@ async function ensureD1Schema(db) {
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_kyc_audit_no_update BEFORE UPDATE ON bravus_kyc_audit BEGIN SELECT RAISE(ABORT, 'KYC audit entries are immutable'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_kyc_audit_no_delete BEFORE DELETE ON bravus_kyc_audit BEGIN SELECT RAISE(ABORT, 'KYC audit entries are immutable'); END"),
   ]);
+  let evidenceSchema = await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bravus_biometric_evidence'").first();
+  let evidenceSchemaSql = String(evidenceSchema?.sql || "");
+  if (!evidenceSchemaSql.includes("KYC_DOCUMENT_FRONT") || !evidenceSchemaSql.includes("KYC_DOCUMENT_BACK")) {
+    await db.batch([
+      db.prepare("DROP TRIGGER IF EXISTS bravus_biometric_evidence_no_update"),
+      db.prepare("DROP TRIGGER IF EXISTS bravus_biometric_evidence_no_delete"),
+      db.prepare("DROP TABLE IF EXISTS bravus_biometric_evidence_v2"),
+      db.prepare("CREATE TABLE bravus_biometric_evidence_v2 (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('ENROLLED_FACE','PASSWORD_RESET_FACE','KYC_DOCUMENT_FRONT','KYC_DOCUMENT_BACK')), owner_username TEXT NOT NULL, mime TEXT NOT NULL, ciphertext TEXT NOT NULL, iv TEXT NOT NULL, sha256 TEXT NOT NULL, created_at TEXT NOT NULL)"),
+      db.prepare("INSERT INTO bravus_biometric_evidence_v2 (id, kind, owner_username, mime, ciphertext, iv, sha256, created_at) SELECT id, kind, owner_username, mime, ciphertext, iv, sha256, created_at FROM bravus_biometric_evidence"),
+      db.prepare("DROP TABLE bravus_biometric_evidence"),
+      db.prepare("ALTER TABLE bravus_biometric_evidence_v2 RENAME TO bravus_biometric_evidence"),
+      db.prepare("CREATE TRIGGER bravus_biometric_evidence_no_update BEFORE UPDATE ON bravus_biometric_evidence BEGIN SELECT RAISE(ABORT, 'Biometric evidence is immutable'); END"),
+      db.prepare("CREATE TRIGGER bravus_biometric_evidence_no_delete BEFORE DELETE ON bravus_biometric_evidence BEGIN SELECT RAISE(ABORT, 'Biometric evidence is immutable'); END"),
+    ]);
+    evidenceSchema = await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bravus_biometric_evidence'").first();
+    evidenceSchemaSql = String(evidenceSchema?.sql || "");
+  }
+  if (!evidenceSchemaSql.includes("KYC_DOCUMENT_FRONT") || !evidenceSchemaSql.includes("KYC_DOCUMENT_BACK")) {
+    throw new Error("D1_KYC_EVIDENCE_SCHEMA_NOT_READY");
+  }
   d1SchemaReady = true;
 }
 
