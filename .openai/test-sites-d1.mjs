@@ -22,6 +22,12 @@ class FakeStatement {
       const evidence = this.database.biometricEvidence.get(this.bindings[0]);
       return evidence ? structuredClone(evidence) : null;
     }
+    if (this.sql.startsWith("SELECT sql FROM sqlite_master")) {
+      return { sql: "CREATE TABLE bravus_biometric_evidence (kind TEXT CHECK (kind IN ('ENROLLED_FACE','PASSWORD_RESET_FACE','KYC_DOCUMENT_FRONT','KYC_DOCUMENT_BACK')))" };
+    }
+    if (this.sql.startsWith("SELECT COUNT(*) AS count FROM bravus_kyc_audit")) {
+      return { count: this.database.kycAudits.size };
+    }
     throw new Error("Unsupported D1 first(): " + this.sql);
   }
 }
@@ -485,6 +491,8 @@ const persistence = await call(worker, "GET", "/admin/persistence/status", { tok
 assert.equal(persistence.data.backend, "D1");
 assert.equal(persistence.data.durable, true);
 assert.equal(persistence.data.ledgerValid, true);
+assert.equal(persistence.data.kycEvidenceSchemaReady, true);
+assert.equal(persistence.data.immutableKycAuditCount, 2);
 assert.ok(database.audits.size >= 10, "persistent state changes must be audited");
 
 console.log(JSON.stringify({

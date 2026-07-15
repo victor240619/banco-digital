@@ -2591,6 +2591,17 @@ async function handleApi(request) {
 
   if (request.method === "GET" && path === "/admin/persistence/status") {
     const ledger = validateSitesLedger();
+    let kycEvidenceSchemaReady = false;
+    let immutableKycAuditCount = null;
+    try {
+      const evidenceSchema = await currentEnv.DB.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bravus_biometric_evidence'").first();
+      const kycAuditCount = await currentEnv.DB.prepare("SELECT COUNT(*) AS count FROM bravus_kyc_audit").first();
+      const schemaSql = String(evidenceSchema?.sql || "");
+      kycEvidenceSchemaReady = schemaSql.includes("KYC_DOCUMENT_FRONT") && schemaSql.includes("KYC_DOCUMENT_BACK");
+      immutableKycAuditCount = Number(kycAuditCount?.count || 0);
+    } catch {
+      kycEvidenceSchemaReady = false;
+    }
     return json({
       ...persistenceMeta,
       buildTarget,
@@ -2599,6 +2610,8 @@ async function handleApi(request) {
       transactionCount: state.transactions.length,
       ledgerEntryCount: state.ledgerEntries.length,
       ledgerValid: ledger.valid,
+      kycEvidenceSchemaReady,
+      immutableKycAuditCount,
     });
   }
 
