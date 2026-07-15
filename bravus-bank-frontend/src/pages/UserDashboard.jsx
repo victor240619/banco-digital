@@ -19,6 +19,10 @@ import {
 } from '../utils/helpers';
 import { cn } from '../lib/cn';
 import { isMobileApp } from '../lib/appChannel';
+import {
+  saveNativeReceiptPdf,
+  shareNativeReceiptPdf,
+} from '../lib/nativeReceiptDocuments';
 
 // ============ Helpers ============
 const txIcon = (type) => {
@@ -268,8 +272,12 @@ const downloadHtmlDocument = ({ filename, html }) => {
   });
 };
 
-const downloadPdfDocument = ({ filename, pdf }) => {
+const downloadPdfDocument = async ({ filename, pdf }) => {
+  if (isMobileApp()) {
+    return saveNativeReceiptPdf({ filename, pdf });
+  }
   downloadBlobDocument({ filename, blob: pdf });
+  return { message: 'Comprovante em PDF baixado.' };
 };
 
 const shareHtmlDocument = async ({ filename, html, title, text }) => {
@@ -288,6 +296,9 @@ const shareHtmlDocument = async ({ filename, html, title, text }) => {
 };
 
 const sharePdfDocument = async ({ filename, pdf, title, text }) => {
+  if (isMobileApp()) {
+    return shareNativeReceiptPdf({ filename, pdf, title, text });
+  }
   const file = new File([pdf], filename, { type: 'application/pdf' });
   if (navigator.canShare?.({ files: [file] })) {
     await navigator.share({ files: [file], title, text });
@@ -452,17 +463,17 @@ const buildReceiptPdfBlob = (receipt) => {
     '0.918 0.686 0.157 rg 0 796 595 4 re f',
     '1 1 1 rg',
     pdfTextCommand({ text: 'BRAVUS PREMIUM BANK', x: 48, y: 816, size: 13, bold: true }),
-    pdfTextCommand({ text: 'Comprovante de transferencia', x: 48, y: 782, size: 22, bold: true }),
     '0 0 0 rg',
-    pdfTextCommand({ text: `Valor: ${formatCurrency(receipt?.amountCentavos)}`, x: 48, y: 752, size: 16, bold: true }),
+    pdfTextCommand({ text: 'Comprovante de transferencia', x: 48, y: 764, size: 22, bold: true }),
+    pdfTextCommand({ text: `Valor: ${formatCurrency(receipt?.amountCentavos)}`, x: 48, y: 732, size: 16, bold: true }),
     pdfTextCommand({
       text: `${receipt?.channel || 'BRAVUS'} | ${receipt?.settlementStatus || receipt?.status || 'PROCESSADO'}`,
       x: 48,
-      y: 731,
+      y: 711,
       size: 10,
     }),
   ];
-  let y = 698;
+  let y = 680;
   const addSection = (title, rows) => {
     commands.push('0.918 0.686 0.157 rg');
     commands.push(pdfTextCommand({ text: title, x: 48, y, size: 12, bold: true }));
@@ -511,7 +522,7 @@ const buildReceiptPdfBlob = (receipt) => {
   return createSinglePagePdf(commands);
 };
 
-const buildReceiptDocument = (receipt) => {
+export const buildReceiptDocument = (receipt) => {
   const title = `Comprovante Bravus ${formatCurrency(receipt?.amountCentavos)}`;
   const body = `
     <section class="section">
@@ -623,6 +634,7 @@ export default function UserDashboard() {
   const [externalOrders, setExternalOrders] = useState([]);
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [receiptLoading, setReceiptLoading] = useState(null);
+  const [receiptAction, setReceiptAction] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -913,24 +925,44 @@ export default function UserDashboard() {
     }
   };
 
-  const downloadReceipt = () => {
+  const downloadReceipt = async () => {
     if (!selectedReceipt) return;
-    const document = buildReceiptDocument(selectedReceipt);
-    downloadPdfDocument(document);
-    setSuccess('Comprovante em PDF baixado.');
+    setReceiptAction('download');
+    setError('');
+    try {
+      const document = buildReceiptDocument(selectedReceipt);
+      const result = await downloadPdfDocument(document);
+      setSuccess(result.message);
+    } catch (err) {
+      const needsUpdate = err?.code === 'NATIVE_RECEIPT_PLUGINS_UNAVAILABLE';
+      setError(needsUpdate
+        ? 'Atualize o aplicativo Bravus para baixar comprovantes em PDF.'
+        : 'Nao foi possivel salvar o PDF do comprovante.');
+    } finally {
+      setReceiptAction(null);
+    }
   };
 
   const shareReceipt = async () => {
     if (!selectedReceipt) return;
-    const document = buildReceiptDocument(selectedReceipt);
+    setReceiptAction('share');
+    setError('');
     try {
+      const document = buildReceiptDocument(selectedReceipt);
       const message = await sharePdfDocument({
         ...document,
         title: 'Comprovante Bravus Bank',
       });
       setSuccess(message);
     } catch (err) {
-      if (err?.name !== 'AbortError') setError('Nao foi possivel compartilhar o comprovante.');
+      if (err?.name !== 'AbortError') {
+        const needsUpdate = err?.code === 'NATIVE_RECEIPT_PLUGINS_UNAVAILABLE';
+        setError(needsUpdate
+          ? 'Atualize o aplicativo Bravus para compartilhar o PDF.'
+          : 'Nao foi possivel compartilhar o comprovante.');
+      }
+    } finally {
+      setReceiptAction(null);
     }
   };
 
@@ -1739,19 +1771,21 @@ export default function UserDashboard() {
                 <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
                   <button
                     type="button"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-slate-100"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-60"
                     onClick={downloadReceipt}
+                    disabled={Boolean(receiptAction)}
                   >
                     <Download className="h-4 w-4" />
-                    Baixar
+                    {receiptAction === 'download' ? 'Salvando...' : 'Baixar'}
                   </button>
                   <button
                     type="button"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-slate-100"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-60"
                     onClick={shareReceipt}
+                    disabled={Boolean(receiptAction)}
                   >
                     <Share2 className="h-4 w-4" />
-                    Compartilhar
+                    {receiptAction === 'share' ? 'Abrindo...' : 'Compartilhar'}
                   </button>
                   <button
                     type="button"

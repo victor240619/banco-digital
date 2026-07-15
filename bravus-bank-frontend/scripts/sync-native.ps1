@@ -22,3 +22,11 @@ if ($Platform -eq "ios") {
 }
 
 npx.cmd cap sync $Platform
+
+if ($Platform -eq "ios") {
+  $packageFile = Join-Path $root "ios\App\CapApp-SPM\Package.swift"
+  if (Test-Path $packageFile) {
+    $packageContent = (Get-Content -Raw $packageFile).Replace("\", "/")
+    [System.IO.File]::WriteAllText($packageFile, $packageContent, [System.Text.UTF8Encoding]::new($false))
+  }
+}
