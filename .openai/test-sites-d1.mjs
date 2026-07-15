@@ -32,6 +32,7 @@ class FakeD1 {
     this.audits = new Map();
     this.ledgerEntries = new Map();
     this.biometricEvidence = new Map();
+    this.kycAudits = new Map();
   }
 
   prepare(sql) {
@@ -44,6 +45,7 @@ class FakeD1 {
       audits: [...this.audits],
       ledgerEntries: [...this.ledgerEntries],
       biometricEvidence: [...this.biometricEvidence],
+      kycAudits: [...this.kycAudits],
     });
     try {
       return statements.map((statement) => ({ meta: { changes: this.execute(statement) } }));
@@ -52,6 +54,7 @@ class FakeD1 {
       this.audits = new Map(snapshot.audits);
       this.ledgerEntries = new Map(snapshot.ledgerEntries);
       this.biometricEvidence = new Map(snapshot.biometricEvidence);
+      this.kycAudits = new Map(snapshot.kycAudits);
       throw error;
     }
   }
@@ -59,7 +62,7 @@ class FakeD1 {
   execute(statement) {
     const sql = statement.sql;
     const values = statement.bindings;
-    if (sql.startsWith("CREATE TABLE") || sql.startsWith("CREATE TRIGGER")) return 0;
+    if (sql.startsWith("CREATE TABLE") || sql.startsWith("CREATE INDEX") || sql.startsWith("CREATE TRIGGER")) return 0;
 
     if (sql.startsWith("INSERT OR IGNORE INTO bravus_state (id, revision")) {
       if (this.stateRow) return 0;
@@ -112,9 +115,24 @@ class FakeD1 {
       const expectedHash = values[9];
       if (!this.stateRow || this.stateRow.revision !== expectedRevision || this.stateRow.payload_hash !== expectedHash) return 0;
       if (this.biometricEvidence.has(values[0])) return 0;
+      if (!["ENROLLED_FACE", "PASSWORD_RESET_FACE", "KYC_DOCUMENT_FRONT", "KYC_DOCUMENT_BACK"].includes(values[1])) {
+        throw new Error("CHECK constraint failed: kind");
+      }
       this.biometricEvidence.set(values[0], {
         id: values[0], kind: values[1], owner_username: values[2], mime: values[3], ciphertext: values[4],
         iv: values[5], sha256: values[6], created_at: values[7],
+      });
+      return 1;
+    }
+
+    if (sql.startsWith("INSERT OR IGNORE INTO bravus_kyc_audit")) {
+      const expectedRevision = values[7];
+      const expectedHash = values[8];
+      if (!this.stateRow || this.stateRow.revision !== expectedRevision || this.stateRow.payload_hash !== expectedHash) return 0;
+      if (this.kycAudits.has(values[0])) return 0;
+      this.kycAudits.set(values[0], {
+        id: values[0], username: values[1], actor: values[2], fromStatus: values[3],
+        toStatus: values[4], reason: values[5], createdAt: values[6],
       });
       return 1;
     }
@@ -371,6 +389,9 @@ const kycApproval = await call(worker, "POST", "/admin/kyc/" + registrationIdent
 });
 assert.equal(kycApproval.response.status, 200, JSON.stringify(kycApproval.data));
 assert.equal(kycApproval.data.statusKyc, "APROVADO_IDENTIDADE");
+assert.equal(database.kycAudits.size, 1, "KYC decision must be mirrored to immutable audit storage");
+const approvedEvidence = await call(worker, "GET", "/admin/kyc/" + registrationIdentity.username + "/evidence", { token: adminLogin.data.token });
+assert.equal(approvedEvidence.response.status, 200, "KYC evidence must remain reviewable after a decision");
 const approvedOutgoing = await call(worker, "POST", "/user/transfer", {
   token: customerLogin.data.token,
   headers: { "idempotency-key": "approved-kyc-transfer-0001" },
@@ -378,6 +399,45 @@ const approvedOutgoing = await call(worker, "POST", "/user/transfer", {
 });
 assert.equal(approvedOutgoing.response.status, 200, JSON.stringify(approvedOutgoing.data));
 assert.equal((await call(worker, "GET", "/user/balance", { token: customerLogin.data.token })).data, 900);
+
+const rejectedIdentity = {
+  clientChannel: "ANDROID_APK",
+  username: "rejected.identity",
+  email: "rejected.identity@bravus.test",
+  cpf: "11144477735",
+};
+const rejectedFaceImage = image(55, 3200);
+const rejectedFaceCheck = await call(worker, "POST", "/auth/register/face-check", {
+  headers: mobileHeaders,
+  body: { ...rejectedIdentity, faceImage: rejectedFaceImage, biometricChallenge: "FACE_CAMERA_CAPTURE_V1" },
+});
+assert.equal(rejectedFaceCheck.response.status, 200, JSON.stringify(rejectedFaceCheck.data));
+const rejectedRegistration = await call(worker, "POST", "/auth/register", {
+  headers: mobileHeaders,
+  body: {
+    ...rejectedIdentity,
+    fullName: "Cliente Identidade Rejeitada",
+    password: "NovaSenha123",
+    documentFrontImage: image(56, 4200),
+    documentBackImage: image(57, 4200),
+    faceImage: rejectedFaceImage,
+    biometricChallenge: "FACE_CAMERA_CAPTURE_V1",
+    faceVerificationToken: rejectedFaceCheck.data.faceVerificationToken,
+  },
+});
+assert.equal(rejectedRegistration.response.status, 200, JSON.stringify(rejectedRegistration.data));
+const kycRejection = await call(worker, "POST", "/admin/kyc/" + rejectedIdentity.username + "/reject", {
+  token: adminLogin.data.token,
+  body: { reason: "Evidencias divergentes na revisao administrativa de identidade." },
+});
+assert.equal(kycRejection.response.status, 200, JSON.stringify(kycRejection.data));
+assert.equal(kycRejection.data.statusKyc, "REJEITADO_IDENTIDADE");
+assert.equal(database.kycAudits.size, 2);
+const rejectedLogin = await call(worker, "POST", "/auth/login", {
+  body: { username: rejectedIdentity.username, password: "NovaSenha123" },
+});
+assert.equal(rejectedLogin.response.status, 403, "identity rejection must block every new login");
+assert.equal(rejectedLogin.data.code, "ACCOUNT_IDENTITY_REJECTED");
 
 const clientSecret = "c".repeat(64);
 const reset = await call(worker, "POST", "/auth/password-reset/start", {
@@ -392,7 +452,7 @@ const face = await call(worker, "POST", "/auth/password-reset/face", {
   body: { requestId: reset.data.requestId, clientSecret, challenge: reset.data.challenge, faceImage: image(44, 3300) },
 });
 assert.equal(face.data.status, "REVIEW_PENDING", JSON.stringify(face.data));
-assert.equal(database.biometricEvidence.size, 4, "submitted face must be encrypted in immutable evidence storage");
+assert.equal(database.biometricEvidence.size, 7, "submitted face must be encrypted in immutable evidence storage");
 
 const pending = await call(worker, "GET", "/admin/password-reset/requests", { token: adminLogin.data.token });
 assert.equal(pending.data.some((item) => item.requestId === reset.data.requestId), true);
@@ -440,4 +500,6 @@ console.log(JSON.stringify({
   registrationFaceTokenVerified: true,
   pendingKycOutgoingBlocked: true,
   auditedKycApprovalVerified: true,
+  rejectedIdentityLoginBlocked: true,
+  immutableKycAuditVerified: true,
 }, null, 2));

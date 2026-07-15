@@ -312,6 +312,7 @@ let state = null;
 let joaoCreditGrant = null;
 let currentEnv = null;
 let pendingBiometricWrites = [];
+let pendingKycAuditWrites = [];
 let persistenceMeta = { backend: "D1", revision: 0, payloadHash: null, updatedAt: null };
 
 function normalizeState(candidate) {
@@ -1760,13 +1761,17 @@ async function ensureD1Schema(db) {
     db.prepare("CREATE TABLE IF NOT EXISTS bravus_state (id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1), revision INTEGER NOT NULL CHECK (revision >= 1), payload TEXT NOT NULL, payload_hash TEXT NOT NULL, source_captured_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS bravus_state_audit (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, revision INTEGER NOT NULL UNIQUE, request_id TEXT NOT NULL, method TEXT NOT NULL, path TEXT NOT NULL, actor TEXT NOT NULL, previous_hash TEXT NOT NULL, payload_hash TEXT NOT NULL, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS bravus_ledger_entries (transfer_id TEXT NOT NULL, entry_type TEXT NOT NULL CHECK (entry_type IN ('debit','credit')), order_id INTEGER, account_username TEXT, account_number TEXT NOT NULL, signed_amount_centavos INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'BRL', reason TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (transfer_id, entry_type), CHECK ((entry_type = 'debit' AND signed_amount_centavos < 0) OR (entry_type = 'credit' AND signed_amount_centavos > 0)))"),
-    db.prepare("CREATE TABLE IF NOT EXISTS bravus_biometric_evidence (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('ENROLLED_FACE','PASSWORD_RESET_FACE')), owner_username TEXT NOT NULL, mime TEXT NOT NULL, ciphertext TEXT NOT NULL, iv TEXT NOT NULL, sha256 TEXT NOT NULL, created_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS bravus_biometric_evidence (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('ENROLLED_FACE','PASSWORD_RESET_FACE','KYC_DOCUMENT_FRONT','KYC_DOCUMENT_BACK')), owner_username TEXT NOT NULL, mime TEXT NOT NULL, ciphertext TEXT NOT NULL, iv TEXT NOT NULL, sha256 TEXT NOT NULL, created_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS bravus_kyc_audit (id TEXT PRIMARY KEY NOT NULL, username TEXT NOT NULL, actor TEXT NOT NULL, from_status TEXT NOT NULL, to_status TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS bravus_kyc_audit_username_created_idx ON bravus_kyc_audit (username, created_at)"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_ledger_entries_no_update BEFORE UPDATE ON bravus_ledger_entries BEGIN SELECT RAISE(ABORT, 'Ledger entries are immutable; create a compensating entry'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_ledger_entries_no_delete BEFORE DELETE ON bravus_ledger_entries BEGIN SELECT RAISE(ABORT, 'Ledger entries are immutable; create a compensating entry'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_state_audit_no_update BEFORE UPDATE ON bravus_state_audit BEGIN SELECT RAISE(ABORT, 'State audit entries are immutable'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_state_audit_no_delete BEFORE DELETE ON bravus_state_audit BEGIN SELECT RAISE(ABORT, 'State audit entries are immutable'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_biometric_evidence_no_update BEFORE UPDATE ON bravus_biometric_evidence BEGIN SELECT RAISE(ABORT, 'Biometric evidence is immutable'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_biometric_evidence_no_delete BEFORE DELETE ON bravus_biometric_evidence BEGIN SELECT RAISE(ABORT, 'Biometric evidence is immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_kyc_audit_no_update BEFORE UPDATE ON bravus_kyc_audit BEGIN SELECT RAISE(ABORT, 'KYC audit entries are immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_kyc_audit_no_delete BEFORE DELETE ON bravus_kyc_audit BEGIN SELECT RAISE(ABORT, 'KYC audit entries are immutable'); END"),
   ]);
   d1SchemaReady = true;
 }
@@ -1799,6 +1804,21 @@ function biometricWriteStatement(db, evidence, revision, payloadHash) {
       evidence.iv,
       evidence.sha256,
       evidence.createdAt,
+      revision,
+      payloadHash,
+    );
+}
+
+function kycAuditWriteStatement(db, entry, revision, payloadHash) {
+  return db.prepare("INSERT OR IGNORE INTO bravus_kyc_audit (id, username, actor, from_status, to_status, reason, created_at) SELECT ?, ?, ?, ?, ?, ?, ? FROM bravus_state WHERE id = 1 AND revision = ? AND payload_hash = ?")
+    .bind(
+      entry.id,
+      entry.username,
+      entry.actor,
+      entry.fromStatus,
+      entry.toStatus,
+      entry.reason,
+      entry.createdAt,
       revision,
       payloadHash,
     );
@@ -1859,6 +1879,7 @@ async function persistD1State(db, previous, request, actor) {
       .bind(nextRevision, requestId, request.method, path, actor || "PUBLIC", previous.payload_hash, payloadHash, updatedAt, nextRevision, payloadHash),
     ...state.ledgerEntries.map((entry) => ledgerMirrorStatement(db, entry, nextRevision, payloadHash)),
     ...pendingBiometricWrites.map((evidence) => biometricWriteStatement(db, evidence, nextRevision, payloadHash)),
+    ...pendingKycAuditWrites.map((entry) => kycAuditWriteStatement(db, entry, nextRevision, payloadHash)),
   ];
   const results = await db.batch(statements);
   const changed = Number(results?.[0]?.meta?.changes || 0);
@@ -1890,6 +1911,7 @@ async function handlePersistedApi(request, env) {
       const previous = await loadOrCreateD1State(env.DB);
       state = normalizeState(JSON.parse(String(previous.payload)));
       pendingBiometricWrites = [];
+      pendingKycAuditWrites = [];
       persistenceMeta = {
         backend: "D1",
         revision: Number(previous.revision),
@@ -1926,6 +1948,12 @@ async function handleApi(request) {
     if (!user || !await verifyPassword(body.password, user.passwordCredential)) {
       state.loginAttempts.unshift({ identifierHash: loginIdentifierHash, createdAt: now() });
       return json("Invalid username or password", { status: 400 });
+    }
+    if (user.statusKyc === "REJEITADO_IDENTIDADE") {
+      return json({
+        message: "A abertura desta conta foi rejeitada. Procure o suporte Bravus.",
+        code: "ACCOUNT_IDENTITY_REJECTED",
+      }, { status: 403 });
     }
     state.loginAttempts = state.loginAttempts.filter((attempt) => attempt.identifierHash !== loginIdentifierHash);
     if (!user.passwordCredential.peppered) {
@@ -2590,8 +2618,7 @@ async function handleApi(request) {
   if (request.method === "GET" && kycEvidenceMatch) {
     const account = state.users[decodeURIComponent(kycEvidenceMatch[1])];
     const evidence = account ? state.kycEvidence[account.username] : null;
-    if (!account || account.statusKyc !== "PENDENTE_VALIDACAO_IDENTIDADE"
-        || !evidence?.documentFrontEvidenceId || !evidence?.documentBackEvidenceId || !evidence?.faceEvidenceId) {
+    if (!account || !evidence?.documentFrontEvidenceId || !evidence?.documentBackEvidenceId || !evidence?.faceEvidenceId) {
       return json({ message: "Evidencias de abertura indisponiveis." }, { status: 404 });
     }
     try {
@@ -2638,11 +2665,13 @@ async function handleApi(request) {
       analysis.reviewReason = reason;
       analysis.reviewedAt = account.kycReviewedAt;
     }
-    state.kycAudit.unshift({
+    const auditEntry = {
       id: crypto.randomUUID(), username: account.username, actor: user.username,
       fromStatus: previousStatus, toStatus: account.statusKyc, reason, createdAt: account.kycReviewedAt,
-    });
+    };
+    state.kycAudit.unshift(auditEntry);
     state.kycAudit = state.kycAudit.slice(0, 500);
+    pendingKycAuditWrites.push(auditEntry);
     if (!approved) revokeUserSessions(account.username);
     return json(userSummary(account));
   }
