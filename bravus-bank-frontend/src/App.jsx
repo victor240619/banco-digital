@@ -6,7 +6,6 @@ import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import { authService } from './services/api';
 import { isMobileApp } from './lib/appChannel';
-import { hasRegistrationDraft } from './lib/registrationDraft';
 
 const Home = lazy(() => import('./pages/Home'));
 const Login = lazy(() => import('./pages/Login'));
@@ -62,7 +61,7 @@ function RootRoute() {
   const user = authService.getCurrentUser();
   const destination = isAuthenticated
     ? (isAdmin ? '/admin' : (user?.identityEvidenceRequired ? '/completar-identidade' : '/dashboard'))
-    : (hasRegistrationDraft() ? '/register' : '/login');
+    : '/login';
   return <Navigate to={destination} replace />;
 }
 
@@ -81,6 +80,32 @@ export default function App() {
       delete window.setGlobalError;
       document.documentElement.classList.remove('native-app');
       document.body.classList.remove('native-app');
+    };
+  }, [nativeApp]);
+
+  useEffect(() => {
+    if (!nativeApp) return undefined;
+    let loginRequired = false;
+    const endNativeSession = () => {
+      const hadSession = authService.isAuthenticated();
+      void authService.logout({ reason: 'APP_BACKGROUND', keepalive: true });
+      if (hadSession) loginRequired = true;
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        endNativeSession();
+        return;
+      }
+      const protectedPath = /^\/(dashboard|admin|completar-identidade)(\/|$)/.test(window.location.pathname);
+      if ((loginRequired || protectedPath) && !authService.isAuthenticated()) {
+        window.location.replace('/login');
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', endNativeSession);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', endNativeSession);
     };
   }, [nativeApp]);
 

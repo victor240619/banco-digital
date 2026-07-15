@@ -522,12 +522,22 @@ async function verifyPassword(password, credential) {
   return difference === 0;
 }
 
-function createSession(user) {
+const NATIVE_SESSION_CHANNELS = new Set(["ANDROID_APK", "IOS_APP", "MOBILE_APP"]);
+const NATIVE_SESSION_IDLE_MS = 15 * 60 * 1000;
+const NATIVE_SESSION_ABSOLUTE_MS = 8 * 60 * 60 * 1000;
+
+function createSession(user, clientChannel = "WEB") {
   const token = randomToken(32);
+  const channel = NATIVE_SESSION_CHANNELS.has(clientChannel) ? clientChannel : "WEB";
+  const createdAt = now();
+  const nativeSession = NATIVE_SESSION_CHANNELS.has(channel);
   state.sessions[token] = {
     username: user.username,
-    createdAt: now(),
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    clientChannel: channel,
+    nativeSession,
+    createdAt,
+    expiresAt: new Date(Date.now() + (nativeSession ? NATIVE_SESSION_IDLE_MS : 24 * 60 * 60 * 1000)).toISOString(),
+    absoluteExpiresAt: new Date(Date.now() + (nativeSession ? NATIVE_SESSION_ABSOLUTE_MS : 24 * 60 * 60 * 1000)).toISOString(),
   };
   return token;
 }
@@ -1796,9 +1806,14 @@ function userFromToken(request) {
   const token = auth.replace(/^Bearer\\s+/i, "").trim();
   const session = state.sessions[token];
   if (!session) return null;
-  if (new Date(session.expiresAt).getTime() <= Date.now()) {
+  const expiresAt = new Date(session.expiresAt).getTime();
+  const absoluteExpiresAt = new Date(session.absoluteExpiresAt || session.expiresAt).getTime();
+  if (expiresAt <= Date.now() || absoluteExpiresAt <= Date.now()) {
     delete state.sessions[token];
     return null;
+  }
+  if (session.nativeSession) {
+    session.expiresAt = new Date(Math.min(Date.now() + NATIVE_SESSION_IDLE_MS, absoluteExpiresAt)).toISOString();
   }
   const user = state.users[session.username] || null;
   if (!user || user.active === false) return null;
@@ -2860,7 +2875,7 @@ async function handleApi(request) {
         expiresAt: challenge.expiresAt,
       }, { status: 403, headers: { "cache-control": "no-store" } });
     }
-    const token = createSession(user);
+    const token = createSession(user, body.clientChannel);
     return json(authResponse(user, token));
   }
 
@@ -2883,7 +2898,7 @@ async function handleApi(request) {
     challenge.consumedAt = now();
     transitionCredential(account, "ACTIVE", account.username, "Senha forte definida no primeiro acesso.");
     revokeUserSessions(account.username);
-    const token = createSession(account);
+    const token = createSession(account, body.clientChannel);
     return json(authResponse(account, token), { headers: { "cache-control": "no-store" } });
   }
 
@@ -3004,9 +3019,20 @@ async function handleApi(request) {
   if (!user) return json({ message: "Unauthorized" }, { status: 401 });
 
   if (request.method === "POST" && path === "/auth/logout") {
+    const body = await request.json().catch(() => ({}));
     const auth = request.headers.get("authorization") || "";
     const token = auth.replace(/^Bearer\\s+/i, "").trim();
     if (token) delete state.sessions[token];
+    const reason = ["MANUAL", "APP_BACKGROUND"].includes(body.reason) ? body.reason : "MANUAL";
+    state.registrationAudit.unshift({
+      id: crypto.randomUUID(),
+      eventType: "SESSION_ENDED",
+      actor: user.username,
+      subjectHash: null,
+      detail: reason,
+      createdAt: now(),
+    });
+    state.registrationAudit = state.registrationAudit.slice(0, 500);
     return json({ status: "SIGNED_OUT" }, { headers: { "cache-control": "no-store" } });
   }
 

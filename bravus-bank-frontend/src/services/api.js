@@ -6,6 +6,7 @@ import {
   getAppClientHeader,
   isMobileApp,
 } from '../lib/appChannel';
+import { createAuthSessionStore } from '../lib/authSessionStore';
 
 const resolveApiUrl = () => {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
@@ -20,6 +21,11 @@ const resolveApiUrl = () => {
 };
 
 const API_URL = resolveApiUrl();
+const authSession = createAuthSessionStore({
+  isNative: isMobileApp,
+  getPersistentStorage: () => (typeof window !== 'undefined' ? window.localStorage : null),
+  getTransientStorage: () => (typeof window !== 'undefined' ? window.sessionStorage : null),
+});
 
 const api = axios.create({
   baseURL: API_URL,
@@ -41,7 +47,7 @@ api.interceptors.request.use(
       // garante que NUNCA enviamos token em endpoints públicos
       if (config.headers && config.headers.Authorization) delete config.headers.Authorization;
     } else {
-      const token = localStorage.getItem('token');
+      const token = authSession.getToken();
       if (token) config.headers.Authorization = `Bearer ${token}`;
     }
     if (window.setGlobalLoading) window.setGlobalLoading(true);
@@ -69,8 +75,7 @@ api.interceptors.response.use(
     // e nao pode expulsar o usuario das demais funcoes autorizadas.
     if (status === 401 && !isPublic) {
       const onAuthPage = ['/login', '/register'].some((p) => window.location.pathname.startsWith(p));
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+      authSession.clear();
       if (!onAuthPage) window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -79,30 +84,33 @@ api.interceptors.response.use(
 
 // ====== Auth ======
 export const authService = {
+  initializeForAppLaunch: () => authSession.initialize(),
   login: async (username, password) => {
-    // garante que login parte sem token sujo no storage
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    authSession.clear();
+    const attemptVersion = authSession.getVersion();
     const { data } = await api.post('/auth/login', {
       username,
       password,
       clientChannel: getAppClientChannel(),
     });
-    if (data.token) {
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data));
+    if (data.token && !authSession.set(data, { expectedVersion: attemptVersion })) {
+      await revokeServerSession(data.token, { reason: 'APP_BACKGROUND', keepalive: true });
+      throw new Error('A tentativa de login foi encerrada porque o aplicativo saiu do primeiro plano. Entre novamente.');
     }
     return data;
   },
   completeInitialPassword: async (initialPasswordChangeToken, newPassword) => {
+    const attemptVersion = authSession.getVersion();
     const { data } = await api.post('/auth/initial-password/complete', {
       initialPasswordChangeToken,
       newPassword,
       clientChannel: getAppClientChannel(),
     });
     if (!data?.token) throw new Error('Troca concluida sem sessao valida. Entre novamente.');
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('user', JSON.stringify(data));
+    if (!authSession.set(data, { expectedVersion: attemptVersion })) {
+      await revokeServerSession(data.token, { reason: 'APP_BACKGROUND', keepalive: true });
+      throw new Error('A sessão foi encerrada porque o aplicativo saiu do primeiro plano. Entre novamente.');
+    }
     return data;
   },
   checkRegistration: async (registrationData) => {
@@ -133,33 +141,20 @@ export const authService = {
     );
     return data;
   },
-  logout: async () => {
-    let serverRevoked = !localStorage.getItem('token');
+  logout: async ({ reason = 'MANUAL', keepalive = false } = {}) => {
+    const token = authSession.getToken();
+    let serverRevoked = !token;
+    authSession.clear();
     try {
-      if (!serverRevoked) {
-        await api.post('/auth/logout');
-        serverRevoked = true;
-      }
+      if (token) serverRevoked = await revokeServerSession(token, { reason, keepalive });
     } catch {
       serverRevoked = false;
-    } finally {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
     }
     return { serverRevoked };
   },
-  getCurrentUser: () => {
-    try { return JSON.parse(localStorage.getItem('user') || 'null'); }
-    catch { return null; }
-  },
-  updateCurrentUser: (patch) => {
-    const current = authService.getCurrentUser();
-    if (!current) return null;
-    const updated = { ...current, ...patch };
-    localStorage.setItem('user', JSON.stringify(updated));
-    return updated;
-  },
-  isAuthenticated: () => !!localStorage.getItem('token'),
+  getCurrentUser: () => authSession.getUser(),
+  updateCurrentUser: (patch) => authSession.updateUser(patch),
+  isAuthenticated: () => !!authSession.getToken(),
   hasRole: (role) => {
     const u = authService.getCurrentUser();
     return !!(u && u.roles && u.roles.includes(role));
@@ -199,6 +194,27 @@ export const userService = {
     headers: { 'Idempotency-Key': idempotencyKey },
   }),
 };
+
+async function revokeServerSession(token, { reason = 'MANUAL', keepalive = false } = {}) {
+  if (!token) return true;
+  const appHeader = getAppClientHeader();
+  const headers = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
+  if (appHeader) headers['X-Bravus-Client'] = appHeader;
+  if (keepalive && typeof fetch === 'function') {
+    const response = await fetch(`${API_URL}/auth/logout`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ reason }),
+      keepalive: true,
+    });
+    return response.ok;
+  }
+  await api.post('/auth/logout', { reason }, { headers });
+  return true;
+}
 
 export const passwordResetService = {
   start: (payload) => api.post('/auth/password-reset/start', payload),

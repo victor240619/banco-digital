@@ -528,6 +528,26 @@ const customerLogin = await call(worker, "POST", "/auth/login", { body: { userna
 assert.equal(customerLogin.response.status, 200, "registered user must survive worker restart");
 const persistedBalance = await call(worker, "GET", "/user/balance", { token: customerLogin.data.token });
 assert.equal(persistedBalance.data, 1000, "balance must survive worker restart");
+const nativeLoginStartedAt = Date.now();
+const nativeSessionLogin = await call(worker, "POST", "/auth/login", {
+  body: { username: "52998224725", password: "PermanentD1123", clientChannel: "ANDROID_APK" },
+});
+assert.equal(nativeSessionLogin.response.status, 200);
+const nativeSession = JSON.parse(database.stateRow.payload).sessions[nativeSessionLogin.data.token];
+assert.equal(nativeSession.clientChannel, "ANDROID_APK");
+assert.equal(nativeSession.nativeSession, true);
+assert.ok(new Date(nativeSession.expiresAt).getTime() - nativeLoginStartedAt <= 16 * 60 * 1000, "native sessions must use a short idle fallback");
+assert.ok(new Date(nativeSession.absoluteExpiresAt).getTime() - nativeLoginStartedAt <= 8 * 60 * 60 * 1000 + 60 * 1000, "native sessions must have an absolute expiry");
+const nativeBackgroundLogout = await call(worker, "POST", "/auth/logout", {
+  token: nativeSessionLogin.data.token,
+  body: { reason: "APP_BACKGROUND" },
+});
+assert.equal(nativeBackgroundLogout.response.status, 200);
+assert.equal((await call(worker, "GET", "/user/profile", { token: nativeSessionLogin.data.token })).response.status, 401);
+const nativeLogoutAudit = JSON.parse(database.stateRow.payload).registrationAudit.find((event) =>
+  event.eventType === "SESSION_ENDED" && event.detail === "APP_BACKGROUND"
+);
+assert.ok(nativeLogoutAudit, "automatic native logout must be audited");
 
 adminLogin = await call(worker, "POST", "/auth/login", { body: { username: "admin@bravusbank.com", password: "6run0955" } });
 assert.equal(adminLogin.response.status, 200);
@@ -1378,6 +1398,8 @@ console.log(JSON.stringify({
   initialPasswordReissueVerified: true,
   provisionedKycEnrollmentVerified: true,
   serverLogoutVerified: true,
+  nativeVolatileSessionVerified: true,
+  nativeBackgroundLogoutVerified: true,
   registrationPreflightVerified: true,
   registrationFaceTokenVerified: true,
   pendingKycOutgoingBlocked: true,
