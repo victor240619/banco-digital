@@ -5,7 +5,7 @@ import { authService } from '../services/api';
 import Logo from './Logo';
 import { cn } from '../lib/cn';
 
-export default function Navbar() {
+export default function Navbar({ nativeApp = false }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(false);
@@ -14,9 +14,17 @@ export default function Navbar() {
   const isAdmin = authService.hasRole('ROLE_ADMIN');
   const isAuthenticated = authService.isAuthenticated();
 
-  const handleLogout = () => {
-    authService.logout();
-    navigate('/login');
+  const handleLogout = async () => {
+    let logoutStatus = { serverRevoked: true };
+    try {
+      logoutStatus = await authService.logout();
+    } finally {
+      setOpen(false);
+      navigate('/login', { replace: true });
+    }
+    if (!logoutStatus.serverRevoked && window.setGlobalError) {
+      window.setGlobalError('A conta saiu deste aparelho, mas a conexao impediu a revogacao remota. Entre novamente para renovar a seguranca da sessao.');
+    }
   };
 
   const NavLink = ({ to, children }) => (
@@ -33,6 +41,30 @@ export default function Navbar() {
       {children}
     </Link>
   );
+
+  if (nativeApp && !isAuthenticated) return null;
+
+  if (nativeApp) {
+    const home = isAdmin ? '/admin' : '/dashboard';
+    return (
+      <header className="native-app-header sticky top-0 z-40 border-b border-white/10 bg-ink-950">
+        <div className="native-safe-top flex min-h-16 items-center justify-between gap-3 px-3">
+          <Link to={home} className="min-w-0 shrink">
+            <Logo className="[&>span]:h-10 [&>span]:w-10" />
+          </Link>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="btn-secondary min-h-11 shrink-0 !px-3 !py-2"
+            aria-label="Sair da conta"
+          >
+            <LogOut className="h-4 w-4" />
+            <span>Sair</span>
+          </button>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header className="sticky top-0 z-40 backdrop-blur-xl bg-ink-950/70 border-b border-white/5">

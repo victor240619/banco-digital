@@ -284,6 +284,11 @@ const initialStateSeed = {
   registrationChecks: [],
   registrationFaceChecks: [],
   registrationAudit: [],
+  accountProvisioningRequests: [],
+  initialPasswordChallenges: [],
+  initialPasswordReissues: [],
+  kycEnrollmentChecks: [],
+  kycEnrollmentRequests: [],
   loginAttempts: [],
   creditGrant: { ...joaoCreditGrantSeed },
   globalRailParticipants: Array.isArray(liveSeed.globalRailParticipants) && liveSeed.globalRailParticipants.length
@@ -323,6 +328,7 @@ function normalizeState(candidate) {
   next.users[admin.username] = { ...admin, ...(next.users[admin.username] || {}) };
   for (const user of Object.values(next.users)) {
     user.roles = Array.isArray(user.roles) && user.roles.length ? user.roles : ["ROLE_USER"];
+    user.credentialState = user.credentialState || "ACTIVE";
     if (!user.passwordCredential || user.passwordCredential.hash === legacyPasswordV0Hash) {
       user.passwordCredential = { ...legacyPasswordCredential };
     }
@@ -340,6 +346,11 @@ function normalizeState(candidate) {
   next.registrationChecks = Array.isArray(next.registrationChecks) ? next.registrationChecks : [];
   next.registrationFaceChecks = Array.isArray(next.registrationFaceChecks) ? next.registrationFaceChecks : [];
   next.registrationAudit = Array.isArray(next.registrationAudit) ? next.registrationAudit : [];
+  next.accountProvisioningRequests = Array.isArray(next.accountProvisioningRequests) ? next.accountProvisioningRequests : [];
+  next.initialPasswordChallenges = Array.isArray(next.initialPasswordChallenges) ? next.initialPasswordChallenges : [];
+  next.initialPasswordReissues = Array.isArray(next.initialPasswordReissues) ? next.initialPasswordReissues : [];
+  next.kycEnrollmentChecks = Array.isArray(next.kycEnrollmentChecks) ? next.kycEnrollmentChecks : [];
+  next.kycEnrollmentRequests = Array.isArray(next.kycEnrollmentRequests) ? next.kycEnrollmentRequests : [];
   next.loginAttempts = Array.isArray(next.loginAttempts) ? next.loginAttempts : [];
   next.creditGrant = next.creditGrant && typeof next.creditGrant === "object"
     ? { ...joaoCreditGrantSeed, ...next.creditGrant }
@@ -472,6 +483,62 @@ function revokeUserSessions(username) {
   }
 }
 
+const credentialTransitions = Object.freeze({
+  INITIAL_CHANGE_REQUIRED: ["ACTIVE"],
+  ACTIVE: [],
+});
+
+function transitionCredential(user, next, actor, detail) {
+  const previous = user.credentialState || "ACTIVE";
+  if (previous !== next && !credentialTransitions[previous]?.includes(next)) {
+    throw new Error("CREDENTIAL_INVALID_TRANSITION");
+  }
+  user.credentialState = next;
+  state.registrationAudit.unshift({
+    id: crypto.randomUUID(),
+    eventType: "CREDENTIAL_" + previous + "_TO_" + next,
+    actor: actor || user.username,
+    subjectHash: null,
+    detail: String(detail || "").slice(0, 500),
+    createdAt: now(),
+  });
+  state.registrationAudit = state.registrationAudit.slice(0, 500);
+}
+
+function removeExpiredInitialPasswordChallenges() {
+  const currentTime = Date.now();
+  state.initialPasswordChallenges = state.initialPasswordChallenges
+    .filter((challenge) => challenge.status === "PENDING" && new Date(challenge.expiresAt).getTime() > currentTime)
+    .slice(0, 199);
+}
+
+async function createInitialPasswordChallenge(user) {
+  removeExpiredInitialPasswordChallenges();
+  for (const challenge of state.initialPasswordChallenges) {
+    if (challenge.username === user.username && challenge.status === "PENDING") challenge.status = "REPLACED";
+  }
+  const token = randomToken(32);
+  const createdAt = now();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  state.initialPasswordChallenges.unshift({
+    id: crypto.randomUUID(),
+    username: user.username,
+    tokenHash: await sha256Text(token),
+    status: "PENDING",
+    createdAt,
+    expiresAt,
+  });
+  return { token, expiresAt };
+}
+
+async function initialPasswordChallengeForToken(token) {
+  removeExpiredInitialPasswordChallenges();
+  const tokenHash = await sha256Text(String(token || ""));
+  return state.initialPasswordChallenges.find((challenge) =>
+    challenge.tokenHash === tokenHash && challenge.status === "PENDING"
+  ) || null;
+}
+
 async function biometricEncryptionKey() {
   const encoded = String(currentEnv?.BRAVUS_BIOMETRIC_KEY || "").trim();
   if (!encoded) throw new Error("BIOMETRIC_ENCRYPTION_UNAVAILABLE");
@@ -580,8 +647,10 @@ function userSummary(user) {
     accountType: user.accountType,
     balance: user.balance,
     statusKyc: user.statusKyc || "APROVADO_AUTO",
+    credentialState: user.credentialState || "ACTIVE",
+    identityEvidenceRequired: user.statusKyc === "PENDENTE_VALIDACAO_IDENTIDADE" && !user.kycAnalysisId,
     isActive: true,
-    createdAt: "2026-07-12T00:00:00-03:00",
+    createdAt: user.createdAt || "2026-07-12T00:00:00-03:00",
   };
 }
 
@@ -594,6 +663,7 @@ function authResponse(user, token) {
     accountNumber: user.accountNumber,
     balance: user.balance,
     statusKyc: user.statusKyc || "APROVADO_AUTO",
+    identityEvidenceRequired: user.statusKyc === "PENDENTE_VALIDACAO_IDENTIDADE" && !user.kycAnalysisId,
     roles: user.roles,
   };
 }
@@ -1721,6 +1791,15 @@ async function validatedRegistrationFaceCheck(body) {
   return check;
 }
 
+async function validatedKycEnrollmentCheck(body, user) {
+  const tokenHash = await sha256Text(String(body.faceVerificationToken || ""));
+  const faceSha256 = await sha256Text(String(body.faceImage || ""));
+  const check = state.kycEnrollmentChecks.find((item) => item.tokenHash === tokenHash) || null;
+  if (!check || check.status !== "VALIDATED" || check.username !== user.username || check.faceSha256 !== faceSha256) return null;
+  if (new Date(check.expiresAt).getTime() <= Date.now()) return null;
+  return check;
+}
+
 function analyzeDocumentRequest(body) {
   const documentNumber = digits(body.document || body.cpf || "");
   const documentType = documentTypeFor(body.type, documentNumber);
@@ -1979,8 +2058,47 @@ async function handleApi(request) {
     if (!user.passwordCredential.peppered) {
       user.passwordCredential = await createPasswordCredential(body.password);
     }
+    if (user.credentialState === "INITIAL_CHANGE_REQUIRED") {
+      if (!user.initialCredentialExpiresAt || new Date(user.initialCredentialExpiresAt).getTime() <= Date.now()) {
+        return json({
+          message: "A senha inicial expirou. Solicite uma nova senha inicial ao administrador.",
+          code: "INITIAL_PASSWORD_EXPIRED",
+        }, { status: 403, headers: { "cache-control": "no-store" } });
+      }
+      revokeUserSessions(user.username);
+      const challenge = await createInitialPasswordChallenge(user);
+      return json({
+        message: "Defina uma senha forte antes de acessar sua conta.",
+        code: "INITIAL_PASSWORD_CHANGE_REQUIRED",
+        initialPasswordChangeToken: challenge.token,
+        expiresAt: challenge.expiresAt,
+      }, { status: 403, headers: { "cache-control": "no-store" } });
+    }
     const token = createSession(user);
     return json(authResponse(user, token));
+  }
+
+  if (request.method === "POST" && path === "/auth/initial-password/complete") {
+    const body = await request.json().catch(() => ({}));
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$/.test(String(body.newPassword || ""))) {
+      return badRequest("Use no minimo 8 caracteres, com letra maiuscula, minuscula e numero.", "WEAK_PASSWORD");
+    }
+    const challenge = await initialPasswordChallengeForToken(body.initialPasswordChangeToken);
+    const account = challenge ? state.users[challenge.username] : null;
+    if (!challenge || !account || account.credentialState !== "INITIAL_CHANGE_REQUIRED") {
+      return badRequest("A troca da senha inicial expirou. Entre novamente.", "INITIAL_PASSWORD_CHANGE_INVALID");
+    }
+    if (await verifyPassword(body.newPassword, account.passwordCredential)) {
+      return badRequest("A senha definitiva deve ser diferente da senha inicial.", "INITIAL_PASSWORD_REUSE");
+    }
+    account.passwordCredential = await createPasswordCredential(body.newPassword);
+    account.initialCredentialExpiresAt = null;
+    challenge.status = "CONSUMED";
+    challenge.consumedAt = now();
+    transitionCredential(account, "ACTIVE", account.username, "Senha forte definida no primeiro acesso.");
+    revokeUserSessions(account.username);
+    const token = createSession(account);
+    return json(authResponse(account, token), { headers: { "cache-control": "no-store" } });
   }
 
   if (request.method === "POST" && path === "/auth/password-reset/start") {
@@ -2262,6 +2380,132 @@ async function handleApi(request) {
 
   const user = userFromToken(request);
   if (!user) return json({ message: "Unauthorized" }, { status: 401 });
+
+  if (request.method === "POST" && path === "/auth/logout") {
+    const auth = request.headers.get("authorization") || "";
+    const token = auth.replace(/^Bearer\\s+/i, "").trim();
+    if (token) delete state.sessions[token];
+    return json({ status: "SIGNED_OUT" }, { headers: { "cache-control": "no-store" } });
+  }
+
+  if (request.method === "POST" && path === "/user/kyc/face-check") {
+    const body = await request.json().catch(() => ({}));
+    if (user.statusKyc !== "PENDENTE_VALIDACAO_IDENTIDADE") {
+      return badRequest("A conta nao esta aguardando validacao de identidade.", "KYC_INVALID_STATE");
+    }
+    if (state.kycEvidence[user.username]?.faceEvidenceId) {
+      return badRequest("As evidencias de identidade ja foram enviadas.", "KYC_EVIDENCE_ALREADY_SUBMITTED");
+    }
+    if (String(body.biometricChallenge || "") !== "FACE_CAMERA_CAPTURE_V1") {
+      return badRequest("Desafio de captura facial invalido.", "KYC_FACE_CHALLENGE_INVALID");
+    }
+    const face = imageEvidence(body.faceImage, "Biometria facial", 2500, 240, 240);
+    if (!face.ok) return badRequest(face.message, "KYC_FACE_INVALID");
+    const token = randomToken(32);
+    const createdAt = now();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    state.kycEnrollmentChecks = state.kycEnrollmentChecks
+      .filter((item) => item.status === "VALIDATED" && new Date(item.expiresAt).getTime() > Date.now())
+      .slice(0, 199);
+    state.kycEnrollmentChecks.unshift({
+      id: crypto.randomUUID(), username: user.username, tokenHash: await sha256Text(token),
+      faceSha256: await sha256Text(String(body.faceImage)), status: "VALIDATED", createdAt, expiresAt,
+      quality: { mime: face.mime, bytes: face.bytes, width: face.width, height: face.height },
+    });
+    state.registrationAudit.unshift({
+      id: crypto.randomUUID(), eventType: "KYC_FACE_CAPTURE_VALIDATED", actor: user.username,
+      subjectHash: await sha256Text(user.username), detail: "Captura facial autenticada e validada para envio KYC.", createdAt,
+    });
+    state.registrationAudit = state.registrationAudit.slice(0, 500);
+    return json({
+      status: "CAPTURE_VALIDATED", faceVerificationToken: token, expiresAt,
+      message: "Captura facial validada. Envie os documentos para analise.",
+    }, { headers: { "cache-control": "no-store" } });
+  }
+
+  if (request.method === "POST" && path === "/user/kyc/enroll") {
+    const body = await request.json().catch(() => ({}));
+    const idempotencyKey = String(request.headers.get("idempotency-key") || "").trim();
+    if (idempotencyKey.length < 16 || idempotencyKey.length > 150) {
+      return badRequest("Informe uma chave de idempotencia valida.", "IDEMPOTENCY_KEY_REQUIRED");
+    }
+    const imageHashes = await Promise.all([
+      sha256Text(String(body.documentFrontImage || "")),
+      sha256Text(String(body.documentBackImage || "")),
+      sha256Text(String(body.faceImage || "")),
+    ]);
+    const fingerprint = await sha256Text([user.username, ...imageHashes].join("|"));
+    const previousEnrollment = state.kycEnrollmentRequests.find((item) => item.idempotencyKey === idempotencyKey);
+    if (previousEnrollment) {
+      if (previousEnrollment.username !== user.username || previousEnrollment.fingerprint !== fingerprint) {
+        return json({ message: "Chave de idempotencia reutilizada com evidencias diferentes.", code: "IDEMPOTENCY_CONFLICT" }, { status: 409 });
+      }
+      return json({
+        statusKyc: user.statusKyc,
+        identityEvidenceRequired: false,
+        analysisId: previousEnrollment.analysisId,
+        idempotentReplay: true,
+      });
+    }
+    if (user.statusKyc !== "PENDENTE_VALIDACAO_IDENTIDADE") {
+      return badRequest("A conta nao esta aguardando validacao de identidade.", "KYC_INVALID_STATE");
+    }
+    if (state.kycEvidence[user.username]?.faceEvidenceId) {
+      return badRequest("As evidencias de identidade ja foram enviadas.", "KYC_EVIDENCE_ALREADY_SUBMITTED");
+    }
+    const faceCheck = await validatedKycEnrollmentCheck(body, user);
+    if (!faceCheck) {
+      return badRequest("A validacao facial expirou ou nao corresponde a esta conta.", "KYC_FACE_VERIFICATION_INVALID");
+    }
+    const kycAnalysis = buildKycAnalysis({ ...body, cpf: user.cpf, fullName: user.fullName }, user);
+    if (kycAnalysis.status !== "EVIDENCIA_CAPTURADA_AUTO") {
+      return badRequest(kycAnalysis.errorMessage || "Envie frente, verso do documento e biometria facial.", "KYC_EVIDENCE_INVALID");
+    }
+    let documentFront;
+    let documentBack;
+    let enrolledFace;
+    try {
+      documentFront = await stageBiometricEvidence({ value: body.documentFrontImage, kind: "KYC_DOCUMENT_FRONT", username: user.username });
+      documentBack = await stageBiometricEvidence({ value: body.documentBackImage, kind: "KYC_DOCUMENT_BACK", username: user.username });
+      enrolledFace = await stageBiometricEvidence({ value: body.faceImage, kind: "ENROLLED_FACE", username: user.username });
+    } catch (error) {
+      pendingBiometricWrites = [];
+      return json({ message: "Nao foi possivel proteger as evidencias de identidade.", code: error.message }, { status: 503 });
+    }
+    kycAnalysis.subjectName = user.fullName;
+    state.documentAnalyses.unshift(kycAnalysis);
+    state.kycEvidence[user.username] = {
+      analysisId: kycAnalysis.id,
+      documentType: kycAnalysis.documentType,
+      documentNumber: kycAnalysis.documentNumber,
+      biometricStatus: kycAnalysis.biometricStatus,
+      evidence: kycAnalysis.evidence,
+      documentFrontEvidenceId: documentFront.id,
+      documentBackEvidenceId: documentBack.id,
+      faceEvidenceId: enrolledFace.id,
+      faceSha256: enrolledFace.sha256,
+      createdAt: kycAnalysis.createdAt,
+    };
+    user.kycAnalysisId = kycAnalysis.id;
+    user.kycEvidenceSubmittedAt = now();
+    faceCheck.status = "CONSUMED";
+    faceCheck.consumedAt = now();
+    state.kycEnrollmentRequests.unshift({
+      id: crypto.randomUUID(), idempotencyKey, fingerprint, username: user.username,
+      analysisId: kycAnalysis.id, createdAt: user.kycEvidenceSubmittedAt,
+    });
+    state.registrationAudit.unshift({
+      id: crypto.randomUUID(), eventType: "KYC_EVIDENCE_SUBMITTED", actor: user.username,
+      subjectHash: await sha256Text(user.username), detail: "Documento e face protegidos para revisao administrativa.", createdAt: user.kycEvidenceSubmittedAt,
+    });
+    state.registrationAudit = state.registrationAudit.slice(0, 500);
+    return json({
+      statusKyc: user.statusKyc,
+      identityEvidenceRequired: false,
+      analysisId: kycAnalysis.id,
+      idempotentReplay: false,
+    }, { status: 201, headers: { "cache-control": "no-store" } });
+  }
 
   enforceFinancialConsistency("AUTHENTICATED_REQUEST");
 
@@ -2609,6 +2853,123 @@ async function handleApi(request) {
     return json({ message: "Forbidden" }, { status: 403 });
   }
 
+  if (request.method === "POST" && path === "/admin/accounts/provision") {
+    const body = await request.json().catch(() => ({}));
+    const idempotencyKey = String(request.headers.get("idempotency-key") || "").trim();
+    if (idempotencyKey.length < 16 || idempotencyKey.length > 150) {
+      return badRequest("Informe uma chave de idempotencia valida.", "IDEMPOTENCY_KEY_REQUIRED");
+    }
+    const identity = registrationIdentity(body);
+    const fullName = String(body.fullName || "").trim();
+    const initialPassword = String(body.initialPassword || "");
+    if (fullName.length < 5 || fullName.length > 120) {
+      return badRequest("Informe o nome completo do titular.", "ACCOUNT_FULL_NAME_INVALID");
+    }
+    if (!/^[a-z0-9._-]{3,50}$/.test(identity.username)) {
+      return badRequest("Informe um usuario valido.", "ACCOUNT_USERNAME_INVALID");
+    }
+    if (initialPassword.length < 6 || initialPassword.length > 128) {
+      return badRequest("A senha inicial deve ter entre 6 e 128 caracteres.", "INITIAL_PASSWORD_INVALID");
+    }
+    const fingerprint = await sha256Text([
+      identity.cpf, identity.username, identity.email, fullName.toLowerCase(),
+    ].join("|"));
+    const previousProvision = state.accountProvisioningRequests.find((item) => item.idempotencyKey === idempotencyKey);
+    if (previousProvision) {
+      if (previousProvision.fingerprint !== fingerprint) {
+        return json({ message: "Chave de idempotencia reutilizada com dados diferentes.", code: "IDEMPOTENCY_CONFLICT" }, { status: 409 });
+      }
+      const previousAccount = state.users[previousProvision.username];
+      if (!previousAccount) {
+        return json({ message: "Provisionamento anterior inconsistente.", code: "ACCOUNT_PROVISION_INCONSISTENT" }, { status: 409 });
+      }
+      return json({ account: userSummary(previousAccount), passwordChangeRequired: previousAccount.credentialState === "INITIAL_CHANGE_REQUIRED", idempotentReplay: true });
+    }
+    const availability = registrationAvailability(identity);
+    if (!availability.available) {
+      const { identity: privateIdentity, ...publicAvailability } = availability;
+      return json(publicAvailability, { status: 409, headers: { "cache-control": "no-store" } });
+    }
+    const createdAt = now();
+    const provisionedAccount = {
+      ...joao,
+      id: Math.max(...Object.values(state.users).map((item) => item.id)) + 1,
+      username: identity.username,
+      email: identity.email,
+      fullName,
+      cpf: identity.cpf,
+      phone: String(body.phone || "").replace(/\\D/g, ""),
+      accountNumber: accountNumberForDocument(identity.cpf),
+      balance: 0,
+      roles: ["ROLE_USER"],
+      statusKyc: "PENDENTE_VALIDACAO_IDENTIDADE",
+      kycAnalysisId: null,
+      credentialState: "INITIAL_CHANGE_REQUIRED",
+      initialCredentialExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      passwordCredential: await createPasswordCredential(initialPassword),
+      createdAt,
+    };
+    state.users[provisionedAccount.username] = provisionedAccount;
+    state.accountProvisioningRequests.unshift({
+      id: crypto.randomUUID(), idempotencyKey, fingerprint, username: provisionedAccount.username,
+      actor: user.username, createdAt,
+    });
+    state.registrationAudit.unshift({
+      id: crypto.randomUUID(), eventType: "ACCOUNT_PROVISIONED_PENDING_IDENTITY", actor: user.username,
+      subjectHash: await registrationSubjectHash(identity),
+      detail: "Conta provisionada com senha inicial de uso unico e validacao de identidade pendente.", createdAt,
+    });
+    state.registrationAudit = state.registrationAudit.slice(0, 500);
+    return json({
+      account: userSummary(provisionedAccount),
+      passwordChangeRequired: true,
+      identityVerificationRequired: true,
+      idempotentReplay: false,
+    }, { status: 201, headers: { "cache-control": "no-store" } });
+  }
+
+  const initialPasswordReissueMatch = path.match(/^\\/admin\\/accounts\\/([^/]+)\\/initial-password\\/reissue$/);
+  if (request.method === "POST" && initialPasswordReissueMatch) {
+    const account = state.users[decodeURIComponent(initialPasswordReissueMatch[1])];
+    const body = await request.json().catch(() => ({}));
+    const idempotencyKey = String(request.headers.get("idempotency-key") || "").trim();
+    const initialPassword = String(body.initialPassword || "");
+    if (idempotencyKey.length < 16 || idempotencyKey.length > 150) {
+      return badRequest("Informe uma chave de idempotencia valida.", "IDEMPOTENCY_KEY_REQUIRED");
+    }
+    if (!account || account.roles.includes("ROLE_ADMIN")) {
+      return json({ message: "Conta indisponivel para reemissao.", code: "ACCOUNT_NOT_FOUND" }, { status: 404 });
+    }
+    if (account.credentialState !== "INITIAL_CHANGE_REQUIRED") {
+      return badRequest("A conta ja concluiu o primeiro acesso.", "INITIAL_PASSWORD_REISSUE_INVALID_STATE");
+    }
+    if (initialPassword.length < 6 || initialPassword.length > 128) {
+      return badRequest("A senha inicial deve ter entre 6 e 128 caracteres.", "INITIAL_PASSWORD_INVALID");
+    }
+    const fingerprint = await sha256Text(account.username + "|INITIAL_PASSWORD_REISSUE");
+    const previousReissue = state.initialPasswordReissues.find((item) => item.idempotencyKey === idempotencyKey);
+    if (previousReissue) {
+      if (previousReissue.username !== account.username || previousReissue.fingerprint !== fingerprint) {
+        return json({ message: "Chave de idempotencia reutilizada para outra conta.", code: "IDEMPOTENCY_CONFLICT" }, { status: 409 });
+      }
+      return json({ account: userSummary(account), idempotentReplay: true });
+    }
+    account.passwordCredential = await createPasswordCredential(initialPassword);
+    account.initialCredentialExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    revokeUserSessions(account.username);
+    state.initialPasswordChallenges = state.initialPasswordChallenges.filter((challenge) => challenge.username !== account.username);
+    state.initialPasswordReissues.unshift({
+      id: crypto.randomUUID(), idempotencyKey, fingerprint, username: account.username,
+      actor: user.username, createdAt: now(),
+    });
+    state.registrationAudit.unshift({
+      id: crypto.randomUUID(), eventType: "INITIAL_PASSWORD_REISSUED", actor: user.username,
+      subjectHash: await sha256Text(account.username), detail: "Senha inicial reemitida; desafios e sessoes anteriores revogados.", createdAt: now(),
+    });
+    state.registrationAudit = state.registrationAudit.slice(0, 500);
+    return json({ account: userSummary(account), idempotentReplay: false }, { headers: { "cache-control": "no-store" } });
+  }
+
   if (request.method === "GET" && path === "/admin/persistence/status") {
     const ledger = validateSitesLedger();
     let kycEvidenceSchemaReady = false;
@@ -2681,6 +3042,11 @@ async function handleApi(request) {
     const reason = String(body.reason || "").trim();
     if (!account || account.statusKyc !== "PENDENTE_VALIDACAO_IDENTIDADE") {
       return badRequest("A conta nao esta aguardando validacao de identidade.", "KYC_INVALID_STATE");
+    }
+    const evidence = state.kycEvidence[account.username];
+    if (kycReviewMatch[2] === "approve"
+        && (!evidence?.documentFrontEvidenceId || !evidence?.documentBackEvidenceId || !evidence?.faceEvidenceId)) {
+      return badRequest("A conta ainda nao enviou documento e biometria para aprovacao.", "KYC_EVIDENCE_REQUIRED");
     }
     if (reason.length < 10 || reason.length > 500) {
       return badRequest("Registre um motivo entre 10 e 500 caracteres.", "KYC_REASON_INVALID");

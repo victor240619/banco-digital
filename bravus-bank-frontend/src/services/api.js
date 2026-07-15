@@ -28,7 +28,7 @@ const api = axios.create({
 });
 
 // Endpoints públicos — não devem receber Authorization (token velho gera 403)
-const PUBLIC_PATHS = ['/auth/login', '/auth/register', '/auth/password-reset'];
+const PUBLIC_PATHS = ['/auth/login', '/auth/register', '/auth/password-reset', '/auth/initial-password'];
 
 // ====== Interceptors ======
 api.interceptors.request.use(
@@ -94,6 +94,17 @@ export const authService = {
     }
     return data;
   },
+  completeInitialPassword: async (initialPasswordChangeToken, newPassword) => {
+    const { data } = await api.post('/auth/initial-password/complete', {
+      initialPasswordChangeToken,
+      newPassword,
+      clientChannel: getAppClientChannel(),
+    });
+    if (!data?.token) throw new Error('Troca concluida sem sessao valida. Entre novamente.');
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('user', JSON.stringify(data));
+    return data;
+  },
   checkRegistration: async (registrationData) => {
     const { data } = await api.post('/auth/register/availability', {
       ...registrationData,
@@ -125,13 +136,31 @@ export const authService = {
     localStorage.setItem('user', JSON.stringify(data));
     return data;
   },
-  logout: () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+  logout: async () => {
+    let serverRevoked = !localStorage.getItem('token');
+    try {
+      if (!serverRevoked) {
+        await api.post('/auth/logout');
+        serverRevoked = true;
+      }
+    } catch {
+      serverRevoked = false;
+    } finally {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+    }
+    return { serverRevoked };
   },
   getCurrentUser: () => {
     try { return JSON.parse(localStorage.getItem('user') || 'null'); }
     catch { return null; }
+  },
+  updateCurrentUser: (patch) => {
+    const current = authService.getCurrentUser();
+    if (!current) return null;
+    const updated = { ...current, ...patch };
+    localStorage.setItem('user', JSON.stringify(updated));
+    return updated;
   },
   isAuthenticated: () => !!localStorage.getItem('token'),
   hasRole: (role) => {
@@ -146,6 +175,14 @@ export const userService = {
   getMe: () => api.get('/user/me'),
   getBalance: () => api.get('/user/balance'),
   getTransactions: () => api.get('/user/transactions'),
+  verifyIdentityFace: (faceImage) => api.post('/user/kyc/face-check', {
+    faceImage,
+    biometricChallenge: 'FACE_CAMERA_CAPTURE_V1',
+  }),
+  submitIdentityEvidence: (evidence, idempotencyKey) => api.post('/user/kyc/enroll', {
+    ...evidence,
+    biometricChallenge: 'FACE_CAMERA_CAPTURE_V1',
+  }, { headers: { 'Idempotency-Key': idempotencyKey } }),
   getCreditSummary: () => api.get('/credit/summary'),
   getExternalTransfers: (limit = 20) => api.get(`/user/external-transfers?limit=${limit}`),
   getExternalTransferReceipt: (orderId) => api.get(`/user/external-transfers/${orderId}/receipt`),

@@ -18,6 +18,7 @@ import {
   formatCurrency, formatDate, getTransactionTypeLabel,
 } from '../utils/helpers';
 import { cn } from '../lib/cn';
+import { isMobileApp } from '../lib/appChannel';
 
 // ============ Helpers ============
 const txIcon = (type) => {
@@ -621,6 +622,9 @@ export default function UserDashboard() {
   const [resolveLoading, setResolveLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const internalTransferAttempt = useRef(null);
+  const accountRefreshInFlight = useRef(null);
+  const accountDataSignature = useRef('');
+  const lastAccountRefreshAt = useRef(0);
 
   const user = authService.getCurrentUser();
   const location = useLocation();
@@ -680,36 +684,62 @@ export default function UserDashboard() {
   }, [tab, form.transferMode, form.destinationAccount, form.channel, form.pixKey]);
 
   async function loadData(options = {}) {
+    if (accountRefreshInFlight.current) {
+      if (!options.force) return accountRefreshInFlight.current;
+      await accountRefreshInFlight.current;
+      return loadData({ ...options, force: false });
+    }
     const silent = Boolean(options.silent);
+    const refresh = (async () => {
+      try {
+        if (!silent) setLoading(true);
+        const [profileRes, meRes, txRes, creditRes, externalRes] = await Promise.all([
+          userService.getProfile(),
+          userService.getMe().catch(() => ({ data: null })),
+          userService.getTransactions(),
+          userService.getCreditSummary().catch(() => ({ data: null })),
+          userService.getExternalTransfers(8).catch(() => ({ data: [] })),
+        ]);
+        const snapshot = {
+          profile: profileRes.data,
+          me: meRes?.data || null,
+          transactions: Array.isArray(txRes.data) ? txRes.data : [],
+          creditSummary: creditRes?.data || null,
+          externalOrders: Array.isArray(externalRes?.data) ? externalRes.data : [],
+        };
+        const signature = JSON.stringify(snapshot);
+        if (accountDataSignature.current !== signature) {
+          accountDataSignature.current = signature;
+          setProfile(snapshot.profile);
+          setMe(snapshot.me);
+          setTransactions(snapshot.transactions);
+          setCreditSummary(snapshot.creditSummary);
+          setExternalOrders(snapshot.externalOrders);
+        }
+      } catch (err) {
+        if (!silent) setError('Erro ao carregar dados da conta.');
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    })();
+    accountRefreshInFlight.current = refresh;
     try {
-      if (!silent) setLoading(true);
-      const [profileRes, meRes, txRes, creditRes, externalRes] = await Promise.all([
-        userService.getProfile(),
-        userService.getMe().catch(() => ({ data: null })),
-        userService.getTransactions(),
-        userService.getCreditSummary().catch(() => ({ data: null })),
-        userService.getExternalTransfers(8).catch(() => ({ data: [] })),
-      ]);
-      setProfile(profileRes.data);
-      setMe(meRes?.data || null);
-      setTransactions(Array.isArray(txRes.data) ? txRes.data : []);
-      setCreditSummary(creditRes?.data || null);
-      setExternalOrders(Array.isArray(externalRes?.data) ? externalRes.data : []);
-    } catch (err) {
-      if (!silent) setError('Erro ao carregar dados da conta.');
+      return await refresh;
     } finally {
-      if (!silent) setLoading(false);
+      if (accountRefreshInFlight.current === refresh) accountRefreshInFlight.current = null;
     }
   }
 
   useEffect(() => {
     const refreshLiveAccount = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      if (Date.now() - lastAccountRefreshAt.current < 1500) return;
+      lastAccountRefreshAt.current = Date.now();
       loadData({ silent: true });
     };
     window.addEventListener('focus', refreshLiveAccount);
     document.addEventListener('visibilitychange', refreshLiveAccount);
-    const timer = window.setInterval(refreshLiveAccount, 15000);
+    const timer = window.setInterval(refreshLiveAccount, isMobileApp() ? 45000 : 15000);
     return () => {
       window.removeEventListener('focus', refreshLiveAccount);
       document.removeEventListener('visibilitychange', refreshLiveAccount);
@@ -829,7 +859,7 @@ export default function UserDashboard() {
       setSuccess(message);
       setForm(EMPTY_FORM);
       setResolvedRecipient(null);
-      await loadData();
+      await loadData({ force: true });
       navigateToTab('overview');
     } catch (err) {
       setError(operationErrorMessage(err));
@@ -905,7 +935,7 @@ export default function UserDashboard() {
   // ====== UI ======
   if (loading) {
     return (
-      <main className="container-app py-10 space-y-6">
+      <main className="container-app native-safe-bottom space-y-4 py-4 sm:space-y-6 sm:py-8 lg:py-10">
         <div className="skeleton h-32" />
         <div className="grid md:grid-cols-3 gap-5">
           {[...Array(3)].map((_, i) => <div key={i} className="skeleton h-24" />)}
@@ -1001,7 +1031,20 @@ export default function UserDashboard() {
   );
 
   return (
-    <main className="container-app py-10 space-y-6">
+    <main className="container-app native-safe-bottom min-w-0 space-y-4 py-4 sm:space-y-6 sm:py-8 lg:py-10">
+      {profile?.identityEvidenceRequired && (
+        <section className="flex flex-col gap-4 rounded-lg border border-gold-400/30 bg-gold-400/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 font-medium text-gold-100">
+              <ShieldCheck className="h-4 w-4" /> Identidade pendente
+            </div>
+            <p className="mt-1 text-sm text-ink-200">Envie documento e captura facial para liberar operacoes de saida.</p>
+          </div>
+          <button type="button" className="btn-primary shrink-0" onClick={() => navigate('/completar-identidade')}>
+            Completar identidade
+          </button>
+        </section>
+      )}
       {isDashboardHome ? (
         <>
           {/* ==== Bank Identity Card ==== */}
@@ -1013,7 +1056,7 @@ export default function UserDashboard() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="lg:col-span-2 card-premium p-8 relative overflow-hidden"
+          className="card-premium relative overflow-hidden p-4 sm:p-8 lg:col-span-2"
         >
           <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full bg-gradient-gold opacity-15 blur-3xl" />
           <div className="text-xs uppercase tracking-widest text-ink-300">
@@ -1025,7 +1068,7 @@ export default function UserDashboard() {
               {showBalance ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
             </button>
           </div>
-          <div className="mt-1 font-display tabular-nums text-5xl font-bold">
+          <div className="mt-1 break-words font-display text-4xl font-bold tabular-nums sm:text-5xl">
             {showBalance ? (
               <>R$ <span className="gradient-text">{formatCurrency(balance).replace('R$', '').trim()}</span></>
             ) : (
@@ -1162,20 +1205,20 @@ export default function UserDashboard() {
       )}
 
       {/* Content */}
-      <div className="mt-6">
+      <div className="mt-6 min-w-0">
         {tab === 'overview' && (
           isDashboardHome ? (
-            <div className="grid lg:grid-cols-3 gap-6">
+            <div className="grid min-w-0 gap-6 lg:grid-cols-3">
             {/* Chart */}
-            <div className="lg:col-span-2 card-premium p-6">
+            <div className="card-premium min-w-0 p-4 sm:p-6 lg:col-span-2">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="title-md">Movimentação · 7 dias</h3>
                   <p className="text-xs text-ink-400 mt-0.5">Saldo acumulado por dia</p>
                 </div>
               </div>
-              <div className="h-64">
-                <ResponsiveContainer>
+              <div className="h-64 min-w-0 overflow-hidden">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <AreaChart data={chartData}>
                     <defs>
                       <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
@@ -1198,7 +1241,7 @@ export default function UserDashboard() {
             </div>
 
             {/* Transactions list */}
-            <div className="card-premium p-6">
+            <div className="card-premium min-w-0 p-4 sm:p-6">
               <h3 className="title-md mb-4">Últimas transações</h3>
               {transactions.length === 0 ? (
                 <p className="text-sm text-ink-300">Nenhuma transação ainda.</p>

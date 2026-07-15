@@ -376,6 +376,132 @@ assert.equal(persistedBalance.data, 1000, "balance must survive worker restart")
 
 const adminLogin = await call(worker, "POST", "/auth/login", { body: { username: "admin@bravusbank.com", password: "6run0955" } });
 assert.equal(adminLogin.response.status, 200);
+const provisionedIdentity = {
+  username: "provisioned.customer",
+  email: "provisioned.customer@bravus.test",
+  cpf: "71170216161",
+  fullName: "Cliente Provisionado Teste",
+  initialPassword: "Temporary123",
+};
+const unauthorizedProvision = await call(worker, "POST", "/admin/accounts/provision", {
+  token: joaoToken,
+  headers: { "idempotency-key": "account-provision-test-0001" },
+  body: provisionedIdentity,
+});
+assert.equal(unauthorizedProvision.response.status, 403, "only an administrator may provision accounts");
+const provisioned = await call(worker, "POST", "/admin/accounts/provision", {
+  token: adminLogin.data.token,
+  headers: { "idempotency-key": "account-provision-test-0001" },
+  body: provisionedIdentity,
+});
+assert.equal(provisioned.response.status, 201, JSON.stringify(provisioned.data));
+assert.equal(provisioned.data.account.balance, 0);
+assert.equal(provisioned.data.account.statusKyc, "PENDENTE_VALIDACAO_IDENTIDADE");
+assert.equal(provisioned.data.account.credentialState, "INITIAL_CHANGE_REQUIRED");
+const provisionReplay = await call(worker, "POST", "/admin/accounts/provision", {
+  token: adminLogin.data.token,
+  headers: { "idempotency-key": "account-provision-test-0001" },
+  body: { ...provisionedIdentity, initialPassword: "DifferentTemporary123" },
+});
+assert.equal(provisionReplay.response.status, 200);
+assert.equal(provisionReplay.data.idempotentReplay, true);
+assert.equal(JSON.parse(database.stateRow.payload).users[provisionedIdentity.username].credentialState, "INITIAL_CHANGE_REQUIRED");
+const provisionConflict = await call(worker, "POST", "/admin/accounts/provision", {
+  token: adminLogin.data.token,
+  headers: { "idempotency-key": "account-provision-test-0001" },
+  body: { ...provisionedIdentity, fullName: "Outro Titular" },
+});
+assert.equal(provisionConflict.response.status, 409, "idempotency key reuse with different identity data must fail");
+const reissuedInitialPassword = await call(worker, "POST", "/admin/accounts/" + provisionedIdentity.username + "/initial-password/reissue", {
+  token: adminLogin.data.token,
+  headers: { "idempotency-key": "initial-password-reissue-0001" },
+  body: { initialPassword: "Reissued123" },
+});
+assert.equal(reissuedInitialPassword.response.status, 200, JSON.stringify(reissuedInitialPassword.data));
+const oldInitialLogin = await call(worker, "POST", "/auth/login", {
+  body: { username: provisionedIdentity.cpf, password: provisionedIdentity.initialPassword },
+});
+assert.equal(oldInitialLogin.response.status, 400, "reissuing the initial password must invalidate the previous one");
+const initialLogin = await call(worker, "POST", "/auth/login", {
+  body: { username: provisionedIdentity.cpf, password: "Reissued123" },
+});
+assert.equal(initialLogin.response.status, 403);
+assert.equal(initialLogin.data.code, "INITIAL_PASSWORD_CHANGE_REQUIRED");
+assert.equal(Boolean(initialLogin.data.token), false, "an initial password must never create a banking session");
+const weakInitialChange = await call(worker, "POST", "/auth/initial-password/complete", {
+  body: { initialPasswordChangeToken: initialLogin.data.initialPasswordChangeToken, newPassword: "weak" },
+});
+assert.equal(weakInitialChange.response.status, 400, "the permanent password policy must remain enforced");
+const reusedInitialPassword = await call(worker, "POST", "/auth/initial-password/complete", {
+  body: { initialPasswordChangeToken: initialLogin.data.initialPasswordChangeToken, newPassword: "Reissued123" },
+});
+assert.equal(reusedInitialPassword.response.status, 400, "the permanent password must differ from the administrator-known initial password");
+assert.equal(reusedInitialPassword.data.code, "INITIAL_PASSWORD_REUSE");
+const completedInitialChange = await call(worker, "POST", "/auth/initial-password/complete", {
+  body: { initialPasswordChangeToken: initialLogin.data.initialPasswordChangeToken, newPassword: "Permanent123" },
+});
+assert.equal(completedInitialChange.response.status, 200, JSON.stringify(completedInitialChange.data));
+assert.equal(Boolean(completedInitialChange.data.token), true);
+assert.equal(completedInitialChange.data.identityEvidenceRequired, true);
+assert.equal(database.stateRow.payload.includes("Temporary123"), false, "initial passwords must never be persisted in plaintext or unsalted fingerprints");
+assert.equal(database.stateRow.payload.includes("Reissued123"), false, "reissued passwords must never be persisted in plaintext or unsalted fingerprints");
+const reusedInitialChange = await call(worker, "POST", "/auth/initial-password/complete", {
+  body: { initialPasswordChangeToken: initialLogin.data.initialPasswordChangeToken, newPassword: "AnotherPassword123" },
+});
+assert.equal(reusedInitialChange.response.status, 400, "the initial password challenge must be single-use");
+const provisionedOutgoing = await call(worker, "POST", "/user/withdraw", {
+  token: completedInitialChange.data.token,
+  body: { amount: 1 },
+});
+assert.equal(provisionedOutgoing.response.status, 403, "pending identity accounts must not perform outgoing operations");
+const approveWithoutEvidence = await call(worker, "POST", "/admin/kyc/" + provisionedIdentity.username + "/approve", {
+  token: adminLogin.data.token,
+  body: { reason: "Tentativa de aprovacao sem documento e biometria enviados." },
+});
+assert.equal(approveWithoutEvidence.response.status, 400);
+assert.equal(approveWithoutEvidence.data.code, "KYC_EVIDENCE_REQUIRED");
+const provisionedFaceImage = image(71, 3600);
+const provisionedFaceCheck = await call(worker, "POST", "/user/kyc/face-check", {
+  token: completedInitialChange.data.token,
+  body: { faceImage: provisionedFaceImage, biometricChallenge: "FACE_CAMERA_CAPTURE_V1" },
+});
+assert.equal(provisionedFaceCheck.response.status, 200, JSON.stringify(provisionedFaceCheck.data));
+const enrollmentBody = {
+  documentFrontImage: image(72, 4300),
+  documentBackImage: image(73, 4300),
+  faceImage: provisionedFaceImage,
+  biometricChallenge: "FACE_CAMERA_CAPTURE_V1",
+  faceVerificationToken: provisionedFaceCheck.data.faceVerificationToken,
+};
+const provisionedEnrollment = await call(worker, "POST", "/user/kyc/enroll", {
+  token: completedInitialChange.data.token,
+  headers: { "idempotency-key": "provisioned-kyc-enrollment-0001" },
+  body: enrollmentBody,
+});
+assert.equal(provisionedEnrollment.response.status, 201, JSON.stringify(provisionedEnrollment.data));
+assert.equal(provisionedEnrollment.data.identityEvidenceRequired, false);
+const provisionedEnrollmentReplay = await call(worker, "POST", "/user/kyc/enroll", {
+  token: completedInitialChange.data.token,
+  headers: { "idempotency-key": "provisioned-kyc-enrollment-0001" },
+  body: enrollmentBody,
+});
+assert.equal(provisionedEnrollmentReplay.response.status, 200);
+assert.equal(provisionedEnrollmentReplay.data.idempotentReplay, true);
+const approveProvisionedIdentity = await call(worker, "POST", "/admin/kyc/" + provisionedIdentity.username + "/approve", {
+  token: adminLogin.data.token,
+  body: { reason: "Documento e captura facial da conta provisionada conferidos." },
+});
+assert.equal(approveProvisionedIdentity.response.status, 200, JSON.stringify(approveProvisionedIdentity.data));
+assert.equal(approveProvisionedIdentity.data.statusKyc, "APROVADO_IDENTIDADE");
+worker = await loadWorker("restart-after-provision");
+const provisionedLoginAfterRestart = await call(worker, "POST", "/auth/login", {
+  body: { username: provisionedIdentity.email, password: "Permanent123" },
+});
+assert.equal(provisionedLoginAfterRestart.response.status, 200, "provisioned account and changed password must survive restart");
+const signedOut = await call(worker, "POST", "/auth/logout", { token: provisionedLoginAfterRestart.data.token });
+assert.equal(signedOut.response.status, 200);
+const revokedByLogout = await call(worker, "GET", "/user/profile", { token: provisionedLoginAfterRestart.data.token });
+assert.equal(revokedByLogout.response.status, 401, "logout must revoke the server-side session");
 const pendingKyc = await call(worker, "GET", "/admin/kyc/pending", { token: adminLogin.data.token });
 assert.equal(pendingKyc.data.some((item) => item.username === registrationIdentity.username), true);
 const kycEvidence = await call(worker, "GET", "/admin/kyc/" + registrationIdentity.username + "/evidence", { token: adminLogin.data.token });
@@ -395,7 +521,7 @@ const kycApproval = await call(worker, "POST", "/admin/kyc/" + registrationIdent
 });
 assert.equal(kycApproval.response.status, 200, JSON.stringify(kycApproval.data));
 assert.equal(kycApproval.data.statusKyc, "APROVADO_IDENTIDADE");
-assert.equal(database.kycAudits.size, 1, "KYC decision must be mirrored to immutable audit storage");
+assert.equal(database.kycAudits.size, 2, "KYC decisions must be mirrored to immutable audit storage");
 const approvedEvidence = await call(worker, "GET", "/admin/kyc/" + registrationIdentity.username + "/evidence", { token: adminLogin.data.token });
 assert.equal(approvedEvidence.response.status, 200, "KYC evidence must remain reviewable after a decision");
 const approvedOutgoing = await call(worker, "POST", "/user/transfer", {
@@ -438,7 +564,7 @@ const kycRejection = await call(worker, "POST", "/admin/kyc/" + rejectedIdentity
 });
 assert.equal(kycRejection.response.status, 200, JSON.stringify(kycRejection.data));
 assert.equal(kycRejection.data.statusKyc, "REJEITADO_IDENTIDADE");
-assert.equal(database.kycAudits.size, 2);
+assert.equal(database.kycAudits.size, 3);
 const rejectedLogin = await call(worker, "POST", "/auth/login", {
   body: { username: rejectedIdentity.username, password: "NovaSenha123" },
 });
@@ -458,7 +584,7 @@ const face = await call(worker, "POST", "/auth/password-reset/face", {
   body: { requestId: reset.data.requestId, clientSecret, challenge: reset.data.challenge, faceImage: image(44, 3300) },
 });
 assert.equal(face.data.status, "REVIEW_PENDING", JSON.stringify(face.data));
-assert.equal(database.biometricEvidence.size, 7, "submitted face must be encrypted in immutable evidence storage");
+assert.equal(database.biometricEvidence.size, 10, "submitted identity evidence must be encrypted outside state storage");
 
 const pending = await call(worker, "GET", "/admin/password-reset/requests", { token: adminLogin.data.token });
 assert.equal(pending.data.some((item) => item.requestId === reset.data.requestId), true);
@@ -492,7 +618,7 @@ assert.equal(persistence.data.backend, "D1");
 assert.equal(persistence.data.durable, true);
 assert.equal(persistence.data.ledgerValid, true);
 assert.equal(persistence.data.kycEvidenceSchemaReady, true);
-assert.equal(persistence.data.immutableKycAuditCount, 2);
+assert.equal(persistence.data.immutableKycAuditCount, 3);
 assert.ok(database.audits.size >= 10, "persistent state changes must be audited");
 
 console.log(JSON.stringify({
@@ -504,6 +630,10 @@ console.log(JSON.stringify({
   restartVerified: true,
   idempotencyVerified: true,
   passwordResetVerified: true,
+  provisionedAccountVerified: true,
+  initialPasswordReissueVerified: true,
+  provisionedKycEnrollmentVerified: true,
+  serverLogoutVerified: true,
   registrationPreflightVerified: true,
   registrationFaceTokenVerified: true,
   pendingKycOutgoingBlocked: true,

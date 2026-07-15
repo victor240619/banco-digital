@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { MotionConfig } from 'framer-motion';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
@@ -11,6 +12,7 @@ const Home = lazy(() => import('./pages/Home'));
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
 const PasswordReset = lazy(() => import('./pages/PasswordReset'));
+const IdentityVerification = lazy(() => import('./pages/IdentityVerification'));
 const UserDashboard = lazy(() => import('./pages/UserDashboard'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 
@@ -39,7 +41,8 @@ function ProtectedRoute({ children, requireAdmin = false, userOnly = false }) {
 function PublicRoute({ children }) {
   const isAuthenticated = authService.isAuthenticated();
   const isAdmin = authService.hasRole('ROLE_ADMIN');
-  if (isAuthenticated) return <Navigate to={isAdmin ? '/admin' : '/dashboard'} replace />;
+  const user = authService.getCurrentUser();
+  if (isAuthenticated) return <Navigate to={isAdmin ? '/admin' : (user?.identityEvidenceRequired ? '/completar-identidade' : '/dashboard')} replace />;
   return children;
 }
 
@@ -47,16 +50,18 @@ function PublicRoute({ children }) {
 function NotFoundRedirect() {
   const isAuthenticated = authService.isAuthenticated();
   const isAdmin = authService.hasRole('ROLE_ADMIN');
+  const user = authService.getCurrentUser();
   if (!isAuthenticated) return <Navigate to={isMobileApp() ? '/login' : '/'} replace />;
-  return <Navigate to={isAdmin ? '/admin' : '/dashboard'} replace />;
+  return <Navigate to={isAdmin ? '/admin' : (user?.identityEvidenceRequired ? '/completar-identidade' : '/dashboard')} replace />;
 }
 
 function RootRoute() {
   if (!isMobileApp()) return <Home />;
   const isAuthenticated = authService.isAuthenticated();
   const isAdmin = authService.hasRole('ROLE_ADMIN');
+  const user = authService.getCurrentUser();
   const destination = isAuthenticated
-    ? (isAdmin ? '/admin' : '/dashboard')
+    ? (isAdmin ? '/admin' : (user?.identityEvidenceRequired ? '/completar-identidade' : '/dashboard'))
     : (hasRegistrationDraft() ? '/register' : '/login');
   return <Navigate to={destination} replace />;
 }
@@ -69,16 +74,21 @@ export default function App() {
   useEffect(() => {
     window.setGlobalLoading = setIsLoading;
     window.setGlobalError = setError;
+    document.documentElement.classList.toggle('native-app', nativeApp);
+    document.body.classList.toggle('native-app', nativeApp);
     return () => {
       delete window.setGlobalLoading;
       delete window.setGlobalError;
+      document.documentElement.classList.remove('native-app');
+      document.body.classList.remove('native-app');
     };
-  }, []);
+  }, [nativeApp]);
 
   return (
-    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <div className="min-h-screen flex flex-col">
-        {!nativeApp && <Navbar />}
+    <MotionConfig reducedMotion={nativeApp ? 'always' : 'user'}>
+      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <div className="flex min-h-screen min-w-0 flex-col">
+        <Navbar nativeApp={nativeApp} />
 
         {error && (
           <div
@@ -105,6 +115,7 @@ export default function App() {
               <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
               <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
               <Route path="/redefinir-senha" element={<PublicRoute><PasswordReset /></PublicRoute>} />
+              <Route path="/completar-identidade" element={<ProtectedRoute userOnly><IdentityVerification /></ProtectedRoute>} />
               <Route path="/dashboard/*" element={<ProtectedRoute userOnly><UserDashboard /></ProtectedRoute>} />
               <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>} />
               <Route path="*" element={<NotFoundRedirect />} />
@@ -114,6 +125,7 @@ export default function App() {
 
         {!nativeApp && <Footer />}
       </div>
-    </Router>
+      </Router>
+    </MotionConfig>
   );
 }
