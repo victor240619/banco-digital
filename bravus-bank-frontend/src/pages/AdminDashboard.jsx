@@ -1135,7 +1135,7 @@ function DocumentAnalysisView({ analyses, users = [], onSuccess, onError }) {
       </section>
 
       <div className="grid lg:grid-cols-3 gap-6">
-      <form onSubmit={submit} className="card-premium p-6 lg:col-span-2 space-y-4">
+      <form onSubmit={submit} className="card-premium min-w-0 p-6 lg:col-span-2 space-y-4">
         <div className="flex items-center gap-2">
           <Shield className="h-5 w-5 text-amber-300" />
           <h3 className="font-display text-lg font-semibold">Analise automatica CPF/CNPJ</h3>
@@ -1363,7 +1363,7 @@ function CreditView({ users, bs, onSuccess, onError }) {
         </button>
       </form>
 
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4">
         <div className="card-premium p-5">
           <h4 className="text-xs uppercase tracking-widest text-ink-400 mb-3">Créditos do usuário</h4>
           <div className="space-y-2">
