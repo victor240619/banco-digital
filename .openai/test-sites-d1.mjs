@@ -379,7 +379,7 @@ assert.equal(adminLogin.response.status, 200);
 const provisionedIdentity = {
   username: "provisioned.customer",
   email: "provisioned.customer@bravus.test",
-  cpf: "71170216161",
+  cpf: "31415926590",
   fullName: "Cliente Provisionado Teste",
   initialPassword: "Temporary123",
 };

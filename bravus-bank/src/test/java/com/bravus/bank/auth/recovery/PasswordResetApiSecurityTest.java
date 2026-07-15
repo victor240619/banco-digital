@@ -53,7 +53,7 @@ class PasswordResetApiSecurityTest {
     void publicStartRejectsMalformedProof() throws Exception {
         mockMvc.perform(post("/api/auth/password-reset/start")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"identifier\":\"71170216161\",\"idempotencyKey\":\"short\",\"clientSecret\":\"short\"}"))
+                        .content("{\"identifier\":\"31415926590\",\"idempotencyKey\":\"short\",\"clientSecret\":\"short\"}"))
                 .andExpect(status().isBadRequest());
     }
 }

@@ -74,7 +74,7 @@ class PasswordResetServiceIntegrationTest {
 
     @Test
     void completeChangesOnlyCredentialsAndConsumesRequestOnce() {
-        UserEntity user = createUser("recover.user", "recover@example.com", "71170216161", "7117021616", 456_789L);
+        UserEntity user = createUser("recover.user", "recover@example.com", "31415926590", "FixturePwd123", 456_789L);
         String oldHash = user.getPassword();
         String clientSecret = "another-client-secret-with-thirty-two-characters";
 
