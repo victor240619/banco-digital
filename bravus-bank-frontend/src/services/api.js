@@ -214,6 +214,9 @@ export const passwordResetService = {
 export const adminService = {
   getDashboard: () => api.get('/admin/dashboard'),
   getAllUsers: () => api.get('/admin/users'),
+  provisionAccount: (payload, idempotencyKey) => api.post('/admin/accounts/provision', payload, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  }),
   getUserById: (id) => api.get(`/admin/users/${id}`),
   activateUser: (id) => api.put(`/admin/users/${id}/activate`),
   deactivateUser: (id) => api.put(`/admin/users/${id}/deactivate`),

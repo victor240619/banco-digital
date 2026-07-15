@@ -8,6 +8,19 @@ export const formatCurrency = (amount) => {
   }).format(value / 100);
 };
 
+export const formatCurrencyExact = (amountInCents) => {
+  const raw = String(amountInCents ?? '').trim();
+  if (!/^-?\d+$/.test(raw)) return formatCurrency(amountInCents);
+
+  const cents = BigInt(raw);
+  const negative = cents < 0n;
+  const absolute = negative ? -cents : cents;
+  const whole = absolute / 100n;
+  const fraction = String(absolute % 100n).padStart(2, '0');
+  const grouped = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${negative ? '-' : ''}R$ ${grouped},${fraction}`;
+};
+
 export const formatDate = (dateString) => {
   if (!dateString) return '';
 

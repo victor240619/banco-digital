@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   Users, Activity, Banknote, TrendingUp, Power, Trash2, CheckCircle2, AlertCircle,
   Search, Shield, BarChart3, ListChecks, Coins, Link2, Hash, Vault, PiggyBank,
-  Send, RefreshCw, ChevronDown, ChevronUp, Landmark, Globe2, KeyRound, ScanFace, Eye, XCircle,
+  Send, RefreshCw, ChevronDown, ChevronUp, Landmark, Globe2, KeyRound, ScanFace, Eye, XCircle, UserPlus,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -13,12 +13,16 @@ import {
   adminService, analysisService, caymanRailService,
   externalTransferService, globalRailService, kycAdminService, ledgerAdminService, passwordResetAdminService, unifiedSearchService,
 } from '../services/api';
-import { formatCurrency, formatDate, getTransactionTypeLabel } from '../utils/helpers';
+import { formatCurrency, formatCurrencyExact, formatDate, getTransactionTypeLabel } from '../utils/helpers';
 import { cn } from '../lib/cn';
 
 // ============ Helpers ============
 const brl = (cents) => formatCurrency(cents ?? 0);
+const brlExact = (cents) => formatCurrencyExact(cents ?? '0');
 const pct = (n) => `${(n ?? 0).toFixed(1)}%`;
+const chainIsValid = (chain) => chain?.valid ?? chain?.valida ?? false;
+const chainCount = (chain) => chain?.checkedTransfers ?? chain?.quantidade ?? 0;
+const chainMessage = (chain) => chain?.message ?? chain?.mensagem ?? '';
 const apiError = (err, fallback) => {
   if (err?.code === 'ERR_NETWORK' || err?.message === 'Network Error') {
     return 'API local nao esta respondendo em http://localhost:9000. Inicie o backend e tente novamente.';
@@ -220,6 +224,11 @@ export default function AdminDashboard() {
           search={search} setSearch={setSearch}
           onToggle={toggleActive}
           onDelete={removeUser}
+          onCreated={(account) => {
+            setSuccess(`Conta de ${account.fullName || account.username} criada com validacao de identidade pendente.`);
+            loadAll();
+          }}
+          onError={setError}
         />
       )}
 
@@ -292,9 +301,121 @@ export default function AdminDashboard() {
 // ===========================================================
 // 1) Balanço do banco
 // ===========================================================
+function ExactBankView({ bs, chain, stats }) {
+  const reserve = bs.institutionalReserve;
+  const accounting = bs.accounting;
+  const ledgerValid = chainIsValid(chain);
+  const balanceValid = accounting?.balanced === true;
+
+  return (
+    <div className="space-y-6">
+      <section className="card-premium p-6" aria-labelledby="institutional-reserve-title">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-amber-300">
+              <Vault className="h-5 w-5" />
+              <span className="text-xs uppercase tracking-widest">Reserva institucional</span>
+            </div>
+            <h2 id="institutional-reserve-title" className="mt-3 font-display text-2xl font-bold text-white break-words">
+              {brlExact(reserve.amountCentavos)}
+            </h2>
+            <p className="mt-2 text-sm text-ink-300">Reserva declarada pelo Bravus, separada dos saldos dos clientes e sem classificação de lastro externo verificado.</p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-amber-200">{reserve.status}</span>
+            <span className="rounded-lg border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-emerald-200">Não transferível</span>
+            <span className="rounded-lg border border-sky-400/25 bg-sky-400/10 px-3 py-2 text-sky-200">Precisão inteira</span>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid md:grid-cols-3 gap-4">
+        <KpiCard icon={Users} label="Clientes" value={stats?.totalUsers ?? 0}
+                 accent="bg-sky-400/15 text-sky-300" hint="Contas persistidas no D1" />
+        <KpiCard icon={Banknote} label="Saldos de clientes" value={brlExact(accounting.totalLiabilitiesCentavos)}
+                 accent="bg-amber-400/15 text-amber-300" hint="Passivo separado da reserva" />
+        <KpiCard icon={Link2} label="Saldo do ledger" value={brlExact(accounting.ledgerNetCentavos)}
+                 accent={ledgerValid ? 'bg-emerald-400/15 text-emerald-300' : 'bg-red-400/15 text-red-300'}
+                 hint={`${chainCount(chain)} transferências conferidas`} />
+      </div>
+
+      <div className={cn(
+        'card-premium p-5 flex flex-wrap items-center justify-between gap-3',
+        ledgerValid ? 'ring-1 ring-emerald-500/30' : 'ring-1 ring-red-500/30'
+      )}>
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            'h-10 w-10 rounded-lg inline-flex items-center justify-center',
+            ledgerValid ? 'bg-emerald-400/15 text-emerald-300' : 'bg-red-400/15 text-red-300'
+          )}>
+            <Hash className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="text-sm text-ink-300">Integridade do ledger</div>
+            <div className="font-semibold">{ledgerValid ? 'Cadeia válida' : 'Cadeia comprometida'}</div>
+          </div>
+        </div>
+        <div className="max-w-xl text-xs text-ink-400">{chainMessage(chain)}</div>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        <ExactSheetCard
+          title="ATIVO"
+          total={accounting.totalAssetsCentavos}
+          color="text-emerald-300"
+          lines={[{ code: reserve.code, name: reserve.name, amountCentavos: reserve.amountCentavos }]}
+        />
+        <ExactSheetCard
+          title="PASSIVO + PATRIMÔNIO"
+          total={accounting.totalAssetsCentavos}
+          color="text-amber-300"
+          lines={[
+            { code: 'CLIENT_LIABILITIES', name: 'Saldos dos clientes', amountCentavos: accounting.totalLiabilitiesCentavos },
+            { code: 'BRAVUS_EQUITY', name: 'Patrimônio líquido Bravus', amountCentavos: accounting.totalEquityCentavos },
+          ]}
+        />
+      </div>
+
+      <div className={cn(
+        'card-premium p-4 text-sm text-center',
+        balanceValid ? 'text-emerald-300' : 'text-red-300'
+      )}>
+        {balanceValid
+          ? `Balanço equilibrado: ${brlExact(accounting.totalAssetsCentavos)}`
+          : 'Balanço institucional desbalanceado e requer revisão administrativa.'}
+      </div>
+    </div>
+  );
+}
+
+function ExactSheetCard({ title, total, lines, color }) {
+  return (
+    <section className="card-premium p-6">
+      <div className="mb-4">
+        <h3 className={cn('font-display text-lg font-semibold', color)}>{title}</h3>
+        <div className="mt-2 font-mono text-xl font-bold tabular-nums break-words">{brlExact(total)}</div>
+      </div>
+      <div className="space-y-2">
+        {lines.map((line) => (
+          <div key={line.code} className="flex flex-wrap items-start justify-between gap-2 border-b border-white/5 py-2 text-sm">
+            <div className="min-w-0">
+              <div className="font-mono text-xs text-ink-400">{line.code}</div>
+              <div className="text-white">{line.name}</div>
+            </div>
+            <div className="max-w-full break-words text-right font-mono tabular-nums text-ink-200">{brlExact(line.amountCentavos)}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function BankView({ bs, chain, stats }) {
   if (!bs) {
     return <div className="card-premium p-8 text-center text-ink-300">Carregando balanço…</div>;
+  }
+  if (bs.institutionalReserve && bs.accounting) {
+    return <ExactBankView bs={bs} chain={chain} stats={stats} />;
   }
   const reserva = bs.reservaMestre || {};
   const internas = bs.reservasInternas || [];
@@ -439,67 +560,184 @@ function SheetCard({ title, total, lines = [], color }) {
 // ===========================================================
 // 2) Usuários
 // ===========================================================
-function UsersView({ users, search, setSearch, onToggle, onDelete }) {
+const EMPTY_ACCOUNT_FORM = {
+  fullName: '', username: '', email: '', cpf: '', phone: '', initialPassword: '', confirmInitialPassword: '',
+};
+
+function AccountProvisionForm({ onCreated, onError }) {
+  const [form, setForm] = useState(EMPTY_ACCOUNT_FORM);
+  const [submitting, setSubmitting] = useState(false);
+  const attempt = useRef(null);
+  const submittingRef = useRef(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    if (submittingRef.current) return;
+    const payload = {
+      fullName: form.fullName.trim(),
+      username: form.username.trim().toLowerCase(),
+      email: form.email.trim().toLowerCase(),
+      cpf: form.cpf.replace(/\D/g, ''),
+      phone: form.phone.replace(/\D/g, ''),
+      initialPassword: form.initialPassword,
+    };
+    if (payload.fullName.length < 5) return onError('Informe o nome completo do titular.');
+    if (!/^[a-z0-9._-]{3,50}$/.test(payload.username)) return onError('Informe um usuario valido com pelo menos 3 caracteres.');
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(payload.email)) return onError('Informe um e-mail valido.');
+    if (payload.cpf.length !== 11) return onError('Informe um CPF com 11 digitos.');
+    if (payload.initialPassword.length < 6) return onError('A senha inicial deve ter pelo menos 6 caracteres.');
+    if (payload.initialPassword !== form.confirmInitialPassword) return onError('A confirmacao da senha inicial nao confere.');
+    if (!globalThis.crypto?.randomUUID) return onError('Este dispositivo nao oferece geracao segura de identificadores. Atualize o aplicativo.');
+
+    const fingerprint = [payload.cpf, payload.username, payload.email, payload.fullName.toLowerCase()].join('|');
+    if (attempt.current?.fingerprint !== fingerprint) {
+      attempt.current = { fingerprint, key: `admin-account-${globalThis.crypto.randomUUID()}` };
+    }
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      const { data } = await adminService.provisionAccount(payload, attempt.current.key);
+      setForm(EMPTY_ACCOUNT_FORM);
+      attempt.current = null;
+      onCreated(data.account);
+    } catch (error) {
+      onError(apiError(error, 'Falha ao criar a conta manualmente.'));
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  }
+
   return (
-    <div className="card-premium p-5">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1">
-          <Search className="h-4 w-4 text-ink-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nome, email, CPF ou conta…"
-            className="input-premium w-full !pl-9"
-          />
+    <form onSubmit={submit} className="card-premium p-5 sm:p-6 space-y-5" aria-labelledby="manual-account-title">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-amber-400/15 text-amber-300">
+            <UserPlus className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 id="manual-account-title" className="font-display text-lg font-semibold">Criar conta manualmente</h2>
+            <div className="mt-1 flex flex-wrap gap-2 text-xs text-ink-400">
+              <span>Saldo inicial R$ 0,00</span>
+              <span>·</span>
+              <span>KYC pendente</span>
+              <span>·</span>
+              <span>Senha de uso único</span>
+            </div>
+          </div>
         </div>
-        <span className="text-xs text-ink-400">{users.length} usuário(s)</span>
       </div>
-      <div className="overflow-x-auto -mx-5 px-5">
-        <table className="w-full text-sm min-w-[640px]">
-          <thead className="text-left text-xs uppercase tracking-wider text-ink-400 border-b border-white/10">
-            <tr>
-              <th className="py-2 pr-3">Usuário</th>
-              <th className="py-2 pr-3">Conta</th>
-              <th className="py-2 pr-3">Saldo</th>
-              <th className="py-2 pr-3">Status</th>
-              <th className="py-2 pr-3 text-right">Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                <td className="py-2 pr-3">
-                  <div className="font-medium text-white">{u.fullName || u.username}</div>
-                  <div className="text-xs text-ink-400">@{u.username} · {u.email}</div>
-                </td>
-                <td className="py-2 pr-3 font-mono text-ink-200">{u.accountNumber}</td>
-                <td className="py-2 pr-3 font-mono tabular-nums">{brl(u.balance)}</td>
-                <td className="py-2 pr-3">
-                  <span className={cn(
-                    'px-2 py-0.5 rounded-full text-[11px] font-medium',
-                    u.isActive
-                      ? 'bg-emerald-400/15 text-emerald-300'
-                      : 'bg-red-400/15 text-red-300'
-                  )}>
-                    {u.isActive ? 'Ativo' : 'Inativo'}
-                  </span>
-                </td>
-                <td className="py-2 pr-3 text-right">
-                  <button onClick={() => onToggle(u)} className="btn-secondary !py-1.5 !px-2.5 mr-2">
-                    <Power className="h-3.5 w-3.5" />
-                  </button>
-                  <button onClick={() => onDelete(u)} className="btn-secondary !py-1.5 !px-2.5 !text-red-300">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </td>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <Field label="Nome completo" full>
+          <input className="input-premium w-full" value={form.fullName} autoComplete="name" required
+                 onChange={(event) => setForm({ ...form, fullName: event.target.value })} />
+        </Field>
+        <Field label="Usuario">
+          <input className="input-premium w-full" value={form.username} autoComplete="off" required
+                 onChange={(event) => setForm({ ...form, username: event.target.value })} />
+        </Field>
+        <Field label="E-mail">
+          <input type="email" className="input-premium w-full" value={form.email} autoComplete="email" required
+                 onChange={(event) => setForm({ ...form, email: event.target.value })} />
+        </Field>
+        <Field label="CPF">
+          <input className="input-premium w-full" value={form.cpf} inputMode="numeric" maxLength={14} required
+                 onChange={(event) => setForm({ ...form, cpf: event.target.value })} />
+        </Field>
+        <Field label="Telefone (opcional)">
+          <input className="input-premium w-full" value={form.phone} inputMode="tel" autoComplete="tel"
+                 onChange={(event) => setForm({ ...form, phone: event.target.value })} />
+        </Field>
+        <Field label="Senha inicial">
+          <input type="password" className="input-premium w-full" value={form.initialPassword}
+                 autoComplete="new-password" minLength={6} required
+                 onChange={(event) => setForm({ ...form, initialPassword: event.target.value })} />
+        </Field>
+        <Field label="Confirmar senha inicial">
+          <input type="password" className="input-premium w-full" value={form.confirmInitialPassword}
+                 autoComplete="new-password" minLength={6} required
+                 onChange={(event) => setForm({ ...form, confirmInitialPassword: event.target.value })} />
+        </Field>
+      </div>
+
+      <div className="flex justify-end">
+        <button type="submit" className="btn-primary" disabled={submitting}>
+          <UserPlus className="h-4 w-4" />
+          {submitting ? 'Criando conta...' : 'Criar conta'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function UsersView({ users, search, setSearch, onToggle, onDelete, onCreated, onError }) {
+  return (
+    <div className="space-y-6">
+      <AccountProvisionForm onCreated={onCreated} onError={onError} />
+      <section className="card-premium p-5">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="relative flex-1">
+            <Search className="h-4 w-4 text-ink-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por nome, email, CPF ou conta…"
+              className="input-premium w-full !pl-9"
+            />
+          </div>
+          <span className="text-xs text-ink-400">{users.length} usuário(s)</span>
+        </div>
+        <div className="overflow-x-auto -mx-5 px-5">
+          <table className="w-full text-sm min-w-[640px]">
+            <thead className="text-left text-xs uppercase tracking-wider text-ink-400 border-b border-white/10">
+              <tr>
+                <th className="py-2 pr-3">Usuário</th>
+                <th className="py-2 pr-3">Conta</th>
+                <th className="py-2 pr-3">Saldo</th>
+                <th className="py-2 pr-3">Status</th>
+                <th className="py-2 pr-3 text-right">Ações</th>
               </tr>
-            ))}
-            {users.length === 0 && (
-              <tr><td colSpan={5} className="py-6 text-center text-ink-400">Nenhum usuário encontrado.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <td className="py-2 pr-3">
+                    <div className="font-medium text-white">{u.fullName || u.username}</div>
+                    <div className="text-xs text-ink-400">@{u.username} · {u.email}</div>
+                  </td>
+                  <td className="py-2 pr-3 font-mono text-ink-200">{u.accountNumber}</td>
+                  <td className="py-2 pr-3 font-mono tabular-nums">{brl(u.balance)}</td>
+                  <td className="py-2 pr-3">
+                    <span className={cn(
+                      'px-2 py-0.5 rounded-full text-[11px] font-medium',
+                      u.isActive
+                        ? 'bg-emerald-400/15 text-emerald-300'
+                        : 'bg-red-400/15 text-red-300'
+                    )}>
+                      {u.isActive ? 'Ativo' : 'Inativo'}
+                    </span>
+                  </td>
+                  <td className="py-2 pr-3 text-right">
+                    <button onClick={() => onToggle(u)} className="btn-secondary !py-1.5 !px-2.5 mr-2"
+                            aria-label={u.isActive ? `Desativar ${u.username}` : `Ativar ${u.username}`}
+                            title={u.isActive ? 'Desativar conta' : 'Ativar conta'}>
+                      <Power className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={() => onDelete(u)} className="btn-secondary !py-1.5 !px-2.5 !text-red-300"
+                            aria-label={`Excluir ${u.username}`} title="Excluir conta">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {users.length === 0 && (
+                <tr><td colSpan={5} className="py-6 text-center text-ink-400">Nenhum usuário encontrado.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1936,12 +2174,13 @@ function Field({ label, children, full }) {
 // ===========================================================
 function LedgerView({ entries, chain }) {
   const [expanded, setExpanded] = useState(null);
+  const valid = chainIsValid(chain);
 
   return (
     <div className="space-y-4">
       <div className={cn(
         'card-premium p-5 flex flex-wrap items-center justify-between gap-4',
-        chain?.valida ? 'ring-1 ring-emerald-500/30' : 'ring-1 ring-red-500/30'
+        valid ? 'ring-1 ring-emerald-500/30' : 'ring-1 ring-red-500/30'
       )}>
         <div>
           <div className="flex items-center gap-2">
@@ -1949,11 +2188,11 @@ function LedgerView({ entries, chain }) {
             <span className="text-sm text-ink-300">Cadeia de hash</span>
           </div>
           <div className="font-display text-xl font-semibold mt-1">
-            {chain?.quantidade ?? '?'} lançamentos · {chain?.valida ? '✓ íntegra' : '✗ comprometida'}
+            {chainCount(chain)} transferências · {valid ? '✓ íntegra' : '✗ comprometida'}
           </div>
         </div>
         <div className="text-xs text-ink-400 font-mono break-all max-w-md text-right">
-          {chain?.mensagem}
+          {chainMessage(chain)}
         </div>
       </div>
 
@@ -1971,24 +2210,28 @@ function LedgerView({ entries, chain }) {
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300">
-                      #{e.sequencia}
+                      #{e.sequencia ?? e.id}
                     </span>
                     <div className="min-w-0">
-                      <div className="text-sm font-medium text-white truncate">{e.descricao || e.tipo}</div>
+                      <div className="text-sm font-medium text-white truncate">{e.descricao || e.reason || e.tipo || e.entryType}</div>
                       <div className="text-xs text-ink-400 truncate">
-                        DR {e.contaDebitoCodigo} → CR {e.contaCreditoCodigo} · {formatDate(e.dataLancamento || e.createdAt)}
+                        {e.contaDebitoCodigo || e.contaCreditoCodigo
+                          ? `DR ${e.contaDebitoCodigo || '—'} → CR ${e.contaCreditoCodigo || '—'}`
+                          : `${e.entryType || 'entry'} · ${e.accountUsername || e.accountNumber || 'conta'}`}
+                        {' · '}{formatDate(e.dataLancamento || e.createdAt)}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="font-mono tabular-nums text-sm">{brl(e.valor)}</span>
+                    <span className="font-mono tabular-nums text-sm">{brl(e.valor ?? e.signedAmountCentavos)}</span>
                     {isOpen ? <ChevronUp className="h-4 w-4 text-ink-400" /> : <ChevronDown className="h-4 w-4 text-ink-400" />}
                   </div>
                 </button>
                 {isOpen && (
                   <div className="px-4 pb-4 pt-1 text-xs text-ink-300 space-y-1 border-t border-white/5">
-                    <div><b>Hash atual:</b> <span className="font-mono break-all">{e.hashAtual}</span></div>
-                    <div><b>Hash anterior:</b> <span className="font-mono break-all">{e.hashAnterior || '—'}</span></div>
+                    {e.hashAtual && <div><b>Hash atual:</b> <span className="font-mono break-all">{e.hashAtual}</span></div>}
+                    {e.hashAtual && <div><b>Hash anterior:</b> <span className="font-mono break-all">{e.hashAnterior || '—'}</span></div>}
+                    {e.transferId && <div><b>Transferência:</b> <span className="font-mono break-all">{e.transferId}</span></div>}
                     {e.referenciaTipo && <div><b>Referência:</b> {e.referenciaTipo} #{e.referenciaId}</div>}
                   </div>
                 )}

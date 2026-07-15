@@ -206,6 +206,20 @@ const entrypoint = `const buildTarget = "bravus-sites-api-d1-v1";
 const files = ${JSON.stringify(files)};
 const liveSeed = ${JSON.stringify(liveSeed)};
 const now = () => new Date().toISOString();
+const institutionalReserveSeed = Object.freeze({
+  code: "BRAVUS_INSTITUTIONAL_RESERVE",
+  name: "Reserva Institucional Bravus",
+  amountCentavos: "100000000000000000",
+  currency: "BRL",
+  classification: "INSTITUTIONAL",
+  status: "DECLARED",
+  customerFunds: false,
+  transferable: false,
+  sourceReference: "OWNER_DECLARATION",
+  policyVersion: 1,
+  payloadHash: "15fd35def62b676d26bea6568134e5dd059000d2998edd60ec3a2e0992f3e2fa",
+  declaredAt: "2026-07-15T00:00:00-03:00",
+});
 const corsHeaders = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -318,6 +332,7 @@ let joaoCreditGrant = null;
 let currentEnv = null;
 let pendingBiometricWrites = [];
 let pendingKycAuditWrites = [];
+let pendingAccountProvisionAuditWrites = [];
 let persistenceMeta = { backend: "D1", revision: 0, payloadHash: null, updatedAt: null };
 
 function normalizeState(candidate) {
@@ -1842,6 +1857,9 @@ async function ensureD1Schema(db) {
     db.prepare("CREATE TABLE IF NOT EXISTS bravus_ledger_entries (transfer_id TEXT NOT NULL, entry_type TEXT NOT NULL CHECK (entry_type IN ('debit','credit')), order_id INTEGER, account_username TEXT, account_number TEXT NOT NULL, signed_amount_centavos INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'BRL', reason TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (transfer_id, entry_type), CHECK ((entry_type = 'debit' AND signed_amount_centavos < 0) OR (entry_type = 'credit' AND signed_amount_centavos > 0)))"),
     db.prepare("CREATE TABLE IF NOT EXISTS bravus_biometric_evidence (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('ENROLLED_FACE','PASSWORD_RESET_FACE','KYC_DOCUMENT_FRONT','KYC_DOCUMENT_BACK')), owner_username TEXT NOT NULL, mime TEXT NOT NULL, ciphertext TEXT NOT NULL, iv TEXT NOT NULL, sha256 TEXT NOT NULL, created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS bravus_kyc_audit (id TEXT PRIMARY KEY NOT NULL, username TEXT NOT NULL, actor TEXT NOT NULL, from_status TEXT NOT NULL, to_status TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS bravus_institutional_reserve (code TEXT PRIMARY KEY NOT NULL, currency TEXT NOT NULL CHECK (currency = 'BRL'), amount_centavos TEXT NOT NULL CHECK (length(amount_centavos) BETWEEN 1 AND 40 AND amount_centavos NOT GLOB '*[^0-9]*'), classification TEXT NOT NULL CHECK (classification = 'INSTITUTIONAL'), status TEXT NOT NULL CHECK (status IN ('DECLARED','VERIFIED','SUSPENDED')), customer_funds INTEGER NOT NULL CHECK (customer_funds = 0), transferable INTEGER NOT NULL CHECK (transferable = 0), source_reference TEXT NOT NULL, policy_version INTEGER NOT NULL CHECK (policy_version >= 1), payload_hash TEXT NOT NULL, declared_at TEXT NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS bravus_institutional_reserve_audit (id TEXT PRIMARY KEY NOT NULL, reserve_code TEXT NOT NULL, event_type TEXT NOT NULL CHECK (event_type IN ('RESERVE_DECLARED','RESERVE_VERIFIED','RESERVE_SUSPENDED')), amount_centavos TEXT NOT NULL, status TEXT NOT NULL, actor TEXT NOT NULL, reason TEXT NOT NULL, payload_hash TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (reserve_code) REFERENCES bravus_institutional_reserve(code))"),
+    db.prepare("CREATE TABLE IF NOT EXISTS bravus_account_provisioning_audit (id TEXT PRIMARY KEY NOT NULL, account_username TEXT NOT NULL, subject_hash TEXT NOT NULL, actor TEXT NOT NULL, event_type TEXT NOT NULL CHECK (event_type = 'ACCOUNT_PROVISIONED_PENDING_IDENTITY'), created_at TEXT NOT NULL)"),
     db.prepare("CREATE INDEX IF NOT EXISTS bravus_kyc_audit_username_created_idx ON bravus_kyc_audit (username, created_at)"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_ledger_entries_no_update BEFORE UPDATE ON bravus_ledger_entries BEGIN SELECT RAISE(ABORT, 'Ledger entries are immutable; create a compensating entry'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_ledger_entries_no_delete BEFORE DELETE ON bravus_ledger_entries BEGIN SELECT RAISE(ABORT, 'Ledger entries are immutable; create a compensating entry'); END"),
@@ -1851,6 +1869,36 @@ async function ensureD1Schema(db) {
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_biometric_evidence_no_delete BEFORE DELETE ON bravus_biometric_evidence BEGIN SELECT RAISE(ABORT, 'Biometric evidence is immutable'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_kyc_audit_no_update BEFORE UPDATE ON bravus_kyc_audit BEGIN SELECT RAISE(ABORT, 'KYC audit entries are immutable'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_kyc_audit_no_delete BEFORE DELETE ON bravus_kyc_audit BEGIN SELECT RAISE(ABORT, 'KYC audit entries are immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_institutional_reserve_no_update BEFORE UPDATE ON bravus_institutional_reserve BEGIN SELECT RAISE(ABORT, 'Institutional reserve is immutable; use an audited migration'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_institutional_reserve_no_delete BEFORE DELETE ON bravus_institutional_reserve BEGIN SELECT RAISE(ABORT, 'Institutional reserve is immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_institutional_reserve_audit_no_update BEFORE UPDATE ON bravus_institutional_reserve_audit BEGIN SELECT RAISE(ABORT, 'Institutional reserve audit is immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_institutional_reserve_audit_no_delete BEFORE DELETE ON bravus_institutional_reserve_audit BEGIN SELECT RAISE(ABORT, 'Institutional reserve audit is immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_account_provisioning_audit_no_update BEFORE UPDATE ON bravus_account_provisioning_audit BEGIN SELECT RAISE(ABORT, 'Account provisioning audit is immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_account_provisioning_audit_no_delete BEFORE DELETE ON bravus_account_provisioning_audit BEGIN SELECT RAISE(ABORT, 'Account provisioning audit is immutable'); END"),
+  ]);
+  await db.batch([
+    db.prepare("INSERT OR IGNORE INTO bravus_institutional_reserve (code, currency, amount_centavos, classification, status, customer_funds, transferable, source_reference, policy_version, payload_hash, declared_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)")
+      .bind(
+        institutionalReserveSeed.code,
+        institutionalReserveSeed.currency,
+        institutionalReserveSeed.amountCentavos,
+        institutionalReserveSeed.classification,
+        institutionalReserveSeed.status,
+        institutionalReserveSeed.sourceReference,
+        institutionalReserveSeed.policyVersion,
+        institutionalReserveSeed.payloadHash,
+        institutionalReserveSeed.declaredAt,
+      ),
+    db.prepare("INSERT OR IGNORE INTO bravus_institutional_reserve_audit (id, reserve_code, event_type, amount_centavos, status, actor, reason, payload_hash, created_at) VALUES (?, ?, 'RESERVE_DECLARED', ?, ?, 'OWNER_CONFIGURATION', ?, ?, ?)")
+      .bind(
+        "reserve-declaration-v1",
+        institutionalReserveSeed.code,
+        institutionalReserveSeed.amountCentavos,
+        institutionalReserveSeed.status,
+        "Reserva institucional declarada; nao representa saldo de cliente nem prova de lastro externo.",
+        institutionalReserveSeed.payloadHash,
+        institutionalReserveSeed.declaredAt,
+      ),
   ]);
   let evidenceSchema = await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bravus_biometric_evidence'").first();
   let evidenceSchemaSql = String(evidenceSchema?.sql || "");
@@ -1873,6 +1921,53 @@ async function ensureD1Schema(db) {
     throw new Error("D1_KYC_EVIDENCE_SCHEMA_NOT_READY");
   }
   d1SchemaReady = true;
+}
+
+function centavosToReaisString(amountCentavos) {
+  const value = BigInt(String(amountCentavos));
+  const whole = value / 100n;
+  const fraction = String(value % 100n).padStart(2, "0");
+  return whole.toString() + "." + fraction;
+}
+
+function exactCentavos(value, fieldName) {
+  if (typeof value === "number" && !Number.isSafeInteger(value)) {
+    throw new Error("UNSAFE_MONEY_NUMBER_" + fieldName);
+  }
+  const raw = String(value ?? 0).trim();
+  if (!/^-?\\d+$/.test(raw)) throw new Error("INVALID_MONEY_INTEGER_" + fieldName);
+  return BigInt(raw);
+}
+
+async function loadInstitutionalReserve(db) {
+  const row = await db.prepare("SELECT code, currency, amount_centavos, classification, status, customer_funds, transferable, source_reference, policy_version, payload_hash, declared_at FROM bravus_institutional_reserve WHERE code = ?")
+    .bind(institutionalReserveSeed.code)
+    .first();
+  if (!row) throw new Error("D1_INSTITUTIONAL_RESERVE_NOT_FOUND");
+  const canonical = [
+    row.code, row.currency, row.amount_centavos, row.classification, row.status,
+    row.source_reference, row.policy_version,
+  ].join("|");
+  const payloadHash = await sha256Text(canonical);
+  if (payloadHash !== row.payload_hash) throw new Error("D1_INSTITUTIONAL_RESERVE_HASH_MISMATCH");
+  if (Number(row.customer_funds) !== 0 || Number(row.transferable) !== 0) {
+    throw new Error("D1_INSTITUTIONAL_RESERVE_CLASSIFICATION_INVALID");
+  }
+  return {
+    code: row.code,
+    name: institutionalReserveSeed.name,
+    amountCentavos: String(row.amount_centavos),
+    amountReais: centavosToReaisString(row.amount_centavos),
+    currency: row.currency,
+    classification: row.classification,
+    status: row.status,
+    customerFunds: false,
+    transferable: false,
+    sourceReference: row.source_reference,
+    policyVersion: Number(row.policy_version),
+    payloadHash: row.payload_hash,
+    declaredAt: row.declared_at,
+  };
 }
 
 function ledgerMirrorStatement(db, entry, revision, payloadHash) {
@@ -1917,6 +2012,20 @@ function kycAuditWriteStatement(db, entry, revision, payloadHash) {
       entry.fromStatus,
       entry.toStatus,
       entry.reason,
+      entry.createdAt,
+      revision,
+      payloadHash,
+    );
+}
+
+function accountProvisionAuditWriteStatement(db, entry, revision, payloadHash) {
+  return db.prepare("INSERT OR IGNORE INTO bravus_account_provisioning_audit (id, account_username, subject_hash, actor, event_type, created_at) SELECT ?, ?, ?, ?, ?, ? FROM bravus_state WHERE id = 1 AND revision = ? AND payload_hash = ?")
+    .bind(
+      entry.id,
+      entry.accountUsername,
+      entry.subjectHash,
+      entry.actor,
+      entry.eventType,
       entry.createdAt,
       revision,
       payloadHash,
@@ -1979,6 +2088,7 @@ async function persistD1State(db, previous, request, actor) {
     ...state.ledgerEntries.map((entry) => ledgerMirrorStatement(db, entry, nextRevision, payloadHash)),
     ...pendingBiometricWrites.map((evidence) => biometricWriteStatement(db, evidence, nextRevision, payloadHash)),
     ...pendingKycAuditWrites.map((entry) => kycAuditWriteStatement(db, entry, nextRevision, payloadHash)),
+    ...pendingAccountProvisionAuditWrites.map((entry) => accountProvisionAuditWriteStatement(db, entry, nextRevision, payloadHash)),
   ];
   const results = await db.batch(statements);
   const changed = Number(results?.[0]?.meta?.changes || 0);
@@ -2011,6 +2121,7 @@ async function handlePersistedApi(request, env) {
       state = normalizeState(JSON.parse(String(previous.payload)));
       pendingBiometricWrites = [];
       pendingKycAuditWrites = [];
+      pendingAccountProvisionAuditWrites = [];
       persistenceMeta = {
         backend: "D1",
         revision: Number(previous.revision),
@@ -2871,9 +2982,11 @@ async function handleApi(request) {
     if (initialPassword.length < 6 || initialPassword.length > 128) {
       return badRequest("A senha inicial deve ter entre 6 e 128 caracteres.", "INITIAL_PASSWORD_INVALID");
     }
-    const fingerprint = await sha256Text([
-      identity.cpf, identity.username, identity.email, fullName.toLowerCase(),
-    ].join("|"));
+    const phone = String(body.phone || "").replace(/\\D/g, "");
+    const fingerprintMaterial = [
+      identity.cpf, identity.username, identity.email, fullName.toLowerCase(), phone, initialPassword,
+    ].map((value) => String(value).length + ":" + String(value)).join("|");
+    const fingerprint = await sha256Text(fingerprintMaterial + "|" + passwordPepper());
     const previousProvision = state.accountProvisioningRequests.find((item) => item.idempotencyKey === idempotencyKey);
     if (previousProvision) {
       if (previousProvision.fingerprint !== fingerprint) {
@@ -2898,7 +3011,7 @@ async function handleApi(request) {
       email: identity.email,
       fullName,
       cpf: identity.cpf,
-      phone: String(body.phone || "").replace(/\\D/g, ""),
+      phone,
       accountNumber: accountNumberForDocument(identity.cpf),
       balance: 0,
       roles: ["ROLE_USER"],
@@ -2914,12 +3027,14 @@ async function handleApi(request) {
       id: crypto.randomUUID(), idempotencyKey, fingerprint, username: provisionedAccount.username,
       actor: user.username, createdAt,
     });
-    state.registrationAudit.unshift({
+    const provisionAuditEntry = {
       id: crypto.randomUUID(), eventType: "ACCOUNT_PROVISIONED_PENDING_IDENTITY", actor: user.username,
-      subjectHash: await registrationSubjectHash(identity),
+      accountUsername: provisionedAccount.username, subjectHash: await registrationSubjectHash(identity),
       detail: "Conta provisionada com senha inicial de uso unico e validacao de identidade pendente.", createdAt,
-    });
+    };
+    state.registrationAudit.unshift(provisionAuditEntry);
     state.registrationAudit = state.registrationAudit.slice(0, 500);
+    pendingAccountProvisionAuditWrites.push(provisionAuditEntry);
     return json({
       account: userSummary(provisionedAccount),
       passwordChangeRequired: true,
@@ -2974,14 +3089,24 @@ async function handleApi(request) {
     const ledger = validateSitesLedger();
     let kycEvidenceSchemaReady = false;
     let immutableKycAuditCount = null;
+    let institutionalReserveReady = false;
+    let institutionalReserveAuditCount = null;
+    let immutableAccountProvisioningAuditCount = null;
     try {
       const evidenceSchema = await currentEnv.DB.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bravus_biometric_evidence'").first();
       const kycAuditCount = await currentEnv.DB.prepare("SELECT COUNT(*) AS count FROM bravus_kyc_audit").first();
+      const reserve = await loadInstitutionalReserve(currentEnv.DB);
+      const reserveAuditCount = await currentEnv.DB.prepare("SELECT COUNT(*) AS count FROM bravus_institutional_reserve_audit").first();
+      const provisioningAuditCount = await currentEnv.DB.prepare("SELECT COUNT(*) AS count FROM bravus_account_provisioning_audit").first();
       const schemaSql = String(evidenceSchema?.sql || "");
       kycEvidenceSchemaReady = schemaSql.includes("KYC_DOCUMENT_FRONT") && schemaSql.includes("KYC_DOCUMENT_BACK");
       immutableKycAuditCount = Number(kycAuditCount?.count || 0);
+      institutionalReserveReady = reserve.amountCentavos === "100000000000000000" && reserve.status === "DECLARED";
+      institutionalReserveAuditCount = Number(reserveAuditCount?.count || 0);
+      immutableAccountProvisioningAuditCount = Number(provisioningAuditCount?.count || 0);
     } catch {
       kycEvidenceSchemaReady = false;
+      institutionalReserveReady = false;
     }
     return json({
       ...persistenceMeta,
@@ -2993,6 +3118,9 @@ async function handleApi(request) {
       ledgerValid: ledger.valid,
       kycEvidenceSchemaReady,
       immutableKycAuditCount,
+      institutionalReserveReady,
+      institutionalReserveAuditCount,
+      immutableAccountProvisioningAuditCount,
     });
   }
 
@@ -3146,9 +3274,41 @@ async function handleApi(request) {
     return json(state.transactions.map((tx) => hydrateTransaction(tx, state.users[tx.username] || user)));
   }
   if (request.method === "GET" && path === "/admin/ledger/balance-sheet") {
-    const totalClientBalances = Object.values(state.users).reduce((sum, item) => sum + Number(item.balance || 0), 0);
-    const ledgerNet = state.ledgerEntries.reduce((sum, entry) => sum + Number(entry.signedAmountCentavos || 0), 0);
-    return json({ totalAssets: totalClientBalances, totalLiabilities: totalClientBalances, equity: 0, ledgerNet, reserves: [] });
+    const reserve = await loadInstitutionalReserve(currentEnv.DB);
+    const ledgerValidation = validateSitesLedger();
+    const reserveCentavos = exactCentavos(reserve.amountCentavos, "institutional_reserve");
+    const clientLiabilitiesCentavos = Object.values(state.users).reduce(
+      (sum, item) => sum + exactCentavos(item.balance, "client_balance"),
+      0n,
+    );
+    const ledgerNetCentavos = state.ledgerEntries.reduce(
+      (sum, entry) => sum + exactCentavos(entry.signedAmountCentavos, "ledger_entry"),
+      0n,
+    );
+    const equityCentavos = reserveCentavos - clientLiabilitiesCentavos;
+    const equationBalanced = reserveCentavos === clientLiabilitiesCentavos + equityCentavos;
+    const accounting = {
+      amountUnit: "CENTAVOS",
+      precision: "INTEGER_DECIMAL_STRING",
+      totalAssetsCentavos: reserveCentavos.toString(),
+      totalLiabilitiesCentavos: clientLiabilitiesCentavos.toString(),
+      totalEquityCentavos: equityCentavos.toString(),
+      ledgerNetCentavos: ledgerNetCentavos.toString(),
+      equationBalanced,
+      ledgerReconciled: ledgerValidation.valid && ledgerNetCentavos === 0n,
+      balanced: equationBalanced && ledgerValidation.valid && ledgerNetCentavos === 0n,
+    };
+    return json({
+      contractVersion: 2,
+      amountUnit: "CENTAVOS",
+      totalAssets: accounting.totalAssetsCentavos,
+      totalLiabilities: accounting.totalLiabilitiesCentavos,
+      equity: accounting.totalEquityCentavos,
+      ledgerNet: accounting.ledgerNetCentavos,
+      reserves: [reserve],
+      institutionalReserve: reserve,
+      accounting,
+    }, { headers: { "cache-control": "no-store" } });
   }
   if (request.method === "GET" && path === "/admin/ledger/validate-chain") return json(validateSitesLedger());
   if (request.method === "GET" && path.startsWith("/admin/ledger/entries")) return json({ content: state.ledgerEntries, audit: state.ledgerAudit });

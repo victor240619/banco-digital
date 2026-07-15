@@ -40,10 +40,46 @@ assert.throws(() => database.prepare("DELETE FROM bravus_biometric_evidence WHER
 assert.throws(() => database.prepare("UPDATE bravus_kyc_audit SET reason = ? WHERE id = ?").run("alterado", "audit-1"), /immutable/i);
 assert.equal(database.prepare("SELECT COUNT(*) AS count FROM bravus_kyc_audit").get().count, 1);
 
+const journal = JSON.parse(await readFile("drizzle/meta/_journal.json", "utf8"));
+assert.equal(journal.entries.some((entry) => entry.tag === "0002_institutional_reserve"), true);
+await migration("drizzle/0002_institutional_reserve.sql");
+await migration("drizzle/0002_institutional_reserve.sql");
+const reserve = database.prepare("SELECT * FROM bravus_institutional_reserve WHERE code = ?")
+  .get("BRAVUS_INSTITUTIONAL_RESERVE");
+assert.equal(reserve.amount_centavos, "100000000000000000");
+assert.equal(reserve.status, "DECLARED");
+assert.equal(reserve.customer_funds, 0);
+assert.equal(reserve.transferable, 0);
+assert.equal(BigInt(reserve.amount_centavos) > BigInt(Number.MAX_SAFE_INTEGER), true);
+assert.equal(database.prepare("SELECT COUNT(*) AS count FROM bravus_institutional_reserve_audit").get().count, 1);
+assert.throws(
+  () => database.prepare("UPDATE bravus_institutional_reserve SET amount_centavos = ? WHERE code = ?")
+    .run("1", "BRAVUS_INSTITUTIONAL_RESERVE"),
+  /immutable/i,
+);
+assert.throws(
+  () => database.prepare("DELETE FROM bravus_institutional_reserve_audit WHERE id = ?").run("reserve-declaration-v1"),
+  /immutable/i,
+);
+database.prepare(`
+  INSERT INTO bravus_account_provisioning_audit
+    (id, account_username, subject_hash, actor, event_type, created_at)
+  VALUES (?, ?, ?, ?, ?, ?)
+`).run("provision-audit-1", "new.user", "subject-hash", "admin", "ACCOUNT_PROVISIONED_PENDING_IDENTITY", "2026-01-02T00:00:00Z");
+assert.throws(
+  () => database.prepare("DELETE FROM bravus_account_provisioning_audit WHERE id = ?").run("provision-audit-1"),
+  /immutable/i,
+);
+
 database.close();
 console.log(JSON.stringify({
   result: "ok",
   legacyEvidencePreserved: true,
   expandedEvidenceKindsAccepted: true,
   immutableKycAuditVerified: true,
+  institutionalReservePersistedAsText: true,
+  immutableInstitutionalReserveAuditVerified: true,
+  journalDiscoveryVerified: true,
+  idempotentMigrationVerified: true,
+  immutableAccountProvisioningAuditVerified: true,
 }));

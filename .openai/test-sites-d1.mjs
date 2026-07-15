@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -28,6 +29,15 @@ class FakeStatement {
     if (this.sql.startsWith("SELECT COUNT(*) AS count FROM bravus_kyc_audit")) {
       return { count: this.database.kycAudits.size };
     }
+    if (this.sql.startsWith("SELECT COUNT(*) AS count FROM bravus_institutional_reserve_audit")) {
+      return { count: this.database.institutionalReserveAudits.size };
+    }
+    if (this.sql.startsWith("SELECT COUNT(*) AS count FROM bravus_account_provisioning_audit")) {
+      return { count: this.database.accountProvisioningAudits.size };
+    }
+    if (this.sql.startsWith("SELECT code, currency, amount_centavos, classification, status, customer_funds, transferable, source_reference, policy_version, payload_hash, declared_at FROM bravus_institutional_reserve")) {
+      return this.database.institutionalReserve ? structuredClone(this.database.institutionalReserve) : null;
+    }
     throw new Error("Unsupported D1 first(): " + this.sql);
   }
 }
@@ -39,6 +49,9 @@ class FakeD1 {
     this.ledgerEntries = new Map();
     this.biometricEvidence = new Map();
     this.kycAudits = new Map();
+    this.institutionalReserve = null;
+    this.institutionalReserveAudits = new Map();
+    this.accountProvisioningAudits = new Map();
   }
 
   prepare(sql) {
@@ -52,6 +65,9 @@ class FakeD1 {
       ledgerEntries: [...this.ledgerEntries],
       biometricEvidence: [...this.biometricEvidence],
       kycAudits: [...this.kycAudits],
+      institutionalReserve: this.institutionalReserve,
+      institutionalReserveAudits: [...this.institutionalReserveAudits],
+      accountProvisioningAudits: [...this.accountProvisioningAudits],
     });
     try {
       return statements.map((statement) => ({ meta: { changes: this.execute(statement) } }));
@@ -61,6 +77,9 @@ class FakeD1 {
       this.ledgerEntries = new Map(snapshot.ledgerEntries);
       this.biometricEvidence = new Map(snapshot.biometricEvidence);
       this.kycAudits = new Map(snapshot.kycAudits);
+      this.institutionalReserve = snapshot.institutionalReserve;
+      this.institutionalReserveAudits = new Map(snapshot.institutionalReserveAudits);
+      this.accountProvisioningAudits = new Map(snapshot.accountProvisioningAudits);
       throw error;
     }
   }
@@ -139,6 +158,34 @@ class FakeD1 {
       this.kycAudits.set(values[0], {
         id: values[0], username: values[1], actor: values[2], fromStatus: values[3],
         toStatus: values[4], reason: values[5], createdAt: values[6],
+      });
+      return 1;
+    }
+
+    if (sql.startsWith("INSERT OR IGNORE INTO bravus_institutional_reserve (")) {
+      if (this.institutionalReserve) return 0;
+      this.institutionalReserve = {
+        code: values[0], currency: values[1], amount_centavos: values[2], classification: values[3],
+        status: values[4], customer_funds: 0, transferable: 0, source_reference: values[5],
+        policy_version: values[6], payload_hash: values[7], declared_at: values[8],
+      };
+      return 1;
+    }
+
+    if (sql.startsWith("INSERT OR IGNORE INTO bravus_institutional_reserve_audit")) {
+      if (this.institutionalReserveAudits.has(values[0])) return 0;
+      this.institutionalReserveAudits.set(values[0], structuredClone(values));
+      return 1;
+    }
+
+    if (sql.startsWith("INSERT OR IGNORE INTO bravus_account_provisioning_audit")) {
+      const expectedRevision = values[6];
+      const expectedHash = values[7];
+      if (!this.stateRow || this.stateRow.revision !== expectedRevision || this.stateRow.payload_hash !== expectedHash) return 0;
+      if (this.accountProvisioningAudits.has(values[0])) return 0;
+      this.accountProvisioningAudits.set(values[0], {
+        id: values[0], accountUsername: values[1], subjectHash: values[2], actor: values[3],
+        eventType: values[4], createdAt: values[5],
       });
       return 1;
     }
@@ -376,6 +423,32 @@ assert.equal(persistedBalance.data, 1000, "balance must survive worker restart")
 
 const adminLogin = await call(worker, "POST", "/auth/login", { body: { username: "admin@bravusbank.com", password: "6run0955" } });
 assert.equal(adminLogin.response.status, 200);
+const unauthorizedReserve = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: joaoToken });
+assert.equal(unauthorizedReserve.response.status, 403, "institutional reserve must remain admin-only");
+const reserveBeforeProvision = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token });
+assert.equal(reserveBeforeProvision.response.status, 200);
+assert.equal(reserveBeforeProvision.data.institutionalReserve.amountCentavos, "100000000000000000");
+assert.equal(reserveBeforeProvision.data.institutionalReserve.amountReais, "1000000000000000.00");
+assert.equal(reserveBeforeProvision.data.institutionalReserve.status, "DECLARED");
+assert.equal(reserveBeforeProvision.data.institutionalReserve.customerFunds, false);
+assert.equal(reserveBeforeProvision.data.institutionalReserve.transferable, false);
+assert.equal(
+  BigInt(reserveBeforeProvision.data.institutionalReserve.amountCentavos) > BigInt(Number.MAX_SAFE_INTEGER),
+  true,
+  "the reserve test must exercise values above JavaScript's safe integer range",
+);
+assert.equal(reserveBeforeProvision.data.accounting.precision, "INTEGER_DECIMAL_STRING");
+assert.equal(reserveBeforeProvision.data.accounting.balanced, true);
+assert.equal(reserveBeforeProvision.data.accounting.ledgerReconciled, true);
+assert.equal(
+  BigInt(reserveBeforeProvision.data.accounting.totalAssetsCentavos),
+  BigInt(reserveBeforeProvision.data.accounting.totalLiabilitiesCentavos)
+    + BigInt(reserveBeforeProvision.data.accounting.totalEquityCentavos),
+  "assets must equal liabilities plus equity without floating-point arithmetic",
+);
+const persistenceBeforeProvision = await call(worker, "GET", "/admin/persistence/status", { token: adminLogin.data.token });
+assert.equal(persistenceBeforeProvision.data.institutionalReserveReady, true);
+assert.equal(persistenceBeforeProvision.data.institutionalReserveAuditCount, 1);
 const provisionedIdentity = {
   username: "provisioned.customer",
   email: "provisioned.customer@bravus.test",
@@ -389,22 +462,31 @@ const unauthorizedProvision = await call(worker, "POST", "/admin/accounts/provis
   body: provisionedIdentity,
 });
 assert.equal(unauthorizedProvision.response.status, 403, "only an administrator may provision accounts");
-const provisioned = await call(worker, "POST", "/admin/accounts/provision", {
-  token: adminLogin.data.token,
-  headers: { "idempotency-key": "account-provision-test-0001" },
-  body: provisionedIdentity,
-});
+const [provisioned, provisionReplay] = await Promise.all([
+  call(worker, "POST", "/admin/accounts/provision", {
+    token: adminLogin.data.token,
+    headers: { "idempotency-key": "account-provision-test-0001" },
+    body: provisionedIdentity,
+  }),
+  call(worker, "POST", "/admin/accounts/provision", {
+    token: adminLogin.data.token,
+    headers: { "idempotency-key": "account-provision-test-0001" },
+    body: provisionedIdentity,
+  }),
+]);
 assert.equal(provisioned.response.status, 201, JSON.stringify(provisioned.data));
 assert.equal(provisioned.data.account.balance, 0);
 assert.equal(provisioned.data.account.statusKyc, "PENDENTE_VALIDACAO_IDENTIDADE");
 assert.equal(provisioned.data.account.credentialState, "INITIAL_CHANGE_REQUIRED");
-const provisionReplay = await call(worker, "POST", "/admin/accounts/provision", {
+assert.equal(provisionReplay.response.status, 200);
+assert.equal(provisionReplay.data.idempotentReplay, true);
+const provisionPasswordConflict = await call(worker, "POST", "/admin/accounts/provision", {
   token: adminLogin.data.token,
   headers: { "idempotency-key": "account-provision-test-0001" },
   body: { ...provisionedIdentity, initialPassword: "DifferentTemporary123" },
 });
-assert.equal(provisionReplay.response.status, 200);
-assert.equal(provisionReplay.data.idempotentReplay, true);
+assert.equal(provisionPasswordConflict.response.status, 409, "a retry must not silently accept a different initial password");
+assert.equal(provisionPasswordConflict.data.code, "IDEMPOTENCY_CONFLICT");
 assert.equal(JSON.parse(database.stateRow.payload).users[provisionedIdentity.username].credentialState, "INITIAL_CHANGE_REQUIRED");
 const provisionConflict = await call(worker, "POST", "/admin/accounts/provision", {
   token: adminLogin.data.token,
@@ -412,6 +494,34 @@ const provisionConflict = await call(worker, "POST", "/admin/accounts/provision"
   body: { ...provisionedIdentity, fullName: "Outro Titular" },
 });
 assert.equal(provisionConflict.response.status, 409, "idempotency key reuse with different identity data must fail");
+const reserveAfterProvision = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token });
+const persistenceAfterProvision = await call(worker, "GET", "/admin/persistence/status", { token: adminLogin.data.token });
+assert.equal(
+  reserveAfterProvision.data.institutionalReserve.amountCentavos,
+  reserveBeforeProvision.data.institutionalReserve.amountCentavos,
+  "manual account creation must not mutate institutional reserves",
+);
+assert.equal(
+  persistenceAfterProvision.data.ledgerEntryCount,
+  persistenceBeforeProvision.data.ledgerEntryCount,
+  "manual account creation must not post financial ledger entries",
+);
+assert.equal(
+  persistenceAfterProvision.data.transactionCount,
+  persistenceBeforeProvision.data.transactionCount,
+  "manual account creation must not create transactions",
+);
+assert.equal(persistenceAfterProvision.data.userCount, persistenceBeforeProvision.data.userCount + 1);
+assert.equal(persistenceAfterProvision.data.immutableAccountProvisioningAuditCount, 1);
+assert.equal(database.accountProvisioningAudits.size, 1, "manual account creation must have an immutable D1 audit record");
+assert.equal(
+  JSON.parse(database.stateRow.payload).registrationAudit.some((item) =>
+    item.eventType === "ACCOUNT_PROVISIONED_PENDING_IDENTITY"
+    && item.actor === "admin@bravusbank.com"
+  ),
+  true,
+  "manual account creation must create an admin audit event",
+);
 const reissuedInitialPassword = await call(worker, "POST", "/admin/accounts/" + provisionedIdentity.username + "/initial-password/reissue", {
   token: adminLogin.data.token,
   headers: { "idempotency-key": "initial-password-reissue-0001" },
@@ -494,6 +604,11 @@ const approveProvisionedIdentity = await call(worker, "POST", "/admin/kyc/" + pr
 assert.equal(approveProvisionedIdentity.response.status, 200, JSON.stringify(approveProvisionedIdentity.data));
 assert.equal(approveProvisionedIdentity.data.statusKyc, "APROVADO_IDENTIDADE");
 worker = await loadWorker("restart-after-provision");
+const reserveAfterRestart = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token });
+assert.equal(reserveAfterRestart.response.status, 200);
+assert.equal(reserveAfterRestart.data.institutionalReserve.amountCentavos, "100000000000000000");
+assert.equal(database.institutionalReserve.amount_centavos, "100000000000000000");
+assert.equal(database.institutionalReserveAudits.size, 1, "restart must not duplicate reserve audit events");
 const provisionedLoginAfterRestart = await call(worker, "POST", "/auth/login", {
   body: { username: provisionedIdentity.email, password: "Permanent123" },
 });
@@ -613,13 +728,50 @@ assert.equal(revoked.response.status, 401, "password reset must revoke prior ses
 worker = await loadWorker("restart-after-password-reset");
 const finalLogin = await call(worker, "POST", "/auth/login", { body: { username: "52998224725", password: "SenhaFinal456" } });
 assert.equal(finalLogin.response.status, 200, "new password must survive worker restart");
-const persistence = await call(worker, "GET", "/admin/persistence/status", { token: (await call(worker, "POST", "/auth/login", { body: { username: "admin@bravusbank.com", password: "6run0955" } })).data.token });
+const finalAdminLogin = await call(worker, "POST", "/auth/login", { body: { username: "admin@bravusbank.com", password: "6run0955" } });
+const finalAdminToken = finalAdminLogin.data.token;
+const persistence = await call(worker, "GET", "/admin/persistence/status", { token: finalAdminToken });
 assert.equal(persistence.data.backend, "D1");
 assert.equal(persistence.data.durable, true);
 assert.equal(persistence.data.ledgerValid, true);
 assert.equal(persistence.data.kycEvidenceSchemaReady, true);
 assert.equal(persistence.data.immutableKycAuditCount, 3);
 assert.ok(database.audits.size >= 10, "persistent state changes must be audited");
+
+const validStateRow = structuredClone(database.stateRow);
+const corruptedState = JSON.parse(validStateRow.payload);
+corruptedState.ledgerEntries.push({
+  transferId: "corrupted-ledger-test",
+  entryType: "debit",
+  accountNumber: "000000000",
+  signedAmountCentavos: -1,
+  currency: "BRL",
+  reason: "TEST_ONLY_CORRUPTION",
+  createdAt: new Date().toISOString(),
+});
+database.stateRow.payload = JSON.stringify(corruptedState);
+database.stateRow.payload_hash = createHash("sha256").update(database.stateRow.payload).digest("hex");
+worker = await loadWorker("corrupted-ledger-must-fail-closed");
+await assert.rejects(
+  () => call(worker, "GET", "/admin/ledger/balance-sheet", { token: finalAdminToken }),
+  /D1_FINANCIAL_VALIDATION_FAILED/,
+  "an unbalanced ledger must fail closed instead of reporting a healthy balance sheet",
+);
+database.stateRow = validStateRow;
+
+const validReserve = structuredClone(database.institutionalReserve);
+database.institutionalReserve.amount_centavos = "100000000000000001";
+worker = await loadWorker("tampered-reserve-must-fail-closed");
+await assert.rejects(
+  () => call(worker, "GET", "/admin/ledger/balance-sheet", { token: finalAdminToken }),
+  /D1_INSTITUTIONAL_RESERVE_HASH_MISMATCH/,
+  "a reserve value that does not match its immutable declaration must fail closed",
+);
+database.institutionalReserve = validReserve;
+worker = await loadWorker("restart-after-corruption-tests");
+const healthyAfterCorruptionTests = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: finalAdminToken });
+assert.equal(healthyAfterCorruptionTests.data.accounting.balanced, true);
+assert.equal(healthyAfterCorruptionTests.data.accounting.ledgerReconciled, true);
 
 console.log(JSON.stringify({
   result: "ok",
@@ -630,6 +782,10 @@ console.log(JSON.stringify({
   restartVerified: true,
   idempotencyVerified: true,
   passwordResetVerified: true,
+  institutionalReserveVerified: true,
+  corruptedLedgerRejected: true,
+  tamperedReserveRejected: true,
+  manualAdminAccountCreationVerified: true,
   provisionedAccountVerified: true,
   initialPasswordReissueVerified: true,
   provisionedKycEnrollmentVerified: true,
