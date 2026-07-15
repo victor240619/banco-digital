@@ -131,9 +131,6 @@ export const authService = {
         ? { headers: { 'X-Bravus-Client': appHeader } }
         : undefined
     );
-    if (!data?.token) throw new Error('Cadastro concluido sem sessao valida. Entre novamente.');
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('user', JSON.stringify(data));
     return data;
   },
   logout: async () => {
@@ -179,10 +176,9 @@ export const userService = {
     faceImage,
     biometricChallenge: 'FACE_CAMERA_CAPTURE_V1',
   }),
-  submitIdentityEvidence: (evidence, idempotencyKey) => api.post('/user/kyc/enroll', {
-    ...evidence,
-    biometricChallenge: 'FACE_CAMERA_CAPTURE_V1',
-  }, { headers: { 'Idempotency-Key': idempotencyKey } }),
+  submitIdentityEvidence: (evidence, idempotencyKey) => api.post('/user/kyc/enroll', evidence, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  }),
   getCreditSummary: () => api.get('/credit/summary'),
   getExternalTransfers: (limit = 20) => api.get(`/user/external-transfers?limit=${limit}`),
   getExternalTransferReceipt: (orderId) => api.get(`/user/external-transfers/${orderId}/receipt`),
@@ -214,13 +210,35 @@ export const passwordResetService = {
 export const adminService = {
   getDashboard: () => api.get('/admin/dashboard'),
   getAllUsers: () => api.get('/admin/users'),
+  getAccountRequests: () => api.get('/admin/account-requests'),
   provisionAccount: (payload, idempotencyKey) => api.post('/admin/accounts/provision', payload, {
     headers: { 'Idempotency-Key': idempotencyKey },
   }),
-  getUserById: (id) => api.get(`/admin/users/${id}`),
-  activateUser: (id) => api.put(`/admin/users/${id}/activate`),
-  deactivateUser: (id) => api.put(`/admin/users/${id}/deactivate`),
-  deleteUser: (id) => api.delete(`/admin/users/${id}`),
+  getUserAccount: (username) => api.get(`/admin/users/${encodeURIComponent(username)}`),
+  updateUserProfile: (username, payload, idempotencyKey) => api.put(
+    `/admin/users/${encodeURIComponent(username)}/profile`, payload,
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ),
+  blockUser: (username, reason, idempotencyKey) => api.post(
+    `/admin/users/${encodeURIComponent(username)}/block`, { reason },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ),
+  unblockUser: (username, reason, idempotencyKey) => api.post(
+    `/admin/users/${encodeURIComponent(username)}/unblock`, { reason },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ),
+  placeBalanceHold: (username, payload, idempotencyKey) => api.post(
+    `/admin/users/${encodeURIComponent(username)}/holds`, payload,
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ),
+  releaseBalanceHold: (username, holdId, reason, idempotencyKey) => api.post(
+    `/admin/users/${encodeURIComponent(username)}/holds/${encodeURIComponent(holdId)}/release`, { reason },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ),
+  resetUserPassword: (username, payload, idempotencyKey) => api.post(
+    `/admin/users/${encodeURIComponent(username)}/password-reset`, payload,
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ),
   getAllTransactions: () => api.get('/admin/transactions'),
 };
 

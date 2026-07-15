@@ -142,6 +142,7 @@ async function loadLiveSeed() {
       if (!user?.username) continue;
       usersByUsername[user.username] = {
         ...user,
+        active: typeof user.active === "boolean" ? user.active : user.isActive !== false,
         roles: Array.isArray(user.roles) ? user.roles : rolesForSnapshotUser(user),
       };
     }
@@ -317,6 +318,9 @@ const initialStateSeed = {
   accountProvisioningRequests: [],
   initialPasswordChallenges: [],
   initialPasswordReissues: [],
+  balanceHolds: [],
+  accountControlRequests: [],
+  accountControlAudit: [],
   kycEnrollmentChecks: [],
   kycEnrollmentRequests: [],
   loginAttempts: [],
@@ -350,6 +354,7 @@ let pendingBiometricWrites = [];
 let pendingKycAuditWrites = [];
 let pendingAccountProvisionAuditWrites = [];
 let pendingMasterCreditEventWrites = [];
+let pendingAccountControlEventWrites = [];
 let persistenceMeta = { backend: "D1", revision: 0, payloadHash: null, updatedAt: null };
 
 function normalizeState(candidate) {
@@ -360,6 +365,7 @@ function normalizeState(candidate) {
   next.users[admin.username] = { ...admin, ...(next.users[admin.username] || {}) };
   for (const user of Object.values(next.users)) {
     user.roles = Array.isArray(user.roles) && user.roles.length ? user.roles : ["ROLE_USER"];
+    if (typeof user.active !== "boolean") user.active = user.isActive !== false;
     user.credentialState = user.credentialState || "ACTIVE";
     if (!user.passwordCredential || user.passwordCredential.hash === legacyPasswordV0Hash) {
       user.passwordCredential = { ...legacyPasswordCredential };
@@ -383,6 +389,21 @@ function normalizeState(candidate) {
   next.masterCreditRequests = Array.isArray(next.masterCreditRequests) ? next.masterCreditRequests : [];
   next.initialPasswordChallenges = Array.isArray(next.initialPasswordChallenges) ? next.initialPasswordChallenges : [];
   next.initialPasswordReissues = Array.isArray(next.initialPasswordReissues) ? next.initialPasswordReissues : [];
+  next.balanceHolds = Array.isArray(next.balanceHolds) ? next.balanceHolds : [];
+  const holdIds = new Set();
+  for (const hold of next.balanceHolds) {
+    const amount = exactCentavos(hold?.amountCentavos, "normalized_balance_hold");
+    if (!hold?.id || holdIds.has(hold.id) || !next.users[hold.username]
+        || amount <= 0n || !["ACTIVE", "RELEASED"].includes(hold.status)) {
+      throw new Error("BALANCE_HOLD_STATE_INVALID");
+    }
+    if (hold.status === "RELEASED" && (!hold.releasedAt || !hold.releasedBy || !hold.releaseReason)) {
+      throw new Error("BALANCE_HOLD_RELEASE_STATE_INVALID");
+    }
+    holdIds.add(hold.id);
+  }
+  next.accountControlRequests = Array.isArray(next.accountControlRequests) ? next.accountControlRequests : [];
+  next.accountControlAudit = Array.isArray(next.accountControlAudit) ? next.accountControlAudit : [];
   next.kycEnrollmentChecks = Array.isArray(next.kycEnrollmentChecks) ? next.kycEnrollmentChecks : [];
   next.kycEnrollmentRequests = Array.isArray(next.kycEnrollmentRequests) ? next.kycEnrollmentRequests : [];
   next.loginAttempts = Array.isArray(next.loginAttempts) ? next.loginAttempts : [];
@@ -518,8 +539,9 @@ function revokeUserSessions(username) {
 }
 
 const credentialTransitions = Object.freeze({
-  INITIAL_CHANGE_REQUIRED: ["ACTIVE"],
-  ACTIVE: [],
+  INITIAL_CHANGE_REQUIRED: ["ACTIVE", "ADMIN_RESET_REQUIRED"],
+  ADMIN_RESET_REQUIRED: ["ACTIVE", "ADMIN_RESET_REQUIRED"],
+  ACTIVE: ["ADMIN_RESET_REQUIRED"],
 });
 
 function transitionCredential(user, next, actor, detail) {
@@ -623,6 +645,8 @@ async function decryptBiometricEvidence(id, kind) {
 }
 
 const passwordResetTransitions = Object.freeze({
+  ADMIN_PENDING: ["TEMP_PASSWORD_ISSUED", "REJECTED", "EXPIRED", "LOCKED"],
+  TEMP_PASSWORD_ISSUED: ["CONSUMED", "EXPIRED"],
   FACE_PENDING: ["REVIEW_PENDING", "REJECTED", "EXPIRED", "LOCKED"],
   REVIEW_PENDING: ["VERIFIED", "REJECTED", "EXPIRED", "LOCKED"],
   VERIFIED: ["CONSUMED", "EXPIRED"],
@@ -649,6 +673,8 @@ function transitionPasswordReset(request, next, actor, detail) {
 }
 
 function passwordResetPublicStatus(status) {
+  if (status === "ADMIN_PENDING") return "ADMIN_PENDING";
+  if (status === "TEMP_PASSWORD_ISSUED") return "TEMP_PASSWORD_ISSUED";
   return ["FACE_PENDING", "REVIEW_PENDING", "VERIFIED", "CONSUMED"].includes(status) ? status : "UNAVAILABLE";
 }
 
@@ -669,7 +695,153 @@ async function passwordResetRequestForClient(body) {
   return request;
 }
 
+const accountStatusTransitions = Object.freeze({
+  ACTIVE: ["BLOCKED_ADMIN"],
+  BLOCKED_ADMIN: ["ACTIVE"],
+});
+
+function accountStatus(user) {
+  return user?.active === false ? "BLOCKED_ADMIN" : "ACTIVE";
+}
+
+function transitionAccountStatus(user, next) {
+  const previous = accountStatus(user);
+  if (previous !== next && !accountStatusTransitions[previous]?.includes(next)) {
+    throw new Error("ACCOUNT_STATUS_INVALID_TRANSITION");
+  }
+  user.active = next === "ACTIVE";
+  return previous;
+}
+
+function activeBalanceHolds(username) {
+  return state.balanceHolds.filter((hold) => hold.username === username && hold.status === "ACTIVE");
+}
+
+function heldBalanceCentavos(user) {
+  return activeBalanceHolds(user.username).reduce((total, hold) => {
+    const amount = exactCentavos(hold.amountCentavos, "balance_hold");
+    if (amount <= 0n) throw new Error("BALANCE_HOLD_INVALID_AMOUNT");
+    return total + amount;
+  }, 0n);
+}
+
+function availableBalanceCentavos(user) {
+  const balance = exactCentavos(user.balance, "account_balance");
+  const held = heldBalanceCentavos(user);
+  if (held > balance) throw new Error("BALANCE_HOLDS_EXCEED_ACCOUNT_BALANCE");
+  return balance - held;
+}
+
+function availableBalanceNumber(user) {
+  const available = availableBalanceCentavos(user);
+  if (available > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("AVAILABLE_BALANCE_PRECISION_LIMIT");
+  return Number(available);
+}
+
+function ensureAvailableBalance(user, amount) {
+  if (availableBalanceCentavos(user) < exactCentavos(amount, "outgoing_amount")) {
+    throw new Error("INSUFFICIENT_AVAILABLE_BALANCE");
+  }
+}
+
+function assertAccountCanDebit(user, amount) {
+  if (!user || user.active === false) throw new Error("ACCOUNT_BLOCKED");
+  ensureAvailableBalance(user, amount);
+}
+
+function findAdminTargetUser(identifier) {
+  const decoded = decodeURIComponent(String(identifier || ""));
+  return Object.values(state.users).find((item) => item.username === decoded || String(item.id) === decoded) || null;
+}
+
+function accountControlEventView(entry) {
+  return {
+    id: entry.id,
+    eventType: entry.eventType,
+    actor: entry.actor,
+    reason: entry.reason,
+    holdId: entry.holdId || null,
+    amountCentavos: entry.amountCentavos || "0",
+    changedFields: Array.isArray(entry.changedFields) ? entry.changedFields : [],
+    createdAt: entry.createdAt,
+  };
+}
+
+function accountDetail(user) {
+  const held = heldBalanceCentavos(user);
+  const available = availableBalanceCentavos(user);
+  return {
+    account: userSummary(user),
+    balances: {
+      ledgerBalanceCentavos: String(user.balance),
+      heldBalanceCentavos: held.toString(),
+      availableBalanceCentavos: available.toString(),
+    },
+    holds: state.balanceHolds
+      .filter((hold) => hold.username === user.username)
+      .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
+    recentTransactions: state.transactions
+      .filter((transaction) => transaction.username === user.username)
+      .slice(0, 50)
+      .map((transaction) => hydrateTransaction(transaction, user)),
+    audit: state.accountControlAudit
+      .filter((entry) => entry.username === user.username)
+      .slice(0, 100)
+      .map(accountControlEventView),
+  };
+}
+
+async function accountControlAttempt(request, action, target, fingerprintParts) {
+  const idempotencyKey = String(request.headers.get("idempotency-key") || "").trim();
+  if (idempotencyKey.length < 16 || idempotencyKey.length > 150) {
+    throw new Error("IDEMPOTENCY_KEY_REQUIRED");
+  }
+  const idempotencyHash = await sha256Text(idempotencyKey);
+  const fingerprint = await sha256Text([
+    action,
+    target.username,
+    ...fingerprintParts.map((value) => String(value ?? "")),
+    passwordPepper(),
+  ].join("|"));
+  const previous = state.accountControlRequests.find((item) => item.idempotencyHash === idempotencyHash);
+  if (previous && previous.fingerprint !== fingerprint) throw new Error("IDEMPOTENCY_CONFLICT");
+  return { idempotencyHash, fingerprint, previous };
+}
+
+async function appendAccountControlEvent({
+  target, action, actor, reason, attempt, holdId = null, amountCentavos = "0", changedFields = [],
+}) {
+  const createdAt = now();
+  const entry = {
+    id: crypto.randomUUID(),
+    username: target.username,
+    eventType: action,
+    actor,
+    reason,
+    holdId,
+    amountCentavos: String(amountCentavos),
+    changedFields,
+    metadataHash: await sha256Text(JSON.stringify({ action, holdId, amountCentavos: String(amountCentavos), changedFields })),
+    idempotencyHash: attempt.idempotencyHash,
+    createdAt,
+  };
+  state.accountControlAudit.unshift(entry);
+  state.accountControlRequests.unshift({
+    idempotencyHash: attempt.idempotencyHash,
+    fingerprint: attempt.fingerprint,
+    action,
+    username: target.username,
+    eventId: entry.id,
+    holdId,
+    createdAt,
+  });
+  pendingAccountControlEventWrites.push(entry);
+  return entry;
+}
+
 function userSummary(user) {
+  const held = heldBalanceCentavos(user);
+  const available = availableBalanceCentavos(user);
   return {
     id: user.id,
     username: user.username,
@@ -679,13 +851,17 @@ function userSummary(user) {
     phone: user.phone,
     accountNumber: user.accountNumber,
     accountType: user.accountType,
-    balance: user.balance,
+    balance: Number(available),
+    ledgerBalanceCentavos: String(user.balance),
+    heldBalanceCentavos: held.toString(),
+    availableBalanceCentavos: available.toString(),
     statusKyc: user.statusKyc || "STATUS_NAO_INFORMADO",
     credentialState: user.credentialState || "ACTIVE",
     identityEvidenceRequired: user.statusKyc === "PENDENTE_VALIDACAO_IDENTIDADE" && !user.kycAnalysisId,
     roles: user.roles,
     active: user.active !== false,
     isActive: user.active !== false,
+    accountStatus: accountStatus(user),
     createdAt: user.createdAt || "2026-07-12T00:00:00-03:00",
   };
 }
@@ -697,7 +873,10 @@ function authResponse(user, token) {
     email: user.email,
     fullName: user.fullName,
     accountNumber: user.accountNumber,
-    balance: user.balance,
+    balance: availableBalanceNumber(user),
+    ledgerBalanceCentavos: String(user.balance),
+    heldBalanceCentavos: heldBalanceCentavos(user).toString(),
+    availableBalanceCentavos: availableBalanceCentavos(user).toString(),
     statusKyc: user.statusKyc || "STATUS_NAO_INFORMADO",
     identityEvidenceRequired: user.statusKyc === "PENDENTE_VALIDACAO_IDENTIDADE" && !user.kycAnalysisId,
     roles: user.roles,
@@ -713,7 +892,10 @@ function creditSummary(user) {
   return {
     userId: user.id,
     username: user.username,
-    balanceCentavos: user.balance,
+    balanceCentavos: availableBalanceNumber(user),
+    ledgerBalanceCentavos: String(user.balance),
+    heldBalanceCentavos: heldBalanceCentavos(user).toString(),
+    availableBalanceCentavos: availableBalanceCentavos(user).toString(),
     creditoDisponivelCentavos: grant ? grant.valorDisponivel : 0,
     creditoTotalConcedidoCentavos: grant ? grant.valorConcedido : 0,
     creditoTotalUsadoCentavos: grant ? grant.valorUsado : 0,
@@ -1077,7 +1259,7 @@ function commitInternalTransfer({ payer, beneficiary, amount, description, chann
       replayed: true,
     };
   }
-  if (payer.balance < value) throw new Error("INSUFFICIENT_BALANCE");
+  assertAccountCanDebit(payer, value);
 
   const tx = {
     id: nextNumericId(state.transactions),
@@ -1176,7 +1358,7 @@ function reconcileInternalOrder(order) {
   let txOut = outTx;
   let txIn = inTx;
   if (!txOut) {
-    if (payer.balance < amount) {
+    if (payer.active === false || availableBalanceCentavos(payer) < exactCentavos(amount, "reconciliation_amount")) {
       order.ledgerStatus = "RECONCILIATION_BLOCKED";
       order.reconciliationError = "PAYER_BALANCE_TOO_LOW_FOR_MISSING_DEBIT";
       state.ledgerAudit.unshift({ orderId: order.id, status: order.ledgerStatus, error: order.reconciliationError, createdAt: now() });
@@ -1435,6 +1617,7 @@ function enforceFinancialConsistency(reason) {
   reconcileStandaloneTransactions();
   materializeBalancesFromTransactions(reason);
   syncJoaoCreditGrantFromBalance();
+  for (const user of Object.values(state.users)) availableBalanceCentavos(user);
 }
 
 function validateSitesLedger() {
@@ -1524,6 +1707,8 @@ function settlementFor(body, idempotencyKey) {
 }
 
 function bankMe(user) {
+  const availableBalance = availableBalanceNumber(user);
+  const heldBalance = Number(heldBalanceCentavos(user));
   return {
     ...userSummary(user),
     phoneFormatted: user.phone || null,
@@ -1539,19 +1724,23 @@ function bankMe(user) {
       tipoChavePix: user.cpf ? "CPF" : "EMAIL",
     },
     saldos: {
-      saldoDisponivelCentavos: user.balance,
-      saldoDisponivel: user.balance / 100,
+      saldoDisponivelCentavos: availableBalance,
+      saldoDisponivel: availableBalance / 100,
+      saldoContabilCentavos: user.balance,
+      saldoContabil: user.balance / 100,
+      saldoRetidoCentavos: heldBalance,
+      saldoRetido: heldBalance / 100,
       limiteCreditoCentavos: 0,
       limiteCredito: 0,
       limitePixDiarioCentavos: 1000000,
       limitePixDiario: 10000,
-      totalDisponivelCentavos: user.balance,
-      totalDisponivel: user.balance / 100,
+      totalDisponivelCentavos: availableBalance,
+      totalDisponivel: availableBalance / 100,
     },
     conta: {
       nivel: "PREMIUM",
       statusKyc: user.statusKyc || "STATUS_NAO_INFORMADO",
-      ativa: true,
+      ativa: user.active !== false,
       abertura: "2026-07-12T00:00:00-03:00",
     },
     endereco: { cep: null, rua: null, numero: null, cidade: null, uf: null },
@@ -1611,7 +1800,9 @@ function userFromToken(request) {
     delete state.sessions[token];
     return null;
   }
-  return state.users[session.username] || null;
+  const user = state.users[session.username] || null;
+  if (!user || user.active === false) return null;
+  return user;
 }
 
 function publicLoginMatches(user, username) {
@@ -1623,7 +1814,7 @@ function publicLoginMatches(user, username) {
 }
 
 function canUseOutgoingBanking(user) {
-  return hasExplicitApprovedKyc(user);
+  return user?.active !== false && hasExplicitApprovedKyc(user);
 }
 
 function hasExplicitApprovedKyc(user) {
@@ -1711,11 +1902,14 @@ function buildKycAnalysis(body, user) {
   const documentType = documentTypeFor(body.type, documentNumber);
   const front = imageEvidence(body.documentFrontImage, "Frente do documento", 3500, 220, 140);
   const back = imageEvidence(body.documentBackImage, "Verso do documento", 3500, 220, 140);
-  const face = imageEvidence(body.faceImage, "Biometria facial", 2500, 240, 240);
+  const requireFace = body.requireFace !== false;
+  const face = requireFace
+    ? imageEvidence(body.faceImage, "Biometria facial", 2500, 240, 240)
+    : { ok: true, present: false, mime: null, bytes: 0, width: 0, height: 0, fingerprint: null };
   const duplicateEvidence =
     front.fingerprint
-    && (front.fingerprint === back.fingerprint || front.fingerprint === face.fingerprint || back.fingerprint === face.fingerprint);
-  const checks = [front, back, face];
+    && (front.fingerprint === back.fingerprint || (face.fingerprint && (front.fingerprint === face.fingerprint || back.fingerprint === face.fingerprint)));
+  const checks = requireFace ? [front, back, face] : [front, back];
   const messages = checks.filter((item) => !item.ok).map((item) => item.message);
   if (duplicateEvidence) messages.push("As imagens de documento e face devem ser capturas diferentes.");
   const evidenceOk = messages.length === 0;
@@ -1730,8 +1924,8 @@ function buildKycAnalysis(body, user) {
     provider: "BRAVUS_CAPTURE_QUALITY_SITES",
     subjectName: body.fullName || user?.fullName || "Titular informado",
     registrationStatus: documentChecksumOk ? "EVIDENCIA_DOCUMENTAL_CAPTURADA" : "DOCUMENTO_PENDENTE_VALIDACAO_OFICIAL",
-    biometricStatus: face.ok ? "CAPTURA_QUALIDADE_VALIDADA" : "FACE_AUSENTE",
-    biometricChallenge: body.biometricChallenge || "FACE_CAMERA_CAPTURE_V1",
+    biometricStatus: requireFace ? (face.ok ? "CAPTURA_QUALIDADE_VALIDADA" : "FACE_AUSENTE") : "BIOMETRIA_NAO_SOLICITADA",
+    biometricChallenge: requireFace ? (body.biometricChallenge || "FACE_CAMERA_CAPTURE_V1") : "DISABLED_ADMIN_POLICY",
     evidence: {
       documentFront: { present: front.present, mime: front.mime || null, bytes: front.bytes || 0, width: front.width || 0, height: front.height || 0 },
       documentBack: { present: back.present, mime: back.mime || null, bytes: back.bytes || 0, width: back.width || 0, height: back.height || 0 },
@@ -1824,6 +2018,79 @@ async function recordRegistrationCheck(request, availability) {
   return { rateLimited: false, actorHash, subjectHash };
 }
 
+function publicAccountRequests() {
+  return state.accountProvisioningRequests.filter((item) => item.requestType === "PUBLIC_ACCOUNT_REQUEST");
+}
+
+async function createPublicAccountRequest(body, recorded, availability) {
+  const identity = availability.identity;
+  const fullName = String(body.fullName || "").trim();
+  const phone = String(body.phone || "").replace(/\D/g, "");
+  if (!availability.available) {
+    const { identity: privateIdentity, ...publicAvailability } = availability;
+    return { error: json(publicAvailability, { status: 409, headers: { "cache-control": "no-store" } }) };
+  }
+  if (fullName.length < 5 || fullName.length > 120) {
+    return { error: badRequest("Informe o nome completo do titular.", "REGISTRATION_FULL_NAME_REQUIRED") };
+  }
+  const idempotencyKey = String(body.idempotencyKey || "").trim();
+  const fingerprintMaterial = [
+    identity.cpf, identity.username, identity.email, fullName.toLowerCase(), phone,
+  ].map((value) => String(value).length + ":" + String(value)).join("|");
+  const fingerprint = await sha256Text(fingerprintMaterial);
+  const previous = publicAccountRequests().find((item) =>
+    item.idempotencyKey === idempotencyKey
+    || item.fingerprint === fingerprint
+    || item.identity?.cpf === identity.cpf
+    || item.identity?.email === identity.email
+    || item.identity?.username === identity.username
+  );
+  if (previous) {
+    if (previous.idempotencyKey && idempotencyKey && previous.idempotencyKey === idempotencyKey && previous.fingerprint !== fingerprint) {
+      return { error: json({ message: "Chave de cadastro reutilizada com dados diferentes.", code: "REGISTRATION_REQUEST_IDEMPOTENCY_CONFLICT" }, { status: 409 }) };
+    }
+    return {
+      response: json({
+        status: previous.status,
+        requestId: previous.id,
+        message: "Solicitacao de abertura ja enviada ao administrador.",
+        adminReviewRequired: true,
+        accountCreated: false,
+        duplicateRequest: true,
+      }, { status: 202, headers: { "cache-control": "no-store" } }),
+    };
+  }
+  const createdAt = now();
+  const requestEntry = {
+    id: crypto.randomUUID(),
+    requestType: "PUBLIC_ACCOUNT_REQUEST",
+    idempotencyKey: idempotencyKey || "public-account-" + crypto.randomUUID(),
+    fingerprint,
+    status: "PENDING_ADMIN_REVIEW",
+    identity,
+    fullName,
+    phone,
+    subjectHash: recorded.subjectHash,
+    actor: "PUBLIC",
+    createdAt,
+  };
+  state.accountProvisioningRequests.unshift(requestEntry);
+  state.registrationAudit.unshift({
+    id: crypto.randomUUID(), eventType: "PUBLIC_ACCOUNT_REQUESTED", actor: "PUBLIC",
+    subjectHash: recorded.subjectHash, detail: "Solicitacao de abertura enviada para criacao manual pelo administrador.", createdAt,
+  });
+  state.registrationAudit = state.registrationAudit.slice(0, 500);
+  return {
+    response: json({
+      status: requestEntry.status,
+      requestId: requestEntry.id,
+      message: "Solicitacao enviada ao administrador. A conta sera criada internamente pelo Bravus.",
+      adminReviewRequired: true,
+      accountCreated: false,
+    }, { status: 202, headers: { "cache-control": "no-store" } }),
+  };
+}
+
 async function validatedRegistrationFaceCheck(body) {
   const tokenHash = await sha256Text(String(body.faceVerificationToken || ""));
   const subjectHash = await registrationSubjectHash(registrationIdentity(body));
@@ -1904,7 +2171,9 @@ async function ensureD1Schema(db) {
     db.prepare("CREATE TABLE IF NOT EXISTS bravus_account_provisioning_audit (id TEXT PRIMARY KEY NOT NULL, account_username TEXT NOT NULL, subject_hash TEXT NOT NULL, actor TEXT NOT NULL, event_type TEXT NOT NULL CHECK (event_type = 'ACCOUNT_PROVISIONED_PENDING_IDENTITY'), created_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS bravus_master_credit_reserve (code TEXT PRIMARY KEY NOT NULL, currency TEXT NOT NULL CHECK (currency = 'BRL'), total_amount_centavos TEXT NOT NULL CHECK (length(total_amount_centavos) BETWEEN 1 AND 40 AND total_amount_centavos NOT GLOB '*[^0-9]*'), classification TEXT NOT NULL CHECK (classification = 'MASTER_BOOK_CREDIT'), status TEXT NOT NULL CHECK (status = 'ACTIVE'), transfer_scope TEXT NOT NULL CHECK (transfer_scope = 'ADMIN_APPROVED_CUSTOMERS'), admin_only INTEGER NOT NULL CHECK (admin_only = 1), policy_version INTEGER NOT NULL CHECK (policy_version >= 1), payload_hash TEXT NOT NULL, activated_at TEXT NOT NULL)"),
     db.prepare("CREATE TABLE IF NOT EXISTS bravus_master_credit_events (id TEXT PRIMARY KEY NOT NULL, reserve_code TEXT NOT NULL, grant_id TEXT, event_type TEXT NOT NULL CHECK (event_type IN ('RESERVE_ACTIVATED','GRANT_CREATED','GRANT_RELEASED')), account_username TEXT, amount_centavos TEXT NOT NULL CHECK (length(amount_centavos) BETWEEN 1 AND 40 AND amount_centavos NOT GLOB '*[^0-9]*' AND amount_centavos <> '0' AND (amount_centavos = '0' OR substr(amount_centavos, 1, 1) <> '0')), actor TEXT NOT NULL, assessment_reason TEXT NOT NULL, eligibility_rule TEXT, idempotency_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, FOREIGN KEY (reserve_code) REFERENCES bravus_master_credit_reserve(code), UNIQUE (grant_id, event_type), CHECK ((event_type = 'RESERVE_ACTIVATED' AND grant_id IS NULL AND account_username IS NULL) OR (event_type IN ('GRANT_CREATED','GRANT_RELEASED') AND grant_id IS NOT NULL AND account_username IS NOT NULL)))"),
+    db.prepare("CREATE TABLE IF NOT EXISTS bravus_account_control_events (id TEXT PRIMARY KEY NOT NULL, account_username TEXT NOT NULL, event_type TEXT NOT NULL CHECK (event_type IN ('PROFILE_UPDATED','ACCOUNT_BLOCKED','ACCOUNT_UNBLOCKED','BALANCE_HOLD_PLACED','BALANCE_HOLD_RELEASED','PASSWORD_RESET_BY_ADMIN')), hold_id TEXT, amount_centavos TEXT NOT NULL CHECK (length(amount_centavos) BETWEEN 1 AND 40 AND amount_centavos NOT GLOB '*[^0-9]*' AND (amount_centavos = '0' OR substr(amount_centavos, 1, 1) <> '0')), actor TEXT NOT NULL, reason TEXT NOT NULL, metadata_hash TEXT NOT NULL, idempotency_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, CHECK ((event_type IN ('BALANCE_HOLD_PLACED','BALANCE_HOLD_RELEASED') AND hold_id IS NOT NULL AND amount_centavos <> '0') OR (event_type NOT IN ('BALANCE_HOLD_PLACED','BALANCE_HOLD_RELEASED') AND hold_id IS NULL)))"),
     db.prepare("CREATE INDEX IF NOT EXISTS bravus_kyc_audit_username_created_idx ON bravus_kyc_audit (username, created_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS bravus_account_control_events_username_created_idx ON bravus_account_control_events (account_username, created_at)"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_ledger_entries_no_update BEFORE UPDATE ON bravus_ledger_entries BEGIN SELECT RAISE(ABORT, 'Ledger entries are immutable; create a compensating entry'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_ledger_entries_no_delete BEFORE DELETE ON bravus_ledger_entries BEGIN SELECT RAISE(ABORT, 'Ledger entries are immutable; create a compensating entry'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_state_audit_no_update BEFORE UPDATE ON bravus_state_audit BEGIN SELECT RAISE(ABORT, 'State audit entries are immutable'); END"),
@@ -1923,6 +2192,8 @@ async function ensureD1Schema(db) {
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_master_credit_reserve_no_delete BEFORE DELETE ON bravus_master_credit_reserve BEGIN SELECT RAISE(ABORT, 'Master credit reserve is immutable'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_master_credit_events_no_update BEFORE UPDATE ON bravus_master_credit_events BEGIN SELECT RAISE(ABORT, 'Master credit events are immutable'); END"),
     db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_master_credit_events_no_delete BEFORE DELETE ON bravus_master_credit_events BEGIN SELECT RAISE(ABORT, 'Master credit events are immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_account_control_events_no_update BEFORE UPDATE ON bravus_account_control_events BEGIN SELECT RAISE(ABORT, 'Account control events are immutable'); END"),
+    db.prepare("CREATE TRIGGER IF NOT EXISTS bravus_account_control_events_no_delete BEFORE DELETE ON bravus_account_control_events BEGIN SELECT RAISE(ABORT, 'Account control events are immutable'); END"),
   ]);
   await db.batch([
     db.prepare("INSERT OR IGNORE INTO bravus_institutional_reserve (code, currency, amount_centavos, classification, status, customer_funds, transferable, source_reference, policy_version, payload_hash, declared_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)")
@@ -2322,6 +2593,80 @@ function masterCreditEventWriteStatement(db, entry, revision, payloadHash) {
     );
 }
 
+function accountControlEventWriteStatement(db, entry, revision, payloadHash) {
+  return db.prepare("INSERT INTO bravus_account_control_events (id, account_username, event_type, hold_id, amount_centavos, actor, reason, metadata_hash, idempotency_hash, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM bravus_state WHERE id = 1 AND revision = ? AND payload_hash = ?")
+    .bind(
+      entry.id,
+      entry.username,
+      entry.eventType,
+      entry.holdId || null,
+      String(entry.amountCentavos || "0"),
+      entry.actor,
+      entry.reason,
+      entry.metadataHash,
+      entry.idempotencyHash,
+      entry.createdAt,
+      revision,
+      payloadHash,
+    );
+}
+
+function accountControlEventSignature(entry) {
+  return [
+    entry.id || "",
+    entry.username ?? entry.account_username ?? "",
+    entry.eventType ?? entry.event_type ?? "",
+    entry.holdId ?? entry.hold_id ?? "",
+    String(entry.amountCentavos ?? entry.amount_centavos ?? "0"),
+    entry.metadataHash ?? entry.metadata_hash ?? "",
+    entry.idempotencyHash ?? entry.idempotency_hash ?? "",
+  ].join("|");
+}
+
+function accountControlLifecycleValid() {
+  const holdsById = new Map(state.balanceHolds.map((hold) => [hold.id, hold]));
+  for (const hold of state.balanceHolds) {
+    const holdEvents = state.accountControlAudit.filter((entry) => entry.holdId === hold.id);
+    const placed = holdEvents.filter((entry) => entry.eventType === "BALANCE_HOLD_PLACED");
+    const released = holdEvents.filter((entry) => entry.eventType === "BALANCE_HOLD_RELEASED");
+    if (placed.length !== 1 || placed[0].username !== hold.username
+        || String(placed[0].amountCentavos) !== String(hold.amountCentavos)) return false;
+    if (hold.status === "ACTIVE" && released.length !== 0) return false;
+    if (hold.status === "RELEASED" && (released.length !== 1
+        || released[0].username !== hold.username
+        || String(released[0].amountCentavos) !== String(hold.amountCentavos))) return false;
+  }
+  for (const entry of state.accountControlAudit) {
+    if (["BALANCE_HOLD_PLACED", "BALANCE_HOLD_RELEASED"].includes(entry.eventType)
+        && !holdsById.has(entry.holdId)) return false;
+  }
+  for (const account of Object.values(state.users)) {
+    const lastStatusEvent = state.accountControlAudit.find((entry) =>
+      entry.username === account.username && ["ACCOUNT_BLOCKED", "ACCOUNT_UNBLOCKED"].includes(entry.eventType)
+    );
+    if (lastStatusEvent) {
+      const expectedActive = lastStatusEvent.eventType === "ACCOUNT_UNBLOCKED";
+      if ((account.active !== false) !== expectedActive) return false;
+    }
+  }
+  return true;
+}
+
+async function validateAccountControlAudit(db, pendingEvents = []) {
+  const result = await db.prepare("SELECT id, account_username, event_type, hold_id, amount_centavos, metadata_hash, idempotency_hash FROM bravus_account_control_events").all();
+  const persistedEvents = Array.isArray(result?.results) ? result.results : [];
+  const actual = [...persistedEvents, ...pendingEvents].map(accountControlEventSignature).sort();
+  const expected = state.accountControlAudit.map(accountControlEventSignature).sort();
+  return {
+    actual: persistedEvents.length,
+    expected: expected.length,
+    pendingEventCount: pendingEvents.length,
+    valid: accountControlLifecycleValid()
+      && actual.length === expected.length
+      && actual.every((signature, index) => signature === expected[index]),
+  };
+}
+
 async function loadOrCreateD1State(db) {
   await ensureD1Schema(db);
   let row = await db.prepare("SELECT revision, payload, payload_hash, updated_at FROM bravus_state WHERE id = 1").first();
@@ -2358,6 +2703,8 @@ async function persistD1State(db, previous, request, actor) {
   if (!masterAllocation.balanced) throw new Error("D1_MASTER_CREDIT_ALLOCATION_FAILED");
   const masterAudit = await validateMasterCreditAudit(db, pendingMasterCreditEventWrites);
   if (!masterAudit.valid) throw new Error("D1_MASTER_CREDIT_AUDIT_MISMATCH");
+  const accountControlAudit = await validateAccountControlAudit(db, pendingAccountControlEventWrites);
+  if (!accountControlAudit.valid) throw new Error("D1_ACCOUNT_CONTROL_AUDIT_MISMATCH");
 
   const payload = JSON.stringify(state);
   const payloadHash = await sha256Text(payload);
@@ -2385,6 +2732,7 @@ async function persistD1State(db, previous, request, actor) {
     ...pendingKycAuditWrites.map((entry) => kycAuditWriteStatement(db, entry, nextRevision, payloadHash)),
     ...pendingAccountProvisionAuditWrites.map((entry) => accountProvisionAuditWriteStatement(db, entry, nextRevision, payloadHash)),
     ...pendingMasterCreditEventWrites.map((entry) => masterCreditEventWriteStatement(db, entry, nextRevision, payloadHash)),
+    ...pendingAccountControlEventWrites.map((entry) => accountControlEventWriteStatement(db, entry, nextRevision, payloadHash)),
   ];
   const results = await db.batch(statements);
   const changed = Number(results?.[0]?.meta?.changes || 0);
@@ -2419,12 +2767,15 @@ async function handlePersistedApi(request, env) {
       pendingKycAuditWrites = [];
       pendingAccountProvisionAuditWrites = [];
       pendingMasterCreditEventWrites = [];
+      pendingAccountControlEventWrites = [];
       persistenceMeta = {
         backend: "D1",
         revision: Number(previous.revision),
         payloadHash: previous.payload_hash,
         updatedAt: previous.updated_at || null,
       };
+      const accountControlAudit = await validateAccountControlAudit(env.DB);
+      if (!accountControlAudit.valid) throw new Error("D1_ACCOUNT_CONTROL_AUDIT_MISMATCH");
       const attemptRequest = makeRequest();
       const actor = userFromToken(attemptRequest)?.username || "PUBLIC";
       const response = await handleApi(attemptRequest);
@@ -2456,6 +2807,12 @@ async function handleApi(request) {
       state.loginAttempts.unshift({ identifierHash: loginIdentifierHash, createdAt: now() });
       return json("Invalid username or password", { status: 400 });
     }
+    if (user.active === false) {
+      return json({
+        message: "Esta conta esta bloqueada administrativamente. Procure o suporte Bravus.",
+        code: "ACCOUNT_BLOCKED",
+      }, { status: 403, headers: { "cache-control": "no-store" } });
+    }
     if (user.statusKyc === "REJEITADO_IDENTIDADE") {
       return json({
         message: "A abertura desta conta foi rejeitada. Procure o suporte Bravus.",
@@ -2466,7 +2823,7 @@ async function handleApi(request) {
     if (!user.passwordCredential.peppered) {
       user.passwordCredential = await createPasswordCredential(body.password);
     }
-    if (user.credentialState === "INITIAL_CHANGE_REQUIRED") {
+    if (["INITIAL_CHANGE_REQUIRED", "ADMIN_RESET_REQUIRED"].includes(user.credentialState)) {
       if (!user.initialCredentialExpiresAt || new Date(user.initialCredentialExpiresAt).getTime() <= Date.now()) {
         return json({
           message: "A senha inicial expirou. Solicite uma nova senha inicial ao administrador.",
@@ -2493,7 +2850,7 @@ async function handleApi(request) {
     }
     const challenge = await initialPasswordChallengeForToken(body.initialPasswordChangeToken);
     const account = challenge ? state.users[challenge.username] : null;
-    if (!challenge || !account || account.credentialState !== "INITIAL_CHANGE_REQUIRED") {
+    if (!challenge || !account || !["INITIAL_CHANGE_REQUIRED", "ADMIN_RESET_REQUIRED"].includes(account.credentialState)) {
       return badRequest("A troca da senha inicial expirou. Entre novamente.", "INITIAL_PASSWORD_CHANGE_INVALID");
     }
     if (await verifyPassword(body.newPassword, account.passwordCredential)) {
@@ -2547,12 +2904,12 @@ async function handleApi(request) {
       identifierHash,
       idempotencyKey,
       clientSecretHash,
-      challenge: randomToken(24),
-      instruction: "Olhe para a camera, vire levemente o rosto para a direita e mantenha os olhos abertos.",
-      status: "FACE_PENDING",
+      challenge: null,
+      instruction: "Solicitacao enviada ao administrador. O admin deve emitir uma senha temporaria para o usuario entrar e trocar dentro da conta.",
+      status: "ADMIN_PENDING",
       attempts: 0,
       createdAt,
-      expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     };
     state.passwordResetRequests.unshift(resetRequest);
     state.passwordResetAudit.unshift({
@@ -2561,48 +2918,18 @@ async function handleApi(request) {
     });
     return json({
       requestId: resetRequest.requestId,
-      challenge: resetRequest.challenge,
       instruction: resetRequest.instruction,
       expiresAt: resetRequest.expiresAt,
-      status: "FACE_PENDING",
+      status: "ADMIN_PENDING",
     }, { status: 202 });
   }
 
   if (request.method === "POST" && path === "/auth/password-reset/face") {
-    const body = await request.json().catch(() => ({}));
-    let resetRequest;
-    try {
-      resetRequest = await passwordResetRequestForClient(body);
-    } catch {
-      return badRequest("Solicitacao indisponivel.", "PASSWORD_RESET_UNAVAILABLE");
-    }
-    if (resetRequest.status !== "FACE_PENDING") {
-      return json({ status: passwordResetPublicStatus(resetRequest.status) }, { status: 202 });
-    }
-    resetRequest.attempts += 1;
-    if (String(body.challenge || "") !== resetRequest.challenge) {
-      if (resetRequest.attempts >= 3) transitionPasswordReset(resetRequest, "LOCKED", "PUBLIC", "Limite de desafios invalidos excedido.");
-      return badRequest("Desafio facial invalido.", "PASSWORD_RESET_CHALLENGE_INVALID");
-    }
-    const face = imageEvidence(body.faceImage, "Biometria facial", 2500);
-    if (!face.ok) {
-      if (resetRequest.attempts >= 3) transitionPasswordReset(resetRequest, "LOCKED", "PUBLIC", "Limite de capturas invalidas excedido.");
-      return badRequest(face.message, "PASSWORD_RESET_FACE_INVALID");
-    }
-    const enrolled = resetRequest.username ? state.kycEvidence[resetRequest.username] : null;
-    if (!resetRequest.username || !enrolled?.faceEvidenceId) {
-      transitionPasswordReset(resetRequest, "REJECTED", "SYSTEM", "Conta ou biometria de abertura indisponivel.");
-      return json({ status: "UNAVAILABLE" }, { status: 202 });
-    }
-    const submitted = await stageBiometricEvidence({
-      value: body.faceImage,
-      kind: "PASSWORD_RESET_FACE",
-      username: resetRequest.username,
-    });
-    resetRequest.submittedFaceEvidenceId = submitted.id;
-    resetRequest.submittedFaceSha256 = submitted.sha256;
-    transitionPasswordReset(resetRequest, "REVIEW_PENDING", "PUBLIC", "Captura facial recebida para revisao humana.");
-    return json({ status: "REVIEW_PENDING" }, { status: 202 });
+    return json({
+      status: "ADMIN_PENDING",
+      message: "Recuperacao por biometria foi desativada. Aguarde o administrador emitir uma senha temporaria.",
+      code: "PASSWORD_RESET_ADMIN_ONLY",
+    }, { status: 202, headers: { "cache-control": "no-store" } });
   }
 
   if (request.method === "POST" && path === "/auth/password-reset/status") {
@@ -2616,33 +2943,14 @@ async function handleApi(request) {
   }
 
   if (request.method === "POST" && path === "/auth/password-reset/complete") {
-    const body = await request.json().catch(() => ({}));
-    let resetRequest;
-    try {
-      resetRequest = await passwordResetRequestForClient(body);
-    } catch {
-      return badRequest("Solicitacao indisponivel.", "PASSWORD_RESET_UNAVAILABLE");
-    }
-    if (resetRequest.status !== "VERIFIED") {
-      return badRequest("A verificacao facial ainda nao foi aprovada.", "PASSWORD_RESET_NOT_VERIFIED");
-    }
-    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$/.test(String(body.newPassword || ""))) {
-      return badRequest("Use no minimo 8 caracteres, com letra maiuscula, minuscula e numero.", "WEAK_PASSWORD");
-    }
-    const account = state.users[resetRequest.username];
-    if (!account) return badRequest("Solicitacao indisponivel.", "PASSWORD_RESET_UNAVAILABLE");
-    account.passwordCredential = await createPasswordCredential(body.newPassword);
-    revokeUserSessions(account.username);
-    resetRequest.consumedAt = now();
-    transitionPasswordReset(resetRequest, "CONSUMED", account.username, "Senha substituida e sessoes anteriores revogadas.");
-    return json({ status: "CONSUMED" });
+    return badRequest(
+      "A troca publica de senha foi desativada. O administrador deve emitir uma senha temporaria; depois o usuario troca a senha dentro da conta.",
+      "PASSWORD_RESET_ADMIN_ONLY",
+    );
   }
 
   if (request.method === "POST" && path === "/auth/register/availability") {
     const body = await request.json().catch(() => ({}));
-    if (!isMobileRegistrationClient(request, body)) {
-      return json({ message: "A abertura de conta esta disponivel somente no app mobile Bravus Bank.", code: "MOBILE_APP_REQUIRED" }, { status: 403 });
-    }
     const availability = registrationAvailability(body);
     const recorded = await recordRegistrationCheck(request, availability);
     if (recorded.rateLimited) {
@@ -2653,137 +2961,22 @@ async function handleApi(request) {
   }
 
   if (request.method === "POST" && path === "/auth/register/face-check") {
-    const body = await request.json().catch(() => ({}));
-    if (!isMobileRegistrationClient(request, body)) {
-      return json({ message: "A abertura de conta esta disponivel somente no app mobile Bravus Bank.", code: "MOBILE_APP_REQUIRED" }, { status: 403 });
-    }
-    const availability = registrationAvailability(body);
-    const recorded = await recordRegistrationCheck(request, availability);
-    if (recorded.rateLimited) {
-      return json({ message: "Muitas verificacoes. Aguarde antes de tentar novamente.", code: "RATE_LIMITED" }, { status: 429 });
-    }
-    if (!availability.available) {
-      const { identity, ...publicAvailability } = availability;
-      return json(publicAvailability, { status: 409, headers: { "cache-control": "no-store" } });
-    }
-    if (String(body.biometricChallenge || "") !== "FACE_CAMERA_CAPTURE_V1") {
-      return badRequest("Desafio de captura facial invalido.", "REGISTRATION_FACE_CHALLENGE_INVALID");
-    }
-    const face = imageEvidence(body.faceImage, "Biometria facial", 2500, 240, 240);
-    if (!face.ok) return badRequest(face.message, "REGISTRATION_FACE_INVALID");
-
-    const token = randomToken(32);
-    const tokenHash = await sha256Text(token);
-    const faceSha256 = await sha256Text(String(body.faceImage));
-    const createdAt = now();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-    state.registrationFaceChecks = state.registrationFaceChecks
-      .filter((item) => new Date(item.expiresAt).getTime() > Date.now())
-      .slice(0, 199);
-    state.registrationFaceChecks.unshift({
-      id: crypto.randomUUID(), tokenHash, subjectHash: recorded.subjectHash, faceSha256,
-      status: "VALIDATED", createdAt, expiresAt,
-      quality: { mime: face.mime, bytes: face.bytes, width: face.width, height: face.height },
-    });
-    state.registrationAudit.unshift({
-      id: crypto.randomUUID(), eventType: "FACE_CAPTURE_VALIDATED", actor: "PUBLIC_MOBILE",
-      subjectHash: recorded.subjectHash, detail: "Captura e resolucao validadas automaticamente.", createdAt,
-    });
-    state.registrationAudit = state.registrationAudit.slice(0, 500);
     return json({
-      status: "CAPTURE_VALIDATED",
-      faceVerificationToken: token,
-      expiresAt,
-      message: "Captura facial validada automaticamente.",
-    }, { headers: { "cache-control": "no-store" } });
+      status: "DISABLED",
+      message: "Biometria removida do cadastro publico. Envie a solicitacao para analise do administrador.",
+      code: "REGISTRATION_ADMIN_ONLY",
+    }, { status: 202, headers: { "cache-control": "no-store" } });
   }
 
   if (request.method === "POST" && path === "/auth/register") {
     const body = await request.json().catch(() => ({}));
-    if (!isMobileRegistrationClient(request, body)) {
-      return json({ message: "A abertura de conta esta disponivel somente no app mobile Bravus Bank.", code: "MOBILE_APP_REQUIRED" }, { status: 403 });
-    }
     const availability = registrationAvailability(body);
     const recorded = await recordRegistrationCheck(request, availability);
     if (recorded.rateLimited) {
       return json({ message: "Muitas verificacoes. Aguarde antes de tentar novamente.", code: "RATE_LIMITED" }, { status: 429 });
     }
-    if (!availability.available) {
-      const { identity, ...publicAvailability } = availability;
-      return json(publicAvailability, { status: 409, headers: { "cache-control": "no-store" } });
-    }
-    const { cpf: normalizedCpf, username, email } = availability.identity;
-    const fullName = String(body.fullName || "").trim();
-    if (fullName.length < 5) {
-      return badRequest("Informe o nome completo do titular.", "REGISTRATION_FULL_NAME_REQUIRED");
-    }
-    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$/.test(String(body.password || ""))) {
-      return badRequest(
-        "Use no minimo 8 caracteres, com letra maiuscula, minuscula e numero.",
-        "WEAK_PASSWORD",
-      );
-    }
-    if (!body.faceVerificationToken) {
-      return badRequest("Valide a captura facial antes de concluir o cadastro.", "REGISTRATION_FACE_VERIFICATION_REQUIRED");
-    }
-    const faceCheck = await validatedRegistrationFaceCheck(body);
-    if (!faceCheck) {
-      return badRequest("A validacao facial expirou ou nao corresponde a este cadastro. Capture novamente.", "REGISTRATION_FACE_VERIFICATION_INVALID");
-    }
-    const kycAnalysis = buildKycAnalysis({ ...body, cpf: normalizedCpf }, null);
-    if (kycAnalysis.status !== "EVIDENCIA_CAPTURADA_AUTO") {
-      return badRequest(kycAnalysis.errorMessage || "Envie frente, verso do documento e capture a biometria facial.", "REGISTRATION_EVIDENCE_INVALID");
-    }
-    let documentFront;
-    let documentBack;
-    let enrolledFace;
-    try {
-      documentFront = await stageBiometricEvidence({ value: body.documentFrontImage, kind: "KYC_DOCUMENT_FRONT", username });
-      documentBack = await stageBiometricEvidence({ value: body.documentBackImage, kind: "KYC_DOCUMENT_BACK", username });
-      enrolledFace = await stageBiometricEvidence({ value: body.faceImage, kind: "ENROLLED_FACE", username });
-    } catch (error) {
-      pendingBiometricWrites = [];
-      return json({ message: "Nao foi possivel proteger as evidencias de abertura.", code: error.message }, { status: 503 });
-    }
-    const user = {
-      ...joao,
-      id: Math.max(...Object.values(state.users).map((item) => item.id)) + 1,
-      username,
-      email: email || ("cliente" + normalizedCpf.slice(-4) + "@bravusbank.com"),
-      fullName,
-      cpf: normalizedCpf,
-      phone: String(body.phone || "").replace(/\\D/g, ""),
-      accountNumber: accountNumberForDocument(normalizedCpf),
-      balance: 0,
-      roles: ["ROLE_USER"],
-      statusKyc: "PENDENTE_VALIDACAO_IDENTIDADE",
-      kycAnalysisId: kycAnalysis.id,
-      passwordCredential: await createPasswordCredential(body.password),
-    };
-    kycAnalysis.subjectName = user.fullName;
-    state.users[user.username] = user;
-    state.documentAnalyses.unshift(kycAnalysis);
-    state.kycEvidence[user.username] = {
-      analysisId: kycAnalysis.id,
-      documentType: kycAnalysis.documentType,
-      documentNumber: kycAnalysis.documentNumber,
-      biometricStatus: kycAnalysis.biometricStatus,
-      evidence: kycAnalysis.evidence,
-      documentFrontEvidenceId: documentFront.id,
-      documentBackEvidenceId: documentBack.id,
-      faceEvidenceId: enrolledFace.id,
-      faceSha256: enrolledFace.sha256,
-      createdAt: kycAnalysis.createdAt,
-    };
-    faceCheck.status = "CONSUMED";
-    faceCheck.consumedAt = now();
-    state.registrationAudit.unshift({
-      id: crypto.randomUUID(), eventType: "ACCOUNT_CREATED", actor: user.username,
-      subjectHash: recorded.subjectHash, detail: "Conta criada apos disponibilidade e captura validadas.", createdAt: now(),
-    });
-    state.registrationAudit = state.registrationAudit.slice(0, 500);
-    const token = createSession(user);
-    return json(authResponse(user, token));
+    const result = await createPublicAccountRequest(body, recorded, availability);
+    return result.error || result.response;
   }
 
   const user = userFromToken(request);
@@ -2797,37 +2990,10 @@ async function handleApi(request) {
   }
 
   if (request.method === "POST" && path === "/user/kyc/face-check") {
-    const body = await request.json().catch(() => ({}));
-    if (user.statusKyc !== "PENDENTE_VALIDACAO_IDENTIDADE") {
-      return badRequest("A conta nao esta aguardando validacao de identidade.", "KYC_INVALID_STATE");
-    }
-    if (state.kycEvidence[user.username]?.faceEvidenceId) {
-      return badRequest("As evidencias de identidade ja foram enviadas.", "KYC_EVIDENCE_ALREADY_SUBMITTED");
-    }
-    if (String(body.biometricChallenge || "") !== "FACE_CAMERA_CAPTURE_V1") {
-      return badRequest("Desafio de captura facial invalido.", "KYC_FACE_CHALLENGE_INVALID");
-    }
-    const face = imageEvidence(body.faceImage, "Biometria facial", 2500, 240, 240);
-    if (!face.ok) return badRequest(face.message, "KYC_FACE_INVALID");
-    const token = randomToken(32);
-    const createdAt = now();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-    state.kycEnrollmentChecks = state.kycEnrollmentChecks
-      .filter((item) => item.status === "VALIDATED" && new Date(item.expiresAt).getTime() > Date.now())
-      .slice(0, 199);
-    state.kycEnrollmentChecks.unshift({
-      id: crypto.randomUUID(), username: user.username, tokenHash: await sha256Text(token),
-      faceSha256: await sha256Text(String(body.faceImage)), status: "VALIDATED", createdAt, expiresAt,
-      quality: { mime: face.mime, bytes: face.bytes, width: face.width, height: face.height },
-    });
-    state.registrationAudit.unshift({
-      id: crypto.randomUUID(), eventType: "KYC_FACE_CAPTURE_VALIDATED", actor: user.username,
-      subjectHash: await sha256Text(user.username), detail: "Captura facial autenticada e validada para envio KYC.", createdAt,
-    });
-    state.registrationAudit = state.registrationAudit.slice(0, 500);
     return json({
-      status: "CAPTURE_VALIDATED", faceVerificationToken: token, expiresAt,
-      message: "Captura facial validada. Envie os documentos para analise.",
+      status: "DISABLED",
+      message: "Biometria removida apos o login. Envie somente os documentos para analise administrativa.",
+      code: "KYC_FACE_DISABLED",
     }, { headers: { "cache-control": "no-store" } });
   }
 
@@ -2840,7 +3006,6 @@ async function handleApi(request) {
     const imageHashes = await Promise.all([
       sha256Text(String(body.documentFrontImage || "")),
       sha256Text(String(body.documentBackImage || "")),
-      sha256Text(String(body.faceImage || "")),
     ]);
     const fingerprint = await sha256Text([user.username, ...imageHashes].join("|"));
     const previousEnrollment = state.kycEnrollmentRequests.find((item) => item.idempotencyKey === idempotencyKey);
@@ -2858,24 +3023,18 @@ async function handleApi(request) {
     if (user.statusKyc !== "PENDENTE_VALIDACAO_IDENTIDADE") {
       return badRequest("A conta nao esta aguardando validacao de identidade.", "KYC_INVALID_STATE");
     }
-    if (state.kycEvidence[user.username]?.faceEvidenceId) {
+    if (state.kycEvidence[user.username]?.documentFrontEvidenceId) {
       return badRequest("As evidencias de identidade ja foram enviadas.", "KYC_EVIDENCE_ALREADY_SUBMITTED");
     }
-    const faceCheck = await validatedKycEnrollmentCheck(body, user);
-    if (!faceCheck) {
-      return badRequest("A validacao facial expirou ou nao corresponde a esta conta.", "KYC_FACE_VERIFICATION_INVALID");
-    }
-    const kycAnalysis = buildKycAnalysis({ ...body, cpf: user.cpf, fullName: user.fullName }, user);
+    const kycAnalysis = buildKycAnalysis({ ...body, cpf: user.cpf, fullName: user.fullName, requireFace: false }, user);
     if (kycAnalysis.status !== "EVIDENCIA_CAPTURADA_AUTO") {
-      return badRequest(kycAnalysis.errorMessage || "Envie frente, verso do documento e biometria facial.", "KYC_EVIDENCE_INVALID");
+      return badRequest(kycAnalysis.errorMessage || "Envie frente e verso do documento.", "KYC_EVIDENCE_INVALID");
     }
     let documentFront;
     let documentBack;
-    let enrolledFace;
     try {
       documentFront = await stageBiometricEvidence({ value: body.documentFrontImage, kind: "KYC_DOCUMENT_FRONT", username: user.username });
       documentBack = await stageBiometricEvidence({ value: body.documentBackImage, kind: "KYC_DOCUMENT_BACK", username: user.username });
-      enrolledFace = await stageBiometricEvidence({ value: body.faceImage, kind: "ENROLLED_FACE", username: user.username });
     } catch (error) {
       pendingBiometricWrites = [];
       return json({ message: "Nao foi possivel proteger as evidencias de identidade.", code: error.message }, { status: 503 });
@@ -2890,21 +3049,19 @@ async function handleApi(request) {
       evidence: kycAnalysis.evidence,
       documentFrontEvidenceId: documentFront.id,
       documentBackEvidenceId: documentBack.id,
-      faceEvidenceId: enrolledFace.id,
-      faceSha256: enrolledFace.sha256,
+      faceEvidenceId: null,
+      faceSha256: null,
       createdAt: kycAnalysis.createdAt,
     };
     user.kycAnalysisId = kycAnalysis.id;
     user.kycEvidenceSubmittedAt = now();
-    faceCheck.status = "CONSUMED";
-    faceCheck.consumedAt = now();
     state.kycEnrollmentRequests.unshift({
       id: crypto.randomUUID(), idempotencyKey, fingerprint, username: user.username,
       analysisId: kycAnalysis.id, createdAt: user.kycEvidenceSubmittedAt,
     });
     state.registrationAudit.unshift({
       id: crypto.randomUUID(), eventType: "KYC_EVIDENCE_SUBMITTED", actor: user.username,
-      subjectHash: await sha256Text(user.username), detail: "Documento e face protegidos para revisao administrativa.", createdAt: user.kycEvidenceSubmittedAt,
+      subjectHash: await sha256Text(user.username), detail: "Documentos protegidos para revisao administrativa; biometria removida por politica.", createdAt: user.kycEvidenceSubmittedAt,
     });
     state.registrationAudit = state.registrationAudit.slice(0, 500);
     return json({
@@ -2919,7 +3076,7 @@ async function handleApi(request) {
 
   if (request.method === "GET" && path === "/user/profile") return json(userSummary(user));
   if (request.method === "GET" && path === "/user/me") return json(bankMe(user));
-  if (request.method === "GET" && path === "/user/balance") return json(user.balance);
+  if (request.method === "GET" && path === "/user/balance") return json(availableBalanceNumber(user));
   if (request.method === "GET" && path === "/user/transactions") {
     return json(state.transactions.filter((tx) => tx.username === user.username).map((tx) => hydrateTransaction(tx, user)));
   }
@@ -2981,12 +3138,20 @@ async function handleApi(request) {
         });
         return json(result.order);
       } catch (error) {
-        if (error.message === "INSUFFICIENT_BALANCE") return json("Saldo contabil do usuario insuficiente.", { status: 400 });
+        if (["INSUFFICIENT_BALANCE", "INSUFFICIENT_AVAILABLE_BALANCE"].includes(error.message)) {
+          return badRequest("Saldo disponivel insuficiente por saldo contabil ou retencoes ativas.", "INSUFFICIENT_AVAILABLE_BALANCE", {
+            availableBalanceCentavos: availableBalanceNumber(user),
+          });
+        }
         return json(error.message, { status: 400 });
       }
     }
+    if (availableBalanceCentavos(user) < exactCentavos(amount, "external_transfer_amount")) {
+      return badRequest("Saldo disponivel insuficiente por saldo contabil ou retencoes ativas.", "INSUFFICIENT_AVAILABLE_BALANCE", {
+        availableBalanceCentavos: availableBalanceNumber(user),
+      });
+    }
     if (availableCreditFor(user) < amount) return json("Saldo escritural liberado insuficiente.", { status: 400 });
-    if (user.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });
     user.balance -= amount;
     consumeCreditIfAvailable(user, amount);
     const tx = {
@@ -3049,8 +3214,11 @@ async function handleApi(request) {
     const body = await request.json().catch(() => ({}));
     const amount = Number(body.amount || body.amountCentavos || 0);
     if (!amount || amount <= 0) return badRequest("Digite um valor valido.", "INVALID_AMOUNT");
-    if (path === "/user/withdraw" && user.balance < amount) {
-      return badRequest("Saldo contabil insuficiente para concluir a operacao.", "INSUFFICIENT_BALANCE", { balanceCentavos: user.balance });
+    if (path === "/user/withdraw" && availableBalanceCentavos(user) < exactCentavos(amount, "withdraw_amount")) {
+      return badRequest("Saldo disponivel insuficiente para concluir a operacao.", "INSUFFICIENT_AVAILABLE_BALANCE", {
+        balanceCentavos: user.balance,
+        availableBalanceCentavos: availableBalanceNumber(user),
+      });
     }
     let destination = null;
     if (path === "/user/transfer") {
@@ -3075,6 +3243,11 @@ async function handleApi(request) {
             "Informe conta, CPF, e-mail ou chave Pix. Para outros bancos, use Pagamentos/Pix ou Outros bancos.",
             "DESTINATION_REQUIRED"
           );
+        }
+        if (availableBalanceCentavos(user) < exactCentavos(amount, "legacy_external_transfer_amount")) {
+          return badRequest("Saldo disponivel insuficiente por retencoes ativas.", "INSUFFICIENT_AVAILABLE_BALANCE", {
+            availableBalanceCentavos: availableBalanceNumber(user),
+          });
         }
         if (availableCreditFor(user) < amount) {
           return badRequest("Saldo escritural liberado insuficiente.", "INSUFFICIENT_CREDIT", { availableCreditCentavos: availableCreditFor(user) });
@@ -3162,8 +3335,11 @@ async function handleApi(request) {
           order: result.order,
         });
       } catch (error) {
-        if (error.message === "INSUFFICIENT_BALANCE") {
-          return badRequest("Saldo contabil insuficiente para concluir a transferencia.", "INSUFFICIENT_BALANCE", { balanceCentavos: user.balance });
+        if (["INSUFFICIENT_BALANCE", "INSUFFICIENT_AVAILABLE_BALANCE"].includes(error.message)) {
+          return badRequest("Saldo disponivel insuficiente para concluir a transferencia.", "INSUFFICIENT_AVAILABLE_BALANCE", {
+            balanceCentavos: user.balance,
+            availableBalanceCentavos: availableBalanceNumber(user),
+          });
         }
         return badRequest(error.message, error.message);
       }
@@ -3259,6 +3435,238 @@ async function handleApi(request) {
 
   if (!user.roles.includes("ROLE_ADMIN") && path.startsWith("/admin/")) {
     return json({ message: "Forbidden" }, { status: 403 });
+  }
+
+  const adminUserDetailMatch = path.match(/^\\/admin\\/users\\/([^/]+)$/);
+  if (request.method === "GET" && adminUserDetailMatch) {
+    const target = findAdminTargetUser(adminUserDetailMatch[1]);
+    if (!target) return json({ message: "Usuario nao encontrado.", code: "ACCOUNT_NOT_FOUND" }, { status: 404 });
+    return json(accountDetail(target), { headers: { "cache-control": "no-store" } });
+  }
+
+  const adminUserProfileMatch = path.match(/^\\/admin\\/users\\/([^/]+)\\/profile$/);
+  if (request.method === "PUT" && adminUserProfileMatch) {
+    const target = findAdminTargetUser(adminUserProfileMatch[1]);
+    if (!target || target.roles?.includes("ROLE_ADMIN")) {
+      return json({ message: "Conta indisponivel para edicao.", code: "ACCOUNT_NOT_FOUND" }, { status: 404 });
+    }
+    const body = await request.json().catch(() => ({}));
+    const fullName = String(body.fullName || "").trim();
+    const email = String(body.email || "").trim().toLowerCase();
+    const phone = digits(body.phone || "");
+    const reason = String(body.reason || "").trim();
+    if (fullName.length < 5 || fullName.length > 120) {
+      return badRequest("Informe o nome completo entre 5 e 120 caracteres.", "PROFILE_FULL_NAME_INVALID");
+    }
+    if (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email) || email.length > 160) {
+      return badRequest("Informe um e-mail valido.", "PROFILE_EMAIL_INVALID");
+    }
+    if (phone && (phone.length < 10 || phone.length > 15)) {
+      return badRequest("Informe um telefone valido com DDD.", "PROFILE_PHONE_INVALID");
+    }
+    if (reason.length < 10 || reason.length > 500) {
+      return badRequest("Registre um motivo entre 10 e 500 caracteres.", "ACCOUNT_CONTROL_REASON_INVALID");
+    }
+    const emailConflict = Object.values(state.users).some((item) =>
+      item.username !== target.username && String(item.email || "").toLowerCase() === email
+    );
+    if (emailConflict) return json({ message: "E-mail ja utilizado por outra conta.", code: "EMAIL_ALREADY_EXISTS" }, { status: 409 });
+    const changedFields = [
+      target.fullName !== fullName ? "fullName" : null,
+      String(target.email || "").toLowerCase() !== email ? "email" : null,
+      digits(target.phone || "") !== phone ? "phone" : null,
+    ].filter(Boolean);
+    let attempt;
+    try {
+      attempt = await accountControlAttempt(request, "PROFILE_UPDATED", target, [fullName, email, phone, reason]);
+    } catch (error) {
+      if (error.message === "IDEMPOTENCY_KEY_REQUIRED") return badRequest("Informe uma chave de idempotencia valida.", error.message);
+      if (error.message === "IDEMPOTENCY_CONFLICT") return json({ message: "Chave de idempotencia reutilizada com outros dados.", code: error.message }, { status: 409 });
+      throw error;
+    }
+    if (attempt.previous) return json({ ...accountDetail(target), idempotentReplay: true });
+    if (!changedFields.length) return badRequest("Nenhum dado editavel foi alterado.", "PROFILE_NO_CHANGES");
+    target.fullName = fullName;
+    target.email = email;
+    target.phone = phone;
+    await appendAccountControlEvent({
+      target, action: "PROFILE_UPDATED", actor: user.username, reason, attempt, changedFields,
+    });
+    return json({ ...accountDetail(target), idempotentReplay: false });
+  }
+
+  const adminUserStatusMatch = path.match(/^\\/admin\\/users\\/([^/]+)\\/(block|unblock)$/);
+  if (request.method === "POST" && adminUserStatusMatch) {
+    const target = findAdminTargetUser(adminUserStatusMatch[1]);
+    if (!target || target.roles?.includes("ROLE_ADMIN")) {
+      return json({ message: "Conta indisponivel para controle.", code: "ACCOUNT_NOT_FOUND" }, { status: 404 });
+    }
+    const body = await request.json().catch(() => ({}));
+    const reason = String(body.reason || "").trim();
+    if (reason.length < 10 || reason.length > 500) {
+      return badRequest("Registre um motivo entre 10 e 500 caracteres.", "ACCOUNT_CONTROL_REASON_INVALID");
+    }
+    const blocking = adminUserStatusMatch[2] === "block";
+    const action = blocking ? "ACCOUNT_BLOCKED" : "ACCOUNT_UNBLOCKED";
+    const nextStatus = blocking ? "BLOCKED_ADMIN" : "ACTIVE";
+    let attempt;
+    try {
+      attempt = await accountControlAttempt(request, action, target, [reason]);
+    } catch (error) {
+      if (error.message === "IDEMPOTENCY_KEY_REQUIRED") return badRequest("Informe uma chave de idempotencia valida.", error.message);
+      if (error.message === "IDEMPOTENCY_CONFLICT") return json({ message: "Chave de idempotencia reutilizada com outros dados.", code: error.message }, { status: 409 });
+      throw error;
+    }
+    if (attempt.previous) return json({ ...accountDetail(target), idempotentReplay: true });
+    if (accountStatus(target) === nextStatus) {
+      return json({ message: blocking ? "A conta ja esta bloqueada." : "A conta ja esta ativa.", code: "ACCOUNT_STATUS_UNCHANGED" }, { status: 409 });
+    }
+    transitionAccountStatus(target, nextStatus);
+    if (blocking) revokeUserSessions(target.username);
+    await appendAccountControlEvent({ target, action, actor: user.username, reason, attempt });
+    return json({ ...accountDetail(target), idempotentReplay: false });
+  }
+
+  const adminUserHoldMatch = path.match(/^\\/admin\\/users\\/([^/]+)\\/holds$/);
+  if (request.method === "POST" && adminUserHoldMatch) {
+    const target = findAdminTargetUser(adminUserHoldMatch[1]);
+    if (!target || target.roles?.includes("ROLE_ADMIN")) {
+      return json({ message: "Conta indisponivel para retencao.", code: "ACCOUNT_NOT_FOUND" }, { status: 404 });
+    }
+    const body = await request.json().catch(() => ({}));
+    const reason = String(body.reason || "").trim();
+    let amount;
+    try {
+      amount = exactCentavos(body.amountCentavos, "balance_hold_amount");
+    } catch {
+      return badRequest("Informe o valor em centavos inteiros.", "BALANCE_HOLD_AMOUNT_INVALID");
+    }
+    if (amount <= 0n || amount > BigInt(Number.MAX_SAFE_INTEGER)) {
+      return badRequest("Informe um valor de retencao valido.", "BALANCE_HOLD_AMOUNT_INVALID");
+    }
+    if (reason.length < 10 || reason.length > 500) {
+      return badRequest("Registre um motivo entre 10 e 500 caracteres.", "ACCOUNT_CONTROL_REASON_INVALID");
+    }
+    let attempt;
+    try {
+      attempt = await accountControlAttempt(request, "BALANCE_HOLD_PLACED", target, [amount.toString(), reason]);
+    } catch (error) {
+      if (error.message === "IDEMPOTENCY_KEY_REQUIRED") return badRequest("Informe uma chave de idempotencia valida.", error.message);
+      if (error.message === "IDEMPOTENCY_CONFLICT") return json({ message: "Chave de idempotencia reutilizada com outros dados.", code: error.message }, { status: 409 });
+      throw error;
+    }
+    if (attempt.previous) {
+      const previousHold = state.balanceHolds.find((hold) => hold.id === attempt.previous.holdId);
+      return json({ hold: previousHold || null, detail: accountDetail(target), idempotentReplay: true });
+    }
+    if (amount > availableBalanceCentavos(target)) {
+      return json({
+        message: "A retencao excede o saldo atualmente disponivel.",
+        code: "BALANCE_HOLD_EXCEEDS_AVAILABLE",
+        availableBalanceCentavos: availableBalanceCentavos(target).toString(),
+      }, { status: 409 });
+    }
+    const hold = {
+      id: crypto.randomUUID(),
+      username: target.username,
+      amountCentavos: amount.toString(),
+      status: "ACTIVE",
+      reason,
+      createdBy: user.username,
+      createdAt: now(),
+      releasedBy: null,
+      releasedAt: null,
+      releaseReason: null,
+    };
+    state.balanceHolds.unshift(hold);
+    await appendAccountControlEvent({
+      target, action: "BALANCE_HOLD_PLACED", actor: user.username, reason, attempt,
+      holdId: hold.id, amountCentavos: hold.amountCentavos,
+    });
+    return json({ hold, detail: accountDetail(target), idempotentReplay: false }, { status: 201 });
+  }
+
+  const adminUserHoldReleaseMatch = path.match(/^\\/admin\\/users\\/([^/]+)\\/holds\\/([^/]+)\\/release$/);
+  if (request.method === "POST" && adminUserHoldReleaseMatch) {
+    const target = findAdminTargetUser(adminUserHoldReleaseMatch[1]);
+    const hold = target ? state.balanceHolds.find((item) => item.id === decodeURIComponent(adminUserHoldReleaseMatch[2]) && item.username === target.username) : null;
+    if (!target || target.roles?.includes("ROLE_ADMIN") || !hold) {
+      return json({ message: "Retencao nao encontrada.", code: "BALANCE_HOLD_NOT_FOUND" }, { status: 404 });
+    }
+    const body = await request.json().catch(() => ({}));
+    const reason = String(body.reason || "").trim();
+    if (reason.length < 10 || reason.length > 500) {
+      return badRequest("Registre um motivo entre 10 e 500 caracteres.", "ACCOUNT_CONTROL_REASON_INVALID");
+    }
+    let attempt;
+    try {
+      attempt = await accountControlAttempt(request, "BALANCE_HOLD_RELEASED", target, [hold.id, hold.amountCentavos, reason]);
+    } catch (error) {
+      if (error.message === "IDEMPOTENCY_KEY_REQUIRED") return badRequest("Informe uma chave de idempotencia valida.", error.message);
+      if (error.message === "IDEMPOTENCY_CONFLICT") return json({ message: "Chave de idempotencia reutilizada com outros dados.", code: error.message }, { status: 409 });
+      throw error;
+    }
+    if (attempt.previous) return json({ hold, detail: accountDetail(target), idempotentReplay: true });
+    if (hold.status !== "ACTIVE") {
+      return json({ message: "A retencao ja foi liberada.", code: "BALANCE_HOLD_ALREADY_RELEASED" }, { status: 409 });
+    }
+    hold.status = "RELEASED";
+    hold.releasedBy = user.username;
+    hold.releasedAt = now();
+    hold.releaseReason = reason;
+    await appendAccountControlEvent({
+      target, action: "BALANCE_HOLD_RELEASED", actor: user.username, reason, attempt,
+      holdId: hold.id, amountCentavos: hold.amountCentavos,
+    });
+    return json({ hold, detail: accountDetail(target), idempotentReplay: false });
+  }
+
+  const adminUserPasswordMatch = path.match(/^\\/admin\\/users\\/([^/]+)\\/password-reset$/);
+  if (request.method === "POST" && adminUserPasswordMatch) {
+    const target = findAdminTargetUser(adminUserPasswordMatch[1]);
+    if (!target || target.roles?.includes("ROLE_ADMIN")) {
+      return json({ message: "Conta indisponivel para redefinicao.", code: "ACCOUNT_NOT_FOUND" }, { status: 404 });
+    }
+    const body = await request.json().catch(() => ({}));
+    const temporaryPassword = String(body.temporaryPassword || "");
+    const reason = String(body.reason || "").trim();
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$/.test(temporaryPassword)) {
+      return badRequest("Use no minimo 8 caracteres, com letra maiuscula, minuscula e numero.", "WEAK_PASSWORD");
+    }
+    if (reason.length < 10 || reason.length > 500) {
+      return badRequest("Registre um motivo entre 10 e 500 caracteres.", "ACCOUNT_CONTROL_REASON_INVALID");
+    }
+    let attempt;
+    try {
+      attempt = await accountControlAttempt(request, "PASSWORD_RESET_BY_ADMIN", target, [temporaryPassword, reason]);
+    } catch (error) {
+      if (error.message === "IDEMPOTENCY_KEY_REQUIRED") return badRequest("Informe uma chave de idempotencia valida.", error.message);
+      if (error.message === "IDEMPOTENCY_CONFLICT") return json({ message: "Chave de idempotencia reutilizada com outros dados.", code: error.message }, { status: 409 });
+      throw error;
+    }
+    if (attempt.previous) return json({ account: userSummary(target), idempotentReplay: true });
+    target.passwordCredential = await createPasswordCredential(temporaryPassword);
+    transitionCredential(target, "ADMIN_RESET_REQUIRED", user.username, "Senha temporaria administrativa emitida; troca obrigatoria no proximo acesso.");
+    target.initialCredentialExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    revokeUserSessions(target.username);
+    state.initialPasswordChallenges = state.initialPasswordChallenges.filter((challenge) => challenge.username !== target.username);
+    for (const resetRequest of state.passwordResetRequests) {
+      if (resetRequest.username === target.username && resetRequest.status === "ADMIN_PENDING") {
+        resetRequest.reviewedBy = user.username;
+        resetRequest.reviewReason = reason;
+        resetRequest.reviewedAt = now();
+        transitionPasswordReset(resetRequest, "TEMP_PASSWORD_ISSUED", user.username, "Senha temporaria emitida pelo administrador.");
+      }
+    }
+    await appendAccountControlEvent({
+      target, action: "PASSWORD_RESET_BY_ADMIN", actor: user.username, reason, attempt,
+    });
+    return json({
+      account: userSummary(target),
+      passwordChangeRequired: true,
+      temporaryPasswordExpiresAt: target.initialCredentialExpiresAt,
+      idempotentReplay: false,
+    }, { headers: { "cache-control": "no-store" } });
   }
 
   const grantsByUserMatch = path.match(/^\\/admin\\/ledger\\/credit\\/by-user\\/(\\d+)$/);
@@ -3533,6 +3941,8 @@ async function handleApi(request) {
     let immutableAccountProvisioningAuditCount = null;
     let masterCreditReserveReady = false;
     let immutableMasterCreditEventCount = null;
+    let immutableAccountControlEventCount = null;
+    let accountControlAuditReconciled = false;
     let masterCreditAuditReconciled = false;
     let masterCreditExpectedEventCount = null;
     try {
@@ -3543,6 +3953,8 @@ async function handleApi(request) {
       const provisioningAuditCount = await currentEnv.DB.prepare("SELECT COUNT(*) AS count FROM bravus_account_provisioning_audit").first();
       const masterReserve = await loadMasterCreditReserve(currentEnv.DB);
       const masterEventCount = await currentEnv.DB.prepare("SELECT COUNT(*) AS count FROM bravus_master_credit_events").first();
+      const accountControlEventCount = await currentEnv.DB.prepare("SELECT COUNT(*) AS count FROM bravus_account_control_events").first();
+      const accountControlAudit = await validateAccountControlAudit(currentEnv.DB);
       const masterAudit = await validateMasterCreditAudit(currentEnv.DB);
       const schemaSql = String(evidenceSchema?.sql || "");
       kycEvidenceSchemaReady = schemaSql.includes("KYC_DOCUMENT_FRONT") && schemaSql.includes("KYC_DOCUMENT_BACK");
@@ -3552,6 +3964,8 @@ async function handleApi(request) {
       immutableAccountProvisioningAuditCount = Number(provisioningAuditCount?.count || 0);
       masterCreditReserveReady = masterReserve.totalAmountCentavos === "100000000000000000" && masterReserve.status === "ACTIVE";
       immutableMasterCreditEventCount = Number(masterEventCount?.count || 0);
+      immutableAccountControlEventCount = Number(accountControlEventCount?.count || 0);
+      accountControlAuditReconciled = accountControlAudit.valid;
       masterCreditAuditReconciled = masterAudit.valid;
       masterCreditExpectedEventCount = masterAudit.expected;
     } catch {
@@ -3573,6 +3987,8 @@ async function handleApi(request) {
       immutableAccountProvisioningAuditCount,
       masterCreditReserveReady,
       immutableMasterCreditEventCount,
+      immutableAccountControlEventCount,
+      accountControlAuditReconciled,
       masterCreditAuditReconciled,
       masterCreditExpectedEventCount,
     });
@@ -3594,14 +4010,16 @@ async function handleApi(request) {
   if (request.method === "GET" && kycEvidenceMatch) {
     const account = state.users[decodeURIComponent(kycEvidenceMatch[1])];
     const evidence = account ? state.kycEvidence[account.username] : null;
-    if (!account || !evidence?.documentFrontEvidenceId || !evidence?.documentBackEvidenceId || !evidence?.faceEvidenceId) {
+    if (!account || !evidence?.documentFrontEvidenceId || !evidence?.documentBackEvidenceId) {
       return json({ message: "Evidencias de abertura indisponiveis." }, { status: 404 });
     }
     try {
       const [documentFront, documentBack, face] = await Promise.all([
         decryptBiometricEvidence(evidence.documentFrontEvidenceId, "KYC_DOCUMENT_FRONT"),
         decryptBiometricEvidence(evidence.documentBackEvidenceId, "KYC_DOCUMENT_BACK"),
-        decryptBiometricEvidence(evidence.faceEvidenceId, "ENROLLED_FACE"),
+        evidence.faceEvidenceId
+          ? decryptBiometricEvidence(evidence.faceEvidenceId, "ENROLLED_FACE")
+          : Promise.resolve(null),
       ]);
       return json({
         username: account.username,
@@ -3611,6 +4029,7 @@ async function handleApi(request) {
         documentFront,
         documentBack,
         face,
+        faceRemovedByPolicy: !evidence.faceEvidenceId,
       }, { headers: { "cache-control": "no-store", pragma: "no-cache" } });
     } catch {
       return json({ message: "Nao foi possivel abrir as evidencias protegidas." }, { status: 503 });
@@ -3627,8 +4046,8 @@ async function handleApi(request) {
     }
     const evidence = state.kycEvidence[account.username];
     if (kycReviewMatch[2] === "approve"
-        && (!evidence?.documentFrontEvidenceId || !evidence?.documentBackEvidenceId || !evidence?.faceEvidenceId)) {
-      return badRequest("A conta ainda nao enviou documento e biometria para aprovacao.", "KYC_EVIDENCE_REQUIRED");
+        && (!evidence?.documentFrontEvidenceId || !evidence?.documentBackEvidenceId)) {
+      return badRequest("A conta ainda nao enviou frente e verso do documento para aprovacao.", "KYC_EVIDENCE_REQUIRED");
     }
     if (reason.length < 10 || reason.length > 500) {
       return badRequest("Registre um motivo entre 10 e 500 caracteres.", "KYC_REASON_INVALID");
@@ -3659,17 +4078,20 @@ async function handleApi(request) {
 
   if (request.method === "GET" && path === "/admin/password-reset/requests") {
     return json(state.passwordResetRequests
-      .filter((item) => item.status === "REVIEW_PENDING" && new Date(item.expiresAt).getTime() > Date.now())
+      .filter((item) => item.status === "ADMIN_PENDING" && new Date(item.expiresAt).getTime() > Date.now())
       .map((item) => {
         const account = state.users[item.username];
         return {
           requestId: item.requestId,
+          username: account?.username || null,
+          email: account?.email || null,
           fullName: account?.fullName || "Cliente protegido",
           maskedCpf: maskCpf(account?.cpf),
           status: item.status,
           attempts: item.attempts,
           createdAt: item.createdAt,
           expiresAt: item.expiresAt,
+          instruction: item.instruction,
         };
       }));
   }
@@ -3705,13 +4127,13 @@ async function handleApi(request) {
     const resetRequest = state.passwordResetRequests.find((item) => item.requestId === resetReviewMatch[1]);
     const body = await request.json().catch(() => ({}));
     const reason = String(body.reason || "").trim();
-    if (!resetRequest || resetRequest.status !== "REVIEW_PENDING") {
+    if (!resetRequest || resetRequest.status !== "ADMIN_PENDING") {
       return badRequest("Solicitacao nao esta aguardando revisao.", "PASSWORD_RESET_INVALID_STATE");
     }
     if (reason.length < 10 || reason.length > 500) {
       return badRequest("Registre um motivo entre 10 e 500 caracteres.", "PASSWORD_RESET_REASON_INVALID");
     }
-    const next = resetReviewMatch[2] === "approve" ? "VERIFIED" : "REJECTED";
+    const next = resetReviewMatch[2] === "approve" ? "TEMP_PASSWORD_ISSUED" : "REJECTED";
     resetRequest.reviewedBy = user.username;
     resetRequest.reviewReason = reason;
     resetRequest.reviewedAt = now();
@@ -3719,9 +4141,25 @@ async function handleApi(request) {
     return json({ requestId: resetRequest.requestId, status: passwordResetPublicStatus(resetRequest.status) });
   }
 
+  if (request.method === "GET" && path === "/admin/account-requests") {
+    return json(publicAccountRequests()
+      .filter((item) => item.status === "PENDING_ADMIN_REVIEW")
+      .map((item) => ({
+        requestId: item.id,
+        status: item.status,
+        fullName: item.fullName,
+        username: item.identity?.username || "",
+        email: item.identity?.email || "",
+        cpf: item.identity?.cpf || "",
+        maskedCpf: maskCpf(item.identity?.cpf),
+        phone: item.phone || "",
+        createdAt: item.createdAt,
+      })));
+  }
+
   if (request.method === "GET" && path === "/admin/dashboard") {
     const users = Object.values(state.users);
-    return json({ totalUsers: users.length, activeUsers: users.length, totalTransactions: state.transactions.length, totalBalance: users.reduce((sum, item) => sum + item.balance, 0) });
+    return json({ totalUsers: users.length, activeUsers: users.filter((item) => item.active !== false).length, totalTransactions: state.transactions.length, totalBalance: users.reduce((sum, item) => sum + item.balance, 0) });
   }
   if (request.method === "GET" && path === "/admin/users") return json(Object.values(state.users).map(userSummary));
   if (request.method === "GET" && path === "/admin/transactions") {
@@ -3824,12 +4262,20 @@ async function handleApi(request) {
         });
         return json(result.order);
       } catch (error) {
-        if (error.message === "INSUFFICIENT_BALANCE") return json("Saldo contabil do usuario insuficiente.", { status: 400 });
+        if (["INSUFFICIENT_BALANCE", "INSUFFICIENT_AVAILABLE_BALANCE"].includes(error.message)) {
+          return badRequest("Saldo disponivel insuficiente por saldo contabil ou retencoes ativas.", "INSUFFICIENT_AVAILABLE_BALANCE", {
+            availableBalanceCentavos: availableBalanceNumber(origin),
+          });
+        }
         return json(error.message, { status: 400 });
       }
     }
+    if (availableBalanceCentavos(origin) < exactCentavos(amount, "admin_external_transfer_amount")) {
+      return badRequest("Saldo disponivel insuficiente por saldo contabil ou retencoes ativas.", "INSUFFICIENT_AVAILABLE_BALANCE", {
+        availableBalanceCentavos: availableBalanceNumber(origin),
+      });
+    }
     if (availableCreditFor(origin) < amount) return json("Saldo escritural liberado insuficiente.", { status: 400 });
-    if (origin.balance < amount) return json("Saldo contabil do usuario insuficiente.", { status: 400 });
     origin.balance -= amount;
     consumeCreditIfAvailable(origin, amount);
     const tx = {

@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Users, Activity, Banknote, TrendingUp, Power, Trash2, CheckCircle2, AlertCircle,
+  Users, Activity, Banknote, TrendingUp, CheckCircle2, AlertCircle,
   Search, Shield, BarChart3, ListChecks, Coins, Link2, Hash, Vault, PiggyBank,
   Send, RefreshCw, ChevronDown, ChevronUp, Landmark, Globe2, KeyRound, ScanFace, Eye, XCircle, UserPlus,
+  ArrowLeft, Save, Lock, Unlock,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -64,6 +65,7 @@ export default function AdminDashboard() {
   const [externalTransfers, setExternalTransfers] = useState([]);
   const [globalRailParticipants, setGlobalRailParticipants] = useState([]);
   const [passwordResetRequests, setPasswordResetRequests] = useState([]);
+  const [accountRequests, setAccountRequests] = useState([]);
   const [caymanRail, setCaymanRail] = useState({
     config: null,
     readiness: null,
@@ -86,7 +88,7 @@ export default function AdminDashboard() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [d, u, t, bs, ch, en, da, et, grParticipants, crConfig, crReady, crParticipants, crInstructions, resetRequests] = await Promise.all([
+      const [d, u, t, bs, ch, en, da, et, grParticipants, crConfig, crReady, crParticipants, crInstructions, resetRequests, openingRequests] = await Promise.all([
         adminService.getDashboard().catch(() => ({ data: null })),
         adminService.getAllUsers().catch(() => ({ data: [] })),
         adminService.getAllTransactions().catch(() => ({ data: [] })),
@@ -101,6 +103,7 @@ export default function AdminDashboard() {
         caymanRailService.participants().catch(() => ({ data: [] })),
         caymanRailService.instructions(20).catch(() => ({ data: [] })),
         passwordResetAdminService.pending().catch(() => ({ data: [] })),
+        adminService.getAccountRequests().catch(() => ({ data: [] })),
       ]);
       setStats(d.data);
       setUsers(Array.isArray(u.data) ? u.data : []);
@@ -112,6 +115,7 @@ export default function AdminDashboard() {
       setExternalTransfers(Array.isArray(et.data) ? et.data : []);
       setGlobalRailParticipants(Array.isArray(grParticipants.data) ? grParticipants.data : []);
       setPasswordResetRequests(Array.isArray(resetRequests.data) ? resetRequests.data : []);
+      setAccountRequests(Array.isArray(openingRequests.data) ? openingRequests.data : []);
       setCaymanRail({
         config: crConfig.data,
         readiness: crReady.data,
@@ -133,25 +137,6 @@ export default function AdminDashboard() {
         .filter(Boolean).some((v) => String(v).toLowerCase().includes(q))
     );
   }, [users, search]);
-
-  // ===== Ações =====
-  async function toggleActive(u) {
-    try {
-      if (u.isActive) await adminService.deactivateUser(u.id);
-      else await adminService.activateUser(u.id);
-      setSuccess(`Usuário ${u.username} ${u.isActive ? 'desativado' : 'ativado'}.`);
-      loadAll();
-    } catch (e) { setError('Falha ao atualizar usuário.'); }
-  }
-
-  async function removeUser(u) {
-    if (!confirm(`Excluir o usuário "${u.username}"? Esta ação é irreversível.`)) return;
-    try {
-      await adminService.deleteUser(u.id);
-      setSuccess(`Usuário ${u.username} excluído.`);
-      loadAll();
-    } catch (e) { setError('Falha ao excluir usuário.'); }
-  }
 
   const Tab = ({ id, label, icon: Icon }) => (
     <button
@@ -221,13 +206,13 @@ export default function AdminDashboard() {
       {tab === 'users' && (
         <UsersView
           users={filteredUsers}
+          accountRequests={accountRequests}
           search={search} setSearch={setSearch}
-          onToggle={toggleActive}
-          onDelete={removeUser}
           onCreated={(account) => {
             setSuccess(`Conta de ${account.fullName || account.username} criada com validacao de identidade pendente.`);
             loadAll();
           }}
+          onChanged={(message) => { setSuccess(message); loadAll(); }}
           onError={setError}
         />
       )}
@@ -573,11 +558,24 @@ const EMPTY_ACCOUNT_FORM = {
   fullName: '', username: '', email: '', cpf: '', phone: '', initialPassword: '', confirmInitialPassword: '',
 };
 
-function AccountProvisionForm({ onCreated, onError }) {
+function AccountProvisionForm({ initialData, onCreated, onError }) {
   const [form, setForm] = useState(EMPTY_ACCOUNT_FORM);
   const [submitting, setSubmitting] = useState(false);
   const attempt = useRef(null);
   const submittingRef = useRef(false);
+
+  useEffect(() => {
+    if (!initialData) return;
+    setForm((current) => ({
+      ...current,
+      fullName: initialData.fullName || '',
+      username: initialData.username || '',
+      email: initialData.email || '',
+      cpf: initialData.cpf || '',
+      phone: initialData.phone || '',
+    }));
+    attempt.current = null;
+  }, [initialData]);
 
   async function submit(event) {
     event.preventDefault();
@@ -680,68 +678,133 @@ function AccountProvisionForm({ onCreated, onError }) {
   );
 }
 
-function UsersView({ users, search, setSearch, onToggle, onDelete, onCreated, onError }) {
+function AccountRequestsPanel({ requests = [], onUse }) {
+  return (
+    <section className="card-premium p-5 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-amber-400/15 text-amber-300">
+            <UserPlus className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="font-display text-lg font-semibold">Solicitacoes de abertura</h2>
+            <p className="mt-1 text-sm text-ink-400">Pedidos enviados pelo cadastro publico. A conta real deve ser criada manualmente pelo admin.</p>
+          </div>
+        </div>
+        <span className="pill-gold">{requests.length} pendente{requests.length === 1 ? '' : 's'}</span>
+      </div>
+
+      <div className="mt-4 divide-y divide-white/10 border-y border-white/10">
+        {requests.map((request) => (
+          <div key={request.requestId} className="flex flex-wrap items-center justify-between gap-3 py-4">
+            <div className="min-w-0">
+              <div className="font-medium text-white">{request.fullName}</div>
+              <div className="mt-1 text-xs text-ink-400">
+                @{request.username} · {request.email} · {request.maskedCpf || 'CPF protegido'} · {formatDate(request.createdAt)}
+              </div>
+            </div>
+            <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => onUse(request)}>
+              <UserPlus className="h-4 w-4" /> Usar dados
+            </button>
+          </div>
+        ))}
+        {requests.length === 0 && (
+          <div className="py-8 text-center text-sm text-ink-400">Nenhuma solicitacao de abertura pendente.</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function UsersView({ users, accountRequests, search, setSearch, onCreated, onChanged, onError }) {
+  const [selectedUsername, setSelectedUsername] = useState(null);
+  const [requestDraft, setRequestDraft] = useState(null);
+
+  if (selectedUsername) {
+    return (
+      <UserAccountDetail
+        username={selectedUsername}
+        onBack={() => setSelectedUsername(null)}
+        onChanged={onChanged}
+        onError={onError}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <AccountProvisionForm onCreated={onCreated} onError={onError} />
+      <AccountRequestsPanel
+        requests={accountRequests}
+        onUse={(request) => setRequestDraft(request)}
+      />
+      <AccountProvisionForm initialData={requestDraft} onCreated={onCreated} onError={onError} />
       <section className="card-premium p-5">
-        <div className="flex items-center gap-3 mb-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative flex-1">
             <Search className="h-4 w-4 text-ink-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nome, email, CPF ou conta…"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar por nome, email, CPF ou conta"
               className="input-premium w-full !pl-9"
             />
           </div>
-          <span className="text-xs text-ink-400">{users.length} usuário(s)</span>
+          <span className="text-xs text-ink-400">{users.length} usuario(s)</span>
         </div>
-        <div className="overflow-x-auto -mx-5 px-5">
-          <table className="w-full text-sm min-w-[640px]">
-            <thead className="text-left text-xs uppercase tracking-wider text-ink-400 border-b border-white/10">
+
+        <div className="mt-4 overflow-x-auto -mx-5 px-5">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="border-b border-white/10 text-left text-xs uppercase text-ink-400">
               <tr>
-                <th className="py-2 pr-3">Usuário</th>
-                <th className="py-2 pr-3">Conta</th>
-                <th className="py-2 pr-3">Saldo</th>
-                <th className="py-2 pr-3">Status</th>
-                <th className="py-2 pr-3 text-right">Ações</th>
+                <th className="py-3 pr-3">Titular</th>
+                <th className="py-3 pr-3">Conta</th>
+                <th className="py-3 pr-3">Disponivel</th>
+                <th className="py-3 pr-3">Retido</th>
+                <th className="py-3 pr-3">Status</th>
+                <th className="py-3 text-right">Conta</th>
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
-                <tr key={u.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                  <td className="py-2 pr-3">
-                    <div className="font-medium text-white">{u.fullName || u.username}</div>
-                    <div className="text-xs text-ink-400">@{u.username} · {u.email}</div>
+              {users.map((account) => (
+                <tr key={account.id} className="border-b border-white/5 hover:bg-white/[0.03]">
+                  <td className="py-3 pr-3">
+                    <button
+                      type="button"
+                      className="text-left"
+                      onClick={() => setSelectedUsername(account.username)}
+                    >
+                      <span className="block font-medium text-white hover:text-amber-200">
+                        {account.fullName || account.username}
+                      </span>
+                      <span className="block text-xs text-ink-400">@{account.username} · {account.email}</span>
+                    </button>
                   </td>
-                  <td className="py-2 pr-3 font-mono text-ink-200">{u.accountNumber}</td>
-                  <td className="py-2 pr-3 font-mono tabular-nums">{brl(u.balance)}</td>
-                  <td className="py-2 pr-3">
+                  <td className="py-3 pr-3 font-mono text-ink-200">{account.accountNumber}</td>
+                  <td className="py-3 pr-3 font-mono tabular-nums">{brlExact(account.availableBalanceCentavos)}</td>
+                  <td className="py-3 pr-3 font-mono tabular-nums text-amber-200">{brlExact(account.heldBalanceCentavos)}</td>
+                  <td className="py-3 pr-3">
                     <span className={cn(
-                      'px-2 py-0.5 rounded-full text-[11px] font-medium',
-                      u.isActive
+                      'inline-flex px-2 py-1 text-[11px] font-medium',
+                      account.isActive
                         ? 'bg-emerald-400/15 text-emerald-300'
                         : 'bg-red-400/15 text-red-300'
                     )}>
-                      {u.isActive ? 'Ativo' : 'Inativo'}
+                      {account.isActive ? 'Ativa' : 'Bloqueada'}
                     </span>
                   </td>
-                  <td className="py-2 pr-3 text-right">
-                    <button onClick={() => onToggle(u)} className="btn-secondary !py-1.5 !px-2.5 mr-2"
-                            aria-label={u.isActive ? `Desativar ${u.username}` : `Ativar ${u.username}`}
-                            title={u.isActive ? 'Desativar conta' : 'Ativar conta'}>
-                      <Power className="h-3.5 w-3.5" />
-                    </button>
-                    <button onClick={() => onDelete(u)} className="btn-secondary !py-1.5 !px-2.5 !text-red-300"
-                            aria-label={`Excluir ${u.username}`} title="Excluir conta">
-                      <Trash2 className="h-3.5 w-3.5" />
+                  <td className="py-3 text-right">
+                    <button
+                      type="button"
+                      className="btn-secondary !px-3 !py-2"
+                      onClick={() => setSelectedUsername(account.username)}
+                    >
+                      <Eye className="h-4 w-4" /> Abrir
                     </button>
                   </td>
                 </tr>
               ))}
               {users.length === 0 && (
-                <tr><td colSpan={5} className="py-6 text-center text-ink-400">Nenhum usuário encontrado.</td></tr>
+                <tr><td colSpan={6} className="py-8 text-center text-ink-400">Nenhum usuario encontrado.</td></tr>
               )}
             </tbody>
           </table>
@@ -751,51 +814,352 @@ function UsersView({ users, search, setSearch, onToggle, onDelete, onCreated, on
   );
 }
 
+const ACCOUNT_DETAIL_TABS = [
+  { id: 'profile', label: 'Dados', Icon: Users },
+  { id: 'control', label: 'Controle', Icon: Shield },
+  { id: 'holds', label: 'Retencoes', Icon: Banknote },
+  { id: 'password', label: 'Senha', Icon: KeyRound },
+  { id: 'history', label: 'Historico', Icon: Activity },
+];
+
+function UserAccountDetail({ username, onBack, onChanged, onError }) {
+  const [detail, setDetail] = useState(null);
+  const [section, setSection] = useState('profile');
+  const [busy, setBusy] = useState('');
+  const [profile, setProfile] = useState({ fullName: '', email: '', phone: '', reason: '' });
+  const [statusReason, setStatusReason] = useState('');
+  const [holdForm, setHoldForm] = useState({ amountReais: '', reason: '' });
+  const [releaseForm, setReleaseForm] = useState({ holdId: '', reason: '' });
+  const [passwordForm, setPasswordForm] = useState({ password: '', confirm: '', reason: '' });
+  const attempts = useRef({});
+
+  const account = detail?.account;
+  const manageable = account && !account.roles?.includes('ROLE_ADMIN');
+
+  async function loadDetail() {
+    try {
+      const { data } = await adminService.getUserAccount(username);
+      setDetail(data);
+      setProfile({
+        fullName: data.account.fullName || '',
+        email: data.account.email || '',
+        phone: data.account.phone || '',
+        reason: '',
+      });
+    } catch (error) {
+      onError(apiError(error, 'Falha ao abrir a conta do usuario.'));
+    }
+  }
+
+  useEffect(() => { loadDetail(); }, [username]);
+
+  function requestKey(action, fingerprint) {
+    if (!globalThis.crypto?.randomUUID) throw new Error('Este dispositivo nao oferece geracao segura de identificadores.');
+    if (attempts.current[action]?.fingerprint !== fingerprint) {
+      attempts.current[action] = {
+        fingerprint,
+        key: 'admin-user-' + action + '-' + globalThis.crypto.randomUUID(),
+      };
+    }
+    return attempts.current[action].key;
+  }
+
+  async function run(action, fingerprint, request, successMessage) {
+    if (busy) return;
+    setBusy(action);
+    try {
+      const key = requestKey(action, fingerprint);
+      await request(key);
+      delete attempts.current[action];
+      await loadDetail();
+      onChanged(successMessage);
+    } catch (error) {
+      onError(apiError(error, 'Nao foi possivel concluir a operacao administrativa.'));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function saveProfile(event) {
+    event.preventDefault();
+    if (profile.reason.trim().length < 10) return onError('Registre um motivo com pelo menos 10 caracteres.');
+    const payload = {
+      fullName: profile.fullName.trim(),
+      email: profile.email.trim().toLowerCase(),
+      phone: profile.phone.replace(/\D/g, ''),
+      reason: profile.reason.trim(),
+    };
+    await run(
+      'profile',
+      JSON.stringify(payload),
+      (key) => adminService.updateUserProfile(username, payload, key),
+      'Dados cadastrais atualizados e auditados.'
+    );
+  }
+
+  async function changeStatus() {
+    const reason = statusReason.trim();
+    if (reason.length < 10) return onError('Registre um motivo com pelo menos 10 caracteres.');
+    const blocking = account.isActive;
+    await run(
+      blocking ? 'block' : 'unblock',
+      reason,
+      (key) => blocking
+        ? adminService.blockUser(username, reason, key)
+        : adminService.unblockUser(username, reason, key),
+      blocking
+        ? 'Conta bloqueada e sessoes existentes revogadas.'
+        : 'Conta desbloqueada e liberada para novo acesso.'
+    );
+    setStatusReason('');
+  }
+
+  async function placeHold(event) {
+    event.preventDefault();
+    const amountCentavos = reaisToCentavosExact(holdForm.amountReais);
+    const reason = holdForm.reason.trim();
+    if (!amountCentavos || amountCentavos === '0') return onError('Informe um valor de retencao valido.');
+    if (reason.length < 10) return onError('Registre um motivo com pelo menos 10 caracteres.');
+    await run(
+      'hold',
+      amountCentavos + '|' + reason,
+      (key) => adminService.placeBalanceHold(username, { amountCentavos, reason }, key),
+      'Retencao aplicada sem alterar o saldo contabil.'
+    );
+    setHoldForm({ amountReais: '', reason: '' });
+  }
+
+  async function releaseHold(event) {
+    event.preventDefault();
+    const reason = releaseForm.reason.trim();
+    if (!releaseForm.holdId || reason.length < 10) return onError('Selecione a retencao e registre o motivo da liberacao.');
+    await run(
+      'release-' + releaseForm.holdId,
+      releaseForm.holdId + '|' + reason,
+      (key) => adminService.releaseBalanceHold(username, releaseForm.holdId, reason, key),
+      'Retencao liberada e saldo disponivel recalculado.'
+    );
+    setReleaseForm({ holdId: '', reason: '' });
+  }
+
+  async function resetPassword(event) {
+    event.preventDefault();
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,128}$/.test(passwordForm.password)) {
+      return onError('A senha temporaria precisa de maiuscula, minuscula, numero e 8 caracteres.');
+    }
+    if (passwordForm.password !== passwordForm.confirm) return onError('A confirmacao da senha nao confere.');
+    if (passwordForm.reason.trim().length < 10) return onError('Registre um motivo com pelo menos 10 caracteres.');
+    const payload = { temporaryPassword: passwordForm.password, reason: passwordForm.reason.trim() };
+    await run(
+      'password',
+      passwordForm.password + '|' + payload.reason,
+      (key) => adminService.resetUserPassword(username, payload, key),
+      'Senha temporaria emitida; sessoes revogadas e troca obrigatoria no proximo acesso.'
+    );
+    setPasswordForm({ password: '', confirm: '', reason: '' });
+  }
+
+  if (!detail) {
+    return <div className="card-premium p-8 text-center text-ink-300">Carregando conta...</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <button type="button" className="btn-secondary !px-3 !py-2" onClick={onBack}>
+        <ArrowLeft className="h-4 w-4" /> Voltar para usuarios
+      </button>
+
+      <section className="border-y border-white/10 bg-white/[0.03] px-4 py-6 sm:px-6">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
+            <div className="text-xs uppercase text-amber-300">Conta de usuario</div>
+            <h2 className="mt-2 font-display text-2xl font-bold text-white break-words">{account.fullName}</h2>
+            <div className="mt-1 text-sm text-ink-400">@{account.username} · Conta {account.accountNumber}</div>
+          </div>
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3 xl:min-w-[620px]">
+            <AccountMetric label="Saldo contabil" value={brlExact(detail.balances.ledgerBalanceCentavos)} />
+            <AccountMetric label="Saldo retido" value={brlExact(detail.balances.heldBalanceCentavos)} accent="text-amber-200" />
+            <AccountMetric label="Saldo disponivel" value={brlExact(detail.balances.availableBalanceCentavos)} accent="text-emerald-300" />
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-2 text-xs">
+          <span className={cn('px-3 py-2', account.isActive ? 'bg-emerald-400/15 text-emerald-300' : 'bg-red-400/15 text-red-300')}>
+            {account.isActive ? 'CONTA ATIVA' : 'CONTA BLOQUEADA'}
+          </span>
+          <span className="bg-white/[0.06] px-3 py-2 text-ink-200">KYC {account.statusKyc}</span>
+          <span className="bg-white/[0.06] px-3 py-2 text-ink-200">CREDENCIAL {account.credentialState}</span>
+        </div>
+      </section>
+
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Gestao da conta">
+        {ACCOUNT_DETAIL_TABS.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={section === id}
+            onClick={() => setSection(id)}
+            className={cn('btn-secondary !px-3 !py-2', section === id && '!border-amber-400/50 !bg-amber-400/15 !text-amber-100')}
+          >
+            <Icon className="h-4 w-4" /> {label}
+          </button>
+        ))}
+      </div>
+
+      {!manageable && (
+        <div className="border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+          Contas administrativas sao protegidas contra alteracoes por esta area.
+        </div>
+      )}
+
+      {section === 'profile' && (
+        <form onSubmit={saveProfile} className="card-premium p-5 sm:p-6 space-y-5">
+          <SectionTitle icon={Users} title="Dados cadastrais" subtitle="CPF, usuario e numero da conta permanecem imutaveis." />
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Nome completo"><input className="input-premium w-full" value={profile.fullName} disabled={!manageable || busy} onChange={(event) => setProfile({ ...profile, fullName: event.target.value })} /></Field>
+            <Field label="E-mail"><input type="email" className="input-premium w-full" value={profile.email} disabled={!manageable || busy} onChange={(event) => setProfile({ ...profile, email: event.target.value })} /></Field>
+            <Field label="Telefone"><input className="input-premium w-full" value={profile.phone} disabled={!manageable || busy} onChange={(event) => setProfile({ ...profile, phone: event.target.value })} /></Field>
+            <Field label="CPF protegido"><input className="input-premium w-full" value={account.cpf || ''} disabled /></Field>
+          </div>
+          <Field label="Motivo da alteracao"><textarea className="input-premium min-h-24 w-full resize-y" maxLength={500} value={profile.reason} disabled={!manageable || busy} onChange={(event) => setProfile({ ...profile, reason: event.target.value })} /></Field>
+          <div className="flex justify-end"><button type="submit" className="btn-primary" disabled={!manageable || busy || profile.reason.trim().length < 10}><Save className="h-4 w-4" /> Salvar alteracoes</button></div>
+        </form>
+      )}
+
+      {section === 'control' && (
+        <section className="card-premium p-5 sm:p-6 space-y-5">
+          <SectionTitle icon={Shield} title="Controle de acesso" subtitle="O bloqueio encerra todas as sessoes e impede novos acessos e saidas." />
+          <Field label={account.isActive ? 'Motivo do bloqueio' : 'Motivo do desbloqueio'}>
+            <textarea className="input-premium min-h-28 w-full resize-y" maxLength={500} value={statusReason} disabled={!manageable || busy} onChange={(event) => setStatusReason(event.target.value)} />
+          </Field>
+          <button type="button" className={account.isActive ? 'btn-secondary !text-red-300' : 'btn-primary'} disabled={!manageable || busy || statusReason.trim().length < 10} onClick={changeStatus}>
+            {account.isActive ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+            {account.isActive ? 'Bloquear conta e revogar sessoes' : 'Desbloquear conta'}
+          </button>
+        </section>
+      )}
+
+      {section === 'holds' && (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <form onSubmit={placeHold} className="card-premium p-5 sm:p-6 space-y-4">
+            <SectionTitle icon={Banknote} title="Nova retencao" subtitle="Reduz o saldo disponivel sem apagar ou alterar o saldo contabil." />
+            <Field label="Valor em reais"><input className="input-premium w-full" inputMode="decimal" placeholder="0,00" value={holdForm.amountReais} disabled={!manageable || busy} onChange={(event) => setHoldForm({ ...holdForm, amountReais: event.target.value })} /></Field>
+            <Field label="Motivo da retencao"><textarea className="input-premium min-h-24 w-full resize-y" maxLength={500} value={holdForm.reason} disabled={!manageable || busy} onChange={(event) => setHoldForm({ ...holdForm, reason: event.target.value })} /></Field>
+            <button type="submit" className="btn-primary" disabled={!manageable || busy || holdForm.reason.trim().length < 10}><Lock className="h-4 w-4" /> Reter saldo</button>
+          </form>
+
+          <section className="card-premium p-5 sm:p-6">
+            <SectionTitle icon={ListChecks} title="Retencoes da conta" subtitle="Liberacoes criam novos eventos; o registro original permanece." />
+            <div className="mt-4 divide-y divide-white/10 border-y border-white/10">
+              {detail.holds.map((hold) => (
+                <div key={hold.id} className="py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="font-mono text-white">{brlExact(hold.amountCentavos)}</div>
+                      <div className="mt-1 text-xs text-ink-400">{hold.reason} · {formatDate(hold.createdAt)}</div>
+                    </div>
+                    <span className={cn('px-2 py-1 text-xs', hold.status === 'ACTIVE' ? 'bg-amber-400/15 text-amber-200' : 'bg-emerald-400/15 text-emerald-300')}>{hold.status === 'ACTIVE' ? 'ATIVA' : 'LIBERADA'}</span>
+                  </div>
+                  {hold.status === 'ACTIVE' && manageable && (
+                    <button type="button" className="btn-secondary mt-3 !px-3 !py-2" onClick={() => setReleaseForm({ holdId: hold.id, reason: '' })}><Unlock className="h-4 w-4" /> Liberar</button>
+                  )}
+                </div>
+              ))}
+              {detail.holds.length === 0 && <div className="py-8 text-center text-sm text-ink-400">Nenhuma retencao registrada.</div>}
+            </div>
+            {releaseForm.holdId && (
+              <form onSubmit={releaseHold} className="mt-5 space-y-3 border-t border-white/10 pt-5">
+                <Field label="Motivo da liberacao"><textarea className="input-premium min-h-24 w-full resize-y" maxLength={500} value={releaseForm.reason} onChange={(event) => setReleaseForm({ ...releaseForm, reason: event.target.value })} /></Field>
+                <div className="flex gap-2">
+                  <button type="button" className="btn-secondary" onClick={() => setReleaseForm({ holdId: '', reason: '' })}>Cancelar</button>
+                  <button type="submit" className="btn-primary" disabled={busy || releaseForm.reason.trim().length < 10}>Confirmar liberacao</button>
+                </div>
+              </form>
+            )}
+          </section>
+        </div>
+      )}
+
+      {section === 'password' && (
+        <form onSubmit={resetPassword} className="card-premium p-5 sm:p-6 space-y-5">
+          <SectionTitle icon={KeyRound} title="Redefinir senha" subtitle="A senha atual nunca e exibida. A nova senha e temporaria e expira em 24 horas." />
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Nova senha temporaria"><input type="password" autoComplete="new-password" className="input-premium w-full" value={passwordForm.password} disabled={!manageable || busy} onChange={(event) => setPasswordForm({ ...passwordForm, password: event.target.value })} /></Field>
+            <Field label="Confirmar senha"><input type="password" autoComplete="new-password" className="input-premium w-full" value={passwordForm.confirm} disabled={!manageable || busy} onChange={(event) => setPasswordForm({ ...passwordForm, confirm: event.target.value })} /></Field>
+          </div>
+          <Field label="Motivo da redefinicao"><textarea className="input-premium min-h-24 w-full resize-y" maxLength={500} value={passwordForm.reason} disabled={!manageable || busy} onChange={(event) => setPasswordForm({ ...passwordForm, reason: event.target.value })} /></Field>
+          <button type="submit" className="btn-primary" disabled={!manageable || busy || passwordForm.reason.trim().length < 10}><KeyRound className="h-4 w-4" /> Emitir senha temporaria</button>
+        </form>
+      )}
+
+      {section === 'history' && (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <section className="card-premium p-5 sm:p-6">
+            <SectionTitle icon={Activity} title="Auditoria administrativa" subtitle="Eventos imutaveis de dados, acesso, senha e retencoes." />
+            <div className="mt-4 divide-y divide-white/10">
+              {detail.audit.map((event) => (
+                <div key={event.id} className="py-3 text-sm">
+                  <div className="flex flex-wrap justify-between gap-2"><span className="font-medium text-white">{event.eventType}</span><span className="text-xs text-ink-400">{formatDate(event.createdAt)}</span></div>
+                  <div className="mt-1 text-ink-300">{event.reason}</div>
+                  <div className="mt-1 text-xs text-ink-500">por {event.actor}</div>
+                </div>
+              ))}
+              {detail.audit.length === 0 && <div className="py-8 text-center text-sm text-ink-400">Nenhum evento administrativo.</div>}
+            </div>
+          </section>
+          <section className="card-premium p-5 sm:p-6">
+            <SectionTitle icon={ListChecks} title="Movimentacoes recentes" subtitle="Historico financeiro preservado da conta." />
+            <div className="mt-4 divide-y divide-white/10">
+              {detail.recentTransactions.map((transaction) => (
+                <div key={transaction.id} className="flex items-start justify-between gap-3 py-3 text-sm">
+                  <div><div className="font-medium text-white">{getTransactionTypeLabel(transaction.type)}</div><div className="mt-1 text-xs text-ink-400">{formatDate(transaction.createdAt)}</div></div>
+                  <div className="font-mono text-white">{brl(transaction.amount)}</div>
+                </div>
+              ))}
+              {detail.recentTransactions.length === 0 && <div className="py-8 text-center text-sm text-ink-400">Nenhuma movimentacao.</div>}
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AccountMetric({ label, value, accent = 'text-white' }) {
+  return (
+    <div className="min-w-0 border border-white/10 bg-black/10 px-4 py-3">
+      <div className="text-xs uppercase text-ink-400">{label}</div>
+      <div className={cn('mt-1 break-words font-mono text-lg font-semibold', accent)}>{value}</div>
+    </div>
+  );
+}
+
+function SectionTitle({ icon: Icon, title, subtitle }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center bg-amber-400/15 text-amber-300"><Icon className="h-5 w-5" /></div>
+      <div><h3 className="font-display text-lg font-semibold text-white">{title}</h3><p className="mt-1 text-sm text-ink-400">{subtitle}</p></div>
+    </div>
+  );
+}
+
 function PasswordResetReviewView({ requests, onRefresh, onSuccess, onError }) {
-  const [selected, setSelected] = useState(null);
-  const [evidence, setEvidence] = useState(null);
-  const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
 
-  async function openEvidence(request) {
+  async function refresh() {
     setLoading(true);
-    setEvidence(null);
     try {
-      const { data } = await passwordResetAdminService.evidence(request.requestId);
-      setSelected(request);
-      setEvidence(data);
-      setReason('');
+      await onRefresh();
+      onSuccess('Solicitacoes de senha atualizadas.');
     } catch (error) {
-      onError(apiError(error, 'Falha ao abrir as evidencias faciais.'));
+      onError(apiError(error, 'Falha ao atualizar solicitacoes.'));
     } finally {
       setLoading(false);
     }
   }
 
-  async function review(action) {
-    if (!selected) return;
-    if (reason.trim().length < 10) {
-      onError('Registre um motivo com pelo menos 10 caracteres antes de concluir a revisao.');
-      return;
-    }
-    setLoading(true);
-    try {
-      if (action === 'approve') {
-        await passwordResetAdminService.approve(selected.requestId, reason.trim());
-        onSuccess('Verificacao facial aprovada. O cliente ja pode redefinir a senha.');
-      } else {
-        await passwordResetAdminService.reject(selected.requestId, reason.trim());
-        onSuccess('Verificacao facial rejeitada e registrada na auditoria.');
-      }
-      setSelected(null);
-      setEvidence(null);
-      setReason('');
-      await onRefresh();
-    } catch (error) {
-      onError(apiError(error, 'Falha ao concluir a revisao.'));
-    } finally {
-      setLoading(false);
-    }
+  function showInstruction() {
+    onError('Abra a aba Usuarios, clique no cliente e emita uma senha temporaria na secao Senha.');
   }
 
   return (
@@ -803,12 +1167,17 @@ function PasswordResetReviewView({ requests, onRefresh, onSuccess, onError }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-white">
-            <ScanFace className="h-5 w-5 text-gold-300" />
-            <h2 className="text-lg font-semibold">Revisao facial para recuperacao</h2>
+            <KeyRound className="h-5 w-5 text-gold-300" />
+            <h2 className="text-lg font-semibold">Pedidos de senha temporaria</h2>
           </div>
-          <p className="mt-1 text-sm text-ink-400">Compare as duas capturas antes de autorizar qualquer troca de senha.</p>
+          <p className="mt-1 text-sm text-ink-400">O usuario solicita aqui; o admin emite a senha temporaria no detalhe da conta.</p>
         </div>
-        <span className="pill-gold">{requests.length} pendente{requests.length === 1 ? '' : 's'}</span>
+        <div className="flex items-center gap-2">
+          <span className="pill-gold">{requests.length} pendente{requests.length === 1 ? '' : 's'}</span>
+          <button type="button" className="btn-secondary !py-2 !px-3" onClick={refresh} disabled={loading}>
+            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} /> Atualizar
+          </button>
+        </div>
       </div>
 
       <div className="mt-5 divide-y divide-white/10 border-y border-white/10">
@@ -817,75 +1186,22 @@ function PasswordResetReviewView({ requests, onRefresh, onSuccess, onError }) {
             <div>
               <div className="font-medium text-white">{request.fullName}</div>
               <div className="mt-1 text-xs text-ink-400">
-                {request.maskedCpf || 'Documento protegido'} · {formatDate(request.createdAt)} · {request.attempts} tentativa(s)
+                {request.username ? `@${request.username} - ` : ''}{request.maskedCpf || 'Documento protegido'} - {formatDate(request.createdAt)}
               </div>
+              <div className="mt-2 text-xs text-amber-200">Acao: abra Usuarios, clique no cliente e emita uma senha temporaria.</div>
             </div>
-            <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => openEvidence(request)} disabled={loading}>
-              <Eye className="h-4 w-4" /> Revisar
+            <button type="button" className="btn-secondary !py-2 !px-3" onClick={showInstruction} disabled={loading}>
+              <KeyRound className="h-4 w-4" /> Emitir no usuario
             </button>
           </div>
         ))}
         {requests.length === 0 && (
-          <div className="py-8 text-center text-sm text-ink-400">Nenhuma verificacao facial aguardando revisao.</div>
+          <div className="py-8 text-center text-sm text-ink-400">Nenhum pedido de senha temporaria pendente.</div>
         )}
       </div>
-
-      {selected && evidence && (
-        <div className="mt-6 border-t border-white/10 pt-6">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="font-semibold text-white">{evidence.fullName}</div>
-              <div className="text-xs text-ink-400">{evidence.maskedCpf}</div>
-            </div>
-            <button type="button" className="btn-secondary !p-2" onClick={() => { setSelected(null); setEvidence(null); }} aria-label="Fechar evidencias">
-              <XCircle className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <figure>
-              <figcaption className="mb-2 text-xs font-medium uppercase text-ink-300">Abertura da conta</figcaption>
-              <div className="aspect-video overflow-hidden rounded-lg border border-white/10 bg-ink-950">
-                <img src={evidence.enrolledFace} alt="Captura facial da abertura da conta" className="h-full w-full object-cover" />
-              </div>
-            </figure>
-            <figure>
-              <figcaption className="mb-2 text-xs font-medium uppercase text-ink-300">Recuperacao atual</figcaption>
-              <div className="aspect-video overflow-hidden rounded-lg border border-white/10 bg-ink-950">
-                <img src={evidence.submittedFace} alt="Captura facial da recuperacao atual" className="h-full w-full object-cover" />
-              </div>
-            </figure>
-          </div>
-
-          <div className="mt-4 border-l-2 border-gold-400 bg-gold-400/10 px-4 py-3 text-sm text-gold-100">
-            <strong>Desafio solicitado:</strong> {evidence.challenge}
-          </div>
-
-          <div className="mt-4">
-            <label className="form-label" htmlFor="password-reset-review-reason">Motivo da decisao</label>
-            <textarea
-              id="password-reset-review-reason"
-              className="form-input min-h-24 resize-y"
-              maxLength={500}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              placeholder="Registre os elementos considerados na comparacao."
-            />
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <button type="button" className="btn-secondary !text-red-300" onClick={() => review('reject')} disabled={loading || reason.trim().length < 10}>
-              <XCircle className="h-4 w-4" /> Rejeitar
-            </button>
-            <button type="button" className="btn-primary" onClick={() => review('approve')} disabled={loading || reason.trim().length < 10}>
-              <CheckCircle2 className="h-4 w-4" /> Aprovar verificacao
-            </button>
-          </div>
-        </div>
-      )}
     </section>
   );
 }
-
 function UnifiedSearchView({ onError }) {
   const [form, setForm] = useState({ query: '', type: 'AUTO', limit: 50 });
   const [loading, setLoading] = useState(false);
@@ -1105,11 +1421,13 @@ function DocumentAnalysisView({ analyses, users = [], onSuccess, onError }) {
               {[
                 ['Documento frente', kycReview.evidence.documentFront],
                 ['Documento verso', kycReview.evidence.documentBack],
-                ['Captura facial', kycReview.evidence.face],
+                kycReview.evidence.face ? ['Captura facial', kycReview.evidence.face] : ['Biometria facial', null],
               ].map(([label, source]) => (
                 <figure key={label} className="min-w-0">
                   <div className="aspect-[4/3] overflow-hidden rounded-lg border border-white/10 bg-black/30">
-                    <img src={source} alt={label} className="h-full w-full object-contain" />
+                    {source
+                      ? <img src={source} alt={label} className="h-full w-full object-contain" />
+                      : <div className="flex h-full items-center justify-center px-4 text-center text-sm text-ink-400">Removida por politica administrativa</div>}
                   </div>
                   <figcaption className="mt-2 text-xs text-ink-400">{label}</figcaption>
                 </figure>

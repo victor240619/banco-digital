@@ -116,6 +116,39 @@ assert.throws(
   /immutable/i,
 );
 
+assert.equal(journal.entries.some((entry) => entry.tag === "0005_account_control_events"), true);
+await migration("drizzle/0005_account_control_events.sql");
+await migration("drizzle/0005_account_control_events.sql");
+const insertAccountControlEvent = database.prepare(`
+  INSERT INTO bravus_account_control_events
+    (id, account_username, event_type, hold_id, amount_centavos, actor, reason,
+     metadata_hash, idempotency_hash, created_at)
+  VALUES (?, 'new.user', ?, ?, ?, 'admin', 'motivo administrativo registrado',
+    ?, ?, '2026-01-02T00:00:00Z')
+`);
+insertAccountControlEvent.run("control-profile", "PROFILE_UPDATED", null, "0", "metadata-profile", "control-hash-1");
+insertAccountControlEvent.run("control-hold", "BALANCE_HOLD_PLACED", "hold-1", "1000", "metadata-hold", "control-hash-2");
+assert.throws(
+  () => insertAccountControlEvent.run("control-invalid-hold", "BALANCE_HOLD_PLACED", null, "1000", "metadata-invalid", "control-hash-3"),
+  /constraint/i,
+);
+assert.throws(
+  () => insertAccountControlEvent.run("control-invalid-profile", "PROFILE_UPDATED", "hold-invalid", "0", "metadata-invalid", "control-hash-4"),
+  /constraint/i,
+);
+assert.throws(
+  () => insertAccountControlEvent.run("control-duplicate", "ACCOUNT_BLOCKED", null, "0", "metadata-duplicate", "control-hash-1"),
+  /unique/i,
+);
+assert.throws(
+  () => database.prepare("UPDATE bravus_account_control_events SET reason = 'alterado' WHERE id = 'control-profile'").run(),
+  /immutable/i,
+);
+assert.throws(
+  () => database.prepare("DELETE FROM bravus_account_control_events WHERE id = 'control-hold'").run(),
+  /immutable/i,
+);
+
 function createLegacyMasterDatabase(amountCentavos) {
   const target = new DatabaseSync(":memory:");
   target.exec(`
@@ -217,4 +250,5 @@ console.log(JSON.stringify({
   masterCreditEventConstraintsVerified: true,
   legacyMasterCreditSchemaUpgradeVerified: true,
   invalidLegacyUpgradePreservesImmutability: true,
+  immutableAccountControlEventsVerified: true,
 }));
