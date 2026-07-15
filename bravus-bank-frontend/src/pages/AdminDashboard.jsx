@@ -678,7 +678,22 @@ function AccountProvisionForm({ initialData, onCreated, onError }) {
   );
 }
 
-function AccountRequestsPanel({ requests = [], onUse }) {
+function AccountRequestsPanel({ requests = [], onUse, onError }) {
+  const [evidence, setEvidence] = useState(null);
+  const [loadingEvidence, setLoadingEvidence] = useState('');
+
+  async function openEvidence(request) {
+    setLoadingEvidence(request.requestId);
+    try {
+      const { data } = await adminService.getAccountRequestEvidence(request.requestId);
+      setEvidence(data);
+    } catch (error) {
+      onError(apiError(error, 'Falha ao abrir as fotos do documento.'));
+    } finally {
+      setLoadingEvidence('');
+    }
+  }
+
   return (
     <section className="card-premium p-5 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -703,15 +718,46 @@ function AccountRequestsPanel({ requests = [], onUse }) {
                 @{request.username} · {request.email} · {request.maskedCpf || 'CPF protegido'} · {formatDate(request.createdAt)}
               </div>
             </div>
-            <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => onUse(request)}>
-              <UserPlus className="h-4 w-4" /> Usar dados
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => openEvidence(request)} disabled={loadingEvidence === request.requestId}>
+                <Eye className="h-4 w-4" /> Documentos
+              </button>
+              <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => onUse(request)}>
+                <UserPlus className="h-4 w-4" /> Usar dados
+              </button>
+            </div>
           </div>
         ))}
         {requests.length === 0 && (
           <div className="py-8 text-center text-sm text-ink-400">Nenhuma solicitacao de abertura pendente.</div>
         )}
       </div>
+      {evidence && (
+        <div className="mt-5 border-t border-white/10 pt-5">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="font-semibold text-white">{evidence.fullName}</div>
+              <div className="text-xs text-ink-400">@{evidence.username} - {evidence.maskedCpf}</div>
+            </div>
+            <button type="button" className="btn-secondary !p-2" onClick={() => setEvidence(null)} aria-label="Fechar documentos">
+              <XCircle className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {[
+              ['Documento frente', evidence.documentFront],
+              ['Documento verso', evidence.documentBack],
+            ].map(([label, source]) => (
+              <figure key={label}>
+                <div className="aspect-[4/3] overflow-hidden rounded-lg border border-white/10 bg-black/30">
+                  <img src={source} alt={label} className="h-full w-full object-contain" />
+                </div>
+                <figcaption className="mt-2 text-xs text-ink-400">{label}</figcaption>
+              </figure>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -736,6 +782,7 @@ function UsersView({ users, accountRequests, search, setSearch, onCreated, onCha
       <AccountRequestsPanel
         requests={accountRequests}
         onUse={(request) => setRequestDraft(request)}
+        onError={onError}
       />
       <AccountProvisionForm initialData={requestDraft} onCreated={onCreated} onError={onError} />
       <section className="card-premium p-5">

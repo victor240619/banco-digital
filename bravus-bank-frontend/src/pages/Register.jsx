@@ -2,12 +2,22 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, CheckCircle2, Loader2, ShieldCheck, UserPlus,
+  ArrowRight, CheckCircle2, FileText, Loader2, ShieldCheck, UserPlus,
 } from 'lucide-react';
 import { authService } from '../services/api';
 import { clearRegistrationDraft, loadRegistrationDraft, saveRegistrationDraft } from '../lib/registrationDraft';
 
 const onlyDigits = (value) => value.replace(/\D/g, '');
+
+const readImageAsDataUrl = (file) => new Promise((resolve, reject) => {
+  if (!file) return resolve('');
+  if (!['image/jpeg', 'image/png'].includes(file.type)) return reject(new Error('Use imagem JPEG ou PNG.'));
+  if (file.size > 5 * 1024 * 1024) return reject(new Error('Imagem acima de 5 MB.'));
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = () => reject(new Error('Falha ao ler a imagem.'));
+  reader.readAsDataURL(file);
+});
 
 const formatCpf = (value) => {
   const digits = onlyDigits(value).slice(0, 11);
@@ -48,6 +58,7 @@ export default function Register() {
   const availabilityRequestRef = useRef(0);
   const requestKeyRef = useRef('');
   const [formData, setFormData] = useState(() => loadRegistrationDraft());
+  const [documents, setDocuments] = useState({ documentFrontImage: '', documentBackImage: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(null);
@@ -110,6 +121,19 @@ export default function Register() {
     if (identity.username || identity.email || identity.cpf) checkAvailability();
   };
 
+  const handleDocumentChange = (name) => async (event) => {
+    setError('');
+    try {
+      const dataUrl = await readImageAsDataUrl(event.target.files?.[0]);
+      setDocuments((current) => ({ ...current, [name]: dataUrl }));
+      requestKeyRef.current = '';
+    } catch (readError) {
+      event.target.value = '';
+      setDocuments((current) => ({ ...current, [name]: '' }));
+      setError(readError.message || 'Falha ao carregar imagem.');
+    }
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError('');
@@ -121,6 +145,10 @@ export default function Register() {
       setError('Este dispositivo precisa de suporte seguro para gerar o protocolo.');
       return;
     }
+    if (!documents.documentFrontImage || !documents.documentBackImage) {
+      setError('Envie a foto da frente e do verso do documento.');
+      return;
+    }
     setLoading(true);
     try {
       if (!await checkAvailability({ requireComplete: true })) return;
@@ -129,6 +157,8 @@ export default function Register() {
         ...formData,
         cpf: onlyDigits(String(formData.cpf || '')),
         phone: onlyDigits(String(formData.phone || '')),
+        documentFrontImage: documents.documentFrontImage,
+        documentBackImage: documents.documentBackImage,
         idempotencyKey: requestKeyRef.current,
       });
       clearRegistrationDraft();
@@ -206,6 +236,49 @@ export default function Register() {
                   </span>
                 </div>
               )}
+
+              <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="inline-flex items-center gap-2 font-semibold text-white">
+                    <ShieldCheck className="h-5 w-5 text-gold-300" />
+                    Documento do titular
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <span className={documents.documentFrontImage ? 'pill-green' : 'pill-red'}>
+                      {documents.documentFrontImage ? <CheckCircle2 className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                      Frente
+                    </span>
+                    <span className={documents.documentBackImage ? 'pill-green' : 'pill-red'}>
+                      {documents.documentBackImage ? <CheckCircle2 className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                      Verso
+                    </span>
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block rounded-lg border border-white/10 bg-black/10 p-4">
+                    <span className="text-sm font-medium text-ink-100">Foto da frente *</span>
+                    <input
+                      className="mt-3 block w-full text-sm text-ink-300"
+                      type="file"
+                      accept="image/jpeg,image/png"
+                      capture="environment"
+                      onChange={handleDocumentChange('documentFrontImage')}
+                      required
+                    />
+                  </label>
+                  <label className="block rounded-lg border border-white/10 bg-black/10 p-4">
+                    <span className="text-sm font-medium text-ink-100">Foto do verso *</span>
+                    <input
+                      className="mt-3 block w-full text-sm text-ink-300"
+                      type="file"
+                      accept="image/jpeg,image/png"
+                      capture="environment"
+                      onChange={handleDocumentChange('documentBackImage')}
+                      required
+                    />
+                  </label>
+                </div>
+              </section>
 
               <div className="rounded-xl border border-gold-400/25 bg-gold-400/10 px-4 py-3 text-sm text-gold-100">
                 <span className="inline-flex items-start gap-2">

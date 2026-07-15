@@ -2033,9 +2033,17 @@ async function createPublicAccountRequest(body, recorded, availability) {
   if (fullName.length < 5 || fullName.length > 120) {
     return { error: badRequest("Informe o nome completo do titular.", "REGISTRATION_FULL_NAME_REQUIRED") };
   }
+  const evidenceAnalysis = buildKycAnalysis({ ...body, cpf: identity.cpf, fullName, requireFace: false }, null);
+  if (evidenceAnalysis.status !== "EVIDENCIA_CAPTURADA_AUTO") {
+    return { error: badRequest(evidenceAnalysis.errorMessage || "Envie frente e verso do documento.", "REGISTRATION_DOCUMENT_EVIDENCE_REQUIRED") };
+  }
+  const [documentFrontHash, documentBackHash] = await Promise.all([
+    sha256Text(String(body.documentFrontImage || "")),
+    sha256Text(String(body.documentBackImage || "")),
+  ]);
   const idempotencyKey = String(body.idempotencyKey || "").trim();
   const fingerprintMaterial = [
-    identity.cpf, identity.username, identity.email, fullName.toLowerCase(), phone,
+    identity.cpf, identity.username, identity.email, fullName.toLowerCase(), phone, documentFrontHash, documentBackHash,
   ].map((value) => String(value).length + ":" + String(value)).join("|");
   const fingerprint = await sha256Text(fingerprintMaterial);
   const previous = publicAccountRequests().find((item) =>
@@ -2060,6 +2068,15 @@ async function createPublicAccountRequest(body, recorded, availability) {
       }, { status: 202, headers: { "cache-control": "no-store" } }),
     };
   }
+  let documentFront;
+  let documentBack;
+  try {
+    documentFront = await stageBiometricEvidence({ value: body.documentFrontImage, kind: "KYC_DOCUMENT_FRONT", username: identity.username });
+    documentBack = await stageBiometricEvidence({ value: body.documentBackImage, kind: "KYC_DOCUMENT_BACK", username: identity.username });
+  } catch (error) {
+    pendingBiometricWrites = [];
+    return { error: json({ message: "Nao foi possivel proteger as fotos do documento.", code: error.message }, { status: 503 }) };
+  }
   const createdAt = now();
   const requestEntry = {
     id: crypto.randomUUID(),
@@ -2070,6 +2087,9 @@ async function createPublicAccountRequest(body, recorded, availability) {
     identity,
     fullName,
     phone,
+    documentFrontEvidenceId: documentFront.id,
+    documentBackEvidenceId: documentBack.id,
+    documentEvidence: evidenceAnalysis.evidence,
     subjectHash: recorded.subjectHash,
     actor: "PUBLIC",
     createdAt,
@@ -2087,6 +2107,7 @@ async function createPublicAccountRequest(body, recorded, availability) {
       message: "Solicitacao enviada ao administrador. A conta sera criada internamente pelo Bravus.",
       adminReviewRequired: true,
       accountCreated: false,
+      documentEvidenceReceived: true,
     }, { status: 202, headers: { "cache-control": "no-store" } }),
   };
 }
@@ -4153,8 +4174,34 @@ async function handleApi(request) {
         cpf: item.identity?.cpf || "",
         maskedCpf: maskCpf(item.identity?.cpf),
         phone: item.phone || "",
+        documentEvidenceReceived: Boolean(item.documentFrontEvidenceId && item.documentBackEvidenceId),
         createdAt: item.createdAt,
       })));
+  }
+
+  const accountRequestEvidenceMatch = path.match(/^\\/admin\\/account-requests\\/([^/]+)\\/evidence$/);
+  if (request.method === "GET" && accountRequestEvidenceMatch) {
+    const accountRequest = publicAccountRequests().find((item) => item.id === decodeURIComponent(accountRequestEvidenceMatch[1]));
+    if (!accountRequest || !accountRequest.documentFrontEvidenceId || !accountRequest.documentBackEvidenceId) {
+      return json({ message: "Fotos do documento indisponiveis para esta solicitacao." }, { status: 404 });
+    }
+    try {
+      const [documentFront, documentBack] = await Promise.all([
+        decryptBiometricEvidence(accountRequest.documentFrontEvidenceId, "KYC_DOCUMENT_FRONT"),
+        decryptBiometricEvidence(accountRequest.documentBackEvidenceId, "KYC_DOCUMENT_BACK"),
+      ]);
+      return json({
+        requestId: accountRequest.id,
+        fullName: accountRequest.fullName,
+        username: accountRequest.identity?.username || "",
+        email: accountRequest.identity?.email || "",
+        maskedCpf: maskCpf(accountRequest.identity?.cpf),
+        documentFront,
+        documentBack,
+      }, { headers: { "cache-control": "no-store", pragma: "no-cache" } });
+    } catch {
+      return json({ message: "Nao foi possivel abrir as fotos protegidas do documento." }, { status: 503 });
+    }
   }
 
   if (request.method === "GET" && path === "/admin/dashboard") {

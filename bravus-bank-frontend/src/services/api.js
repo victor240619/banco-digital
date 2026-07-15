@@ -211,6 +211,7 @@ export const adminService = {
   getDashboard: () => api.get('/admin/dashboard'),
   getAllUsers: () => api.get('/admin/users'),
   getAccountRequests: () => api.get('/admin/account-requests'),
+  getAccountRequestEvidence: (requestId) => api.get(`/admin/account-requests/${encodeURIComponent(requestId)}/evidence`),
   provisionAccount: (payload, idempotencyKey) => api.post('/admin/accounts/provision', payload, {
     headers: { 'Idempotency-Key': idempotencyKey },
   }),

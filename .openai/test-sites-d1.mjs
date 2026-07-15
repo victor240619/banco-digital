@@ -403,6 +403,8 @@ const register = await call(worker, "POST", "/auth/register", {
     ...registrationIdentity,
     fullName: "Cliente Persistencia D1",
     phone: "11999990000",
+    documentFrontImage: image(11, 4200),
+    documentBackImage: image(22, 4200),
     idempotencyKey: "public-account-request-d1-0001",
   },
 });
@@ -412,13 +414,25 @@ assert.equal(register.data.accountCreated, false);
 assert.equal(JSON.parse(database.stateRow.payload).users[registrationIdentity.username], undefined, "public request must not create an account");
 const duplicateRegister = await call(worker, "POST", "/auth/register", {
   headers: mobileHeaders,
-  body: { ...registrationIdentity, fullName: "Cliente Persistencia D1", phone: "11999990000", idempotencyKey: "public-account-request-d1-0001" },
+  body: {
+    ...registrationIdentity,
+    fullName: "Cliente Persistencia D1",
+    phone: "11999990000",
+    documentFrontImage: image(11, 4200),
+    documentBackImage: image(22, 4200),
+    idempotencyKey: "public-account-request-d1-0001",
+  },
 });
 assert.equal(duplicateRegister.response.status, 202, "duplicate account opening request must be idempotent");
 assert.equal(duplicateRegister.data.duplicateRequest, true);
 const pendingAccountRequests = await call(worker, "GET", "/admin/account-requests", { token: adminLogin.data.token });
 assert.equal(pendingAccountRequests.response.status, 200);
 assert.equal(pendingAccountRequests.data.some((item) => item.requestId === register.data.requestId), true);
+const accountRequestEvidence = await call(worker, "GET", "/admin/account-requests/" + register.data.requestId + "/evidence", { token: adminLogin.data.token });
+assert.equal(accountRequestEvidence.response.status, 200, JSON.stringify(accountRequestEvidence.data));
+assert.match(accountRequestEvidence.data.documentFront, /^data:image\/png;base64,/);
+assert.match(accountRequestEvidence.data.documentBack, /^data:image\/png;base64,/);
+assert.equal(accountRequestEvidence.response.headers.get("cache-control"), "no-store");
 
 const registrationProvision = await call(worker, "POST", "/admin/accounts/provision", {
   token: adminLogin.data.token,
