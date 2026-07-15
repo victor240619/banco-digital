@@ -5,6 +5,7 @@ import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import { authService } from './services/api';
 import { isMobileApp } from './lib/appChannel';
+import { hasRegistrationDraft } from './lib/registrationDraft';
 
 const Home = lazy(() => import('./pages/Home'));
 const Login = lazy(() => import('./pages/Login'));
@@ -54,7 +55,10 @@ function RootRoute() {
   if (!isMobileApp()) return <Home />;
   const isAuthenticated = authService.isAuthenticated();
   const isAdmin = authService.hasRole('ROLE_ADMIN');
-  return <Navigate to={isAuthenticated ? (isAdmin ? '/admin' : '/dashboard') : '/login'} replace />;
+  const destination = isAuthenticated
+    ? (isAdmin ? '/admin' : '/dashboard')
+    : (hasRegistrationDraft() ? '/register' : '/login');
+  return <Navigate to={destination} replace />;
 }
 
 export default function App() {

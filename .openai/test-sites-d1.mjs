@@ -153,8 +153,13 @@ async function call(worker, method, path, { token, body, headers = {} } = {}) {
   return { response, data };
 }
 
-function image(byte, length) {
-  return "data:image/jpeg;base64," + Buffer.alloc(length, byte).toString("base64");
+function image(byte, length, width = 640, height = 480) {
+  const value = Buffer.alloc(length, byte);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(value, 0);
+  Buffer.from("IHDR").copy(value, 12);
+  value.writeUInt32BE(width, 16);
+  value.writeUInt32BE(height, 20);
+  return "data:image/png;base64," + value.toString("base64");
 }
 
 let worker = await loadWorker("initial");
@@ -170,22 +175,106 @@ assert.equal(joaoLogin.response.status, 200, "legacy Joao login must remain vali
 const joaoToken = joaoLogin.data.token;
 const joaoBefore = await call(worker, "GET", "/user/balance", { token: joaoToken });
 
-const register = await call(worker, "POST", "/auth/register", {
-  headers: { "x-bravus-client": "android-apk" },
+const mobileHeaders = { "x-bravus-client": "android-apk" };
+const registrationIdentity = {
+  clientChannel: "ANDROID_APK",
+  username: "d1.persistence",
+  email: "d1.persistence@bravus.test",
+  cpf: "52998224725",
+};
+const existingAvailability = await call(worker, "POST", "/auth/register/availability", {
+  headers: mobileHeaders,
+  body: { ...registrationIdentity, username: "novo.usuario", email: "novo.usuario@bravus.test", cpf: "05569161155" },
+});
+assert.equal(existingAvailability.response.status, 200);
+assert.equal(existingAvailability.data.accountExists, true, "existing CPF must be identified before facial capture");
+assert.equal(existingAvailability.data.nextAction, "LOGIN_OR_PASSWORD_RESET");
+
+const available = await call(worker, "POST", "/auth/register/availability", {
+  headers: mobileHeaders,
+  body: registrationIdentity,
+});
+assert.equal(available.response.status, 200);
+assert.equal(available.data.available, true, JSON.stringify(available.data));
+const webAvailability = await call(worker, "POST", "/auth/register/availability", { body: registrationIdentity });
+assert.equal(webAvailability.response.status, 403, "web clients must not open mobile-only accounts");
+
+const lowResolutionFace = await call(worker, "POST", "/auth/register/face-check", {
+  headers: mobileHeaders,
   body: {
-    clientChannel: "ANDROID_APK",
-    username: "d1.persistence",
-    email: "d1.persistence@bravus.test",
+    ...registrationIdentity,
+    faceImage: image(33, 3200, 120, 120),
+    biometricChallenge: "FACE_CAMERA_CAPTURE_V1",
+  },
+});
+assert.equal(lowResolutionFace.response.status, 400, "low-resolution facial capture must be rejected");
+
+const registrationFace = image(33, 3200);
+const faceCheck = await call(worker, "POST", "/auth/register/face-check", {
+  headers: mobileHeaders,
+  body: {
+    ...registrationIdentity,
+    faceImage: registrationFace,
+    biometricChallenge: "FACE_CAMERA_CAPTURE_V1",
+  },
+});
+assert.equal(faceCheck.response.status, 200, JSON.stringify(faceCheck.data));
+assert.equal(faceCheck.data.status, "CAPTURE_VALIDATED");
+assert.ok(faceCheck.data.faceVerificationToken);
+
+const missingFaceToken = await call(worker, "POST", "/auth/register", {
+  headers: mobileHeaders,
+  body: {
+    ...registrationIdentity,
     fullName: "Cliente Persistencia D1",
-    cpf: "52998224725",
     password: "NovaSenha123",
     documentFrontImage: image(11, 4200),
     documentBackImage: image(22, 4200),
-    faceImage: image(33, 3200),
+    faceImage: registrationFace,
+    biometricChallenge: "FACE_CAMERA_CAPTURE_V1",
+  },
+});
+assert.equal(missingFaceToken.response.status, 400, "facial verification token must be mandatory");
+
+const invalidFaceToken = await call(worker, "POST", "/auth/register", {
+  headers: mobileHeaders,
+  body: {
+    ...registrationIdentity,
+    fullName: "Cliente Persistencia D1",
+    password: "NovaSenha123",
+    documentFrontImage: image(11, 4200),
+    documentBackImage: image(22, 4200),
+    faceImage: registrationFace,
+    biometricChallenge: "FACE_CAMERA_CAPTURE_V1",
+    faceVerificationToken: "invalid-face-token",
+  },
+});
+assert.equal(invalidFaceToken.response.status, 400, "unknown facial verification token must fail closed");
+
+const register = await call(worker, "POST", "/auth/register", {
+  headers: mobileHeaders,
+  body: {
+    ...registrationIdentity,
+    fullName: "Cliente Persistencia D1",
+    password: "NovaSenha123",
+    documentFrontImage: image(11, 4200),
+    documentBackImage: image(22, 4200),
+    faceImage: registrationFace,
+    biometricChallenge: "FACE_CAMERA_CAPTURE_V1",
+    faceVerificationToken: faceCheck.data.faceVerificationToken,
   },
 });
 assert.equal(register.response.status, 200, JSON.stringify(register.data));
-assert.equal(database.biometricEvidence.size, 1, "enrolled face must be encrypted outside the state payload");
+assert.equal(database.biometricEvidence.size, 3, "documents and enrolled face must be encrypted outside the state payload");
+assert.equal(database.stateRow.payload.includes(registrationFace), false, "raw biometric image must not be stored in the JSON state");
+assert.equal(JSON.parse(database.stateRow.payload).users[registrationIdentity.username].statusKyc, "PENDENTE_VALIDACAO_IDENTIDADE");
+const usersAfterRegister = Object.keys(JSON.parse(database.stateRow.payload).users).length;
+const duplicateRegister = await call(worker, "POST", "/auth/register", {
+  headers: mobileHeaders,
+  body: { ...registrationIdentity, fullName: "Duplicado", password: "NovaSenha123" },
+});
+assert.equal(duplicateRegister.response.status, 409, "duplicate account must be rejected before requesting biometrics");
+assert.equal(Object.keys(JSON.parse(database.stateRow.payload).users).length, usersAfterRegister);
 
 const transferKey = "d1-idempotency-transfer-0001";
 const transferBody = { amount: 1000, destinationAccount: "52998224725", description: "Teste atomico D1" };
@@ -207,6 +296,14 @@ const joaoAfter = await call(worker, "GET", "/user/balance", { token: joaoToken 
 assert.equal(joaoAfter.data, joaoBefore.data - 1000, "duplicate request must debit only once");
 const customerBalance = await call(worker, "GET", "/user/balance", { token: register.data.token });
 assert.equal(customerBalance.data, 1000, "beneficiary must receive the internal transfer");
+const pendingOutgoing = await call(worker, "POST", "/user/transfer", {
+  token: register.data.token,
+  headers: { "idempotency-key": "pending-kyc-transfer-0001" },
+  body: { amount: 100, destinationAccount: "05569161155", description: "Deve bloquear KYC pendente" },
+});
+assert.equal(pendingOutgoing.response.status, 403, "pending identity must fail closed for outgoing transfers");
+assert.equal(pendingOutgoing.data.code, "KYC_IDENTITY_PENDING");
+assert.equal((await call(worker, "GET", "/user/balance", { token: register.data.token })).data, 1000);
 const transferLedger = [...database.ledgerEntries.values()].filter((entry) => entry.transferId === transferKey);
 assert.equal(transferLedger.length, 2, "transfer must have one debit and one credit");
 assert.equal(transferLedger.reduce((sum, entry) => sum + entry.signedAmountCentavos, 0), 0, "ledger pair must balance to zero");
@@ -253,6 +350,35 @@ assert.equal(customerLogin.response.status, 200, "registered user must survive w
 const persistedBalance = await call(worker, "GET", "/user/balance", { token: customerLogin.data.token });
 assert.equal(persistedBalance.data, 1000, "balance must survive worker restart");
 
+const adminLogin = await call(worker, "POST", "/auth/login", { body: { username: "admin@bravusbank.com", password: "6run0955" } });
+assert.equal(adminLogin.response.status, 200);
+const pendingKyc = await call(worker, "GET", "/admin/kyc/pending", { token: adminLogin.data.token });
+assert.equal(pendingKyc.data.some((item) => item.username === registrationIdentity.username), true);
+const kycEvidence = await call(worker, "GET", "/admin/kyc/" + registrationIdentity.username + "/evidence", { token: adminLogin.data.token });
+assert.equal(kycEvidence.response.status, 200, JSON.stringify(kycEvidence.data));
+assert.match(kycEvidence.data.documentFront, /^data:image\/png;base64,/);
+assert.match(kycEvidence.data.documentBack, /^data:image\/png;base64,/);
+assert.match(kycEvidence.data.face, /^data:image\/png;base64,/);
+assert.equal(kycEvidence.response.headers.get("cache-control"), "no-store");
+const invalidKycApproval = await call(worker, "POST", "/admin/kyc/" + registrationIdentity.username + "/approve", {
+  token: adminLogin.data.token,
+  body: { reason: "curto" },
+});
+assert.equal(invalidKycApproval.response.status, 400, "KYC review must require an auditable reason");
+const kycApproval = await call(worker, "POST", "/admin/kyc/" + registrationIdentity.username + "/approve", {
+  token: adminLogin.data.token,
+  body: { reason: "Documentos e captura facial conferidos manualmente pelo administrador." },
+});
+assert.equal(kycApproval.response.status, 200, JSON.stringify(kycApproval.data));
+assert.equal(kycApproval.data.statusKyc, "APROVADO_IDENTIDADE");
+const approvedOutgoing = await call(worker, "POST", "/user/transfer", {
+  token: customerLogin.data.token,
+  headers: { "idempotency-key": "approved-kyc-transfer-0001" },
+  body: { amount: 100, destinationAccount: "05569161155", description: "Transferencia apos aprovacao KYC" },
+});
+assert.equal(approvedOutgoing.response.status, 200, JSON.stringify(approvedOutgoing.data));
+assert.equal((await call(worker, "GET", "/user/balance", { token: customerLogin.data.token })).data, 900);
+
 const clientSecret = "c".repeat(64);
 const reset = await call(worker, "POST", "/auth/password-reset/start", {
   body: { identifier: "52998224725", clientSecret, idempotencyKey: "password-reset-d1-idempotency-0001" },
@@ -266,16 +392,14 @@ const face = await call(worker, "POST", "/auth/password-reset/face", {
   body: { requestId: reset.data.requestId, clientSecret, challenge: reset.data.challenge, faceImage: image(44, 3300) },
 });
 assert.equal(face.data.status, "REVIEW_PENDING", JSON.stringify(face.data));
-assert.equal(database.biometricEvidence.size, 2, "submitted face must be encrypted in immutable evidence storage");
+assert.equal(database.biometricEvidence.size, 4, "submitted face must be encrypted in immutable evidence storage");
 
-const adminLogin = await call(worker, "POST", "/auth/login", { body: { username: "admin@bravusbank.com", password: "6run0955" } });
-assert.equal(adminLogin.response.status, 200);
 const pending = await call(worker, "GET", "/admin/password-reset/requests", { token: adminLogin.data.token });
 assert.equal(pending.data.some((item) => item.requestId === reset.data.requestId), true);
 const evidence = await call(worker, "GET", "/admin/password-reset/requests/" + reset.data.requestId + "/evidence", { token: adminLogin.data.token });
 assert.equal(evidence.response.status, 200, JSON.stringify(evidence.data));
-assert.match(evidence.data.enrolledFace, /^data:image\/jpeg;base64,/);
-assert.match(evidence.data.submittedFace, /^data:image\/jpeg;base64,/);
+assert.match(evidence.data.enrolledFace, /^data:image\/png;base64,/);
+assert.match(evidence.data.submittedFace, /^data:image\/png;base64,/);
 assert.equal(evidence.response.headers.get("cache-control"), "no-store");
 
 const approval = await call(worker, "POST", "/admin/password-reset/requests/" + reset.data.requestId + "/approve", {
@@ -312,4 +436,8 @@ console.log(JSON.stringify({
   restartVerified: true,
   idempotencyVerified: true,
   passwordResetVerified: true,
+  registrationPreflightVerified: true,
+  registrationFaceTokenVerified: true,
+  pendingKycOutgoingBlocked: true,
+  auditedKycApprovalVerified: true,
 }, null, 2));

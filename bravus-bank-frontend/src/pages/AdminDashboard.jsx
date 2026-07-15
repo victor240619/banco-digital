@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import {
   adminService, analysisService, caymanRailService,
-  externalTransferService, globalRailService, ledgerAdminService, passwordResetAdminService, unifiedSearchService,
+  externalTransferService, globalRailService, kycAdminService, ledgerAdminService, passwordResetAdminService, unifiedSearchService,
 } from '../services/api';
 import { formatCurrency, formatDate, getTransactionTypeLabel } from '../utils/helpers';
 import { cn } from '../lib/cn';
@@ -230,6 +230,7 @@ export default function AdminDashboard() {
       {tab === 'analysis' && (
         <DocumentAnalysisView
           analyses={documentAnalyses}
+          users={users}
           onSuccess={(msg) => { setSuccess(msg); loadAll(); }}
           onError={setError}
         />
@@ -770,10 +771,13 @@ function UnifiedSearchView({ onError }) {
   );
 }
 
-function DocumentAnalysisView({ analyses, onSuccess, onError }) {
+function DocumentAnalysisView({ analyses, users = [], onSuccess, onError }) {
   const [form, setForm] = useState({ type: 'CPF', document: '' });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [kycReview, setKycReview] = useState({ username: '', evidence: null, reason: '' });
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const pendingAccounts = users.filter((account) => account.statusKyc === 'PENDENTE_VALIDACAO_IDENTIDADE');
 
   async function submit(e) {
     e.preventDefault();
@@ -790,8 +794,100 @@ function DocumentAnalysisView({ analyses, onSuccess, onError }) {
     }
   }
 
+  async function openKycEvidence(username) {
+    setReviewLoading(true);
+    try {
+      const { data } = await kycAdminService.evidence(username);
+      setKycReview({ username, evidence: data, reason: '' });
+    } catch (err) {
+      onError(apiError(err, 'Falha ao abrir as evidencias protegidas.'));
+    } finally {
+      setReviewLoading(false);
+    }
+  }
+
+  async function reviewKyc(decision) {
+    const reason = kycReview.reason.trim();
+    if (reason.length < 10) {
+      onError('Registre um motivo com pelo menos 10 caracteres.');
+      return;
+    }
+    setReviewLoading(true);
+    try {
+      const action = decision === 'approve' ? kycAdminService.approve : kycAdminService.reject;
+      await action(kycReview.username, reason);
+      setKycReview({ username: '', evidence: null, reason: '' });
+      onSuccess(decision === 'approve' ? 'Identidade aprovada e operacoes de saida liberadas.' : 'Identidade rejeitada e sessoes revogadas.');
+    } catch (err) {
+      onError(apiError(err, 'Falha ao concluir a revisao de identidade.'));
+    } finally {
+      setReviewLoading(false);
+    }
+  }
+
   return (
-    <div className="grid lg:grid-cols-3 gap-6">
+    <div className="space-y-6">
+      <section className="card-premium p-5 sm:p-6" aria-labelledby="kyc-review-title">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 id="kyc-review-title" className="font-display text-lg font-semibold">Validacao de identidade pendente</h3>
+            <p className="mt-1 text-sm text-ink-400">Contas pendentes podem consultar e receber, mas nao transferir ou sacar.</p>
+          </div>
+          <span className="rounded-full bg-amber-400/15 px-3 py-1 text-sm text-amber-200">{pendingAccounts.length} pendente(s)</span>
+        </div>
+
+        <div className="mt-4 divide-y divide-white/10 border-y border-white/10">
+          {pendingAccounts.length === 0 && <div className="py-4 text-sm text-ink-400">Nenhuma conta aguardando revisao.</div>}
+          {pendingAccounts.map((account) => (
+            <div key={account.username} className="flex flex-wrap items-center justify-between gap-3 py-4">
+              <div className="min-w-0">
+                <div className="font-semibold text-ink-50">{account.fullName}</div>
+                <div className="text-sm text-ink-400">{account.username} · CPF final {String(account.cpf || '').slice(-4)}</div>
+              </div>
+              <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => openKycEvidence(account.username)} disabled={reviewLoading}>
+                <Eye className="h-4 w-4" /> Revisar evidencias
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {kycReview.evidence && (
+          <div className="mt-5 space-y-4">
+            <div className="text-sm font-semibold text-ink-100">{kycReview.evidence.fullName} · {kycReview.evidence.maskedCpf}</div>
+            <div className="grid gap-4 md:grid-cols-3">
+              {[
+                ['Documento frente', kycReview.evidence.documentFront],
+                ['Documento verso', kycReview.evidence.documentBack],
+                ['Captura facial', kycReview.evidence.face],
+              ].map(([label, source]) => (
+                <figure key={label} className="min-w-0">
+                  <div className="aspect-[4/3] overflow-hidden rounded-lg border border-white/10 bg-black/30">
+                    <img src={source} alt={label} className="h-full w-full object-contain" />
+                  </div>
+                  <figcaption className="mt-2 text-xs text-ink-400">{label}</figcaption>
+                </figure>
+              ))}
+            </div>
+            <textarea
+              className="input-premium min-h-24 w-full"
+              value={kycReview.reason}
+              onChange={(event) => setKycReview((current) => ({ ...current, reason: event.target.value }))}
+              placeholder="Motivo auditavel da aprovacao ou rejeicao (minimo 10 caracteres)"
+              maxLength={500}
+            />
+            <div className="flex flex-wrap gap-3">
+              <button type="button" className="btn-primary" onClick={() => reviewKyc('approve')} disabled={reviewLoading}>
+                <CheckCircle2 className="h-4 w-4" /> Aprovar identidade
+              </button>
+              <button type="button" className="btn-secondary border-red-400/30 text-red-200" onClick={() => reviewKyc('reject')} disabled={reviewLoading}>
+                <XCircle className="h-4 w-4" /> Rejeitar identidade
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <div className="grid lg:grid-cols-3 gap-6">
       <form onSubmit={submit} className="card-premium p-6 lg:col-span-2 space-y-4">
         <div className="flex items-center gap-2">
           <Shield className="h-5 w-5 text-amber-300" />
@@ -851,6 +947,7 @@ function DocumentAnalysisView({ analyses, onSuccess, onError }) {
           ))}
         </div>
       </div>
+    </div>
     </div>
   );
 }

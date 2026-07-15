@@ -277,9 +277,13 @@ const initialStateSeed = {
   ledgerAudit: [],
   documentAnalyses: [],
   kycEvidence: {},
+  kycAudit: [],
   sessions: {},
   passwordResetRequests: [],
   passwordResetAudit: [],
+  registrationChecks: [],
+  registrationFaceChecks: [],
+  registrationAudit: [],
   loginAttempts: [],
   creditGrant: { ...joaoCreditGrantSeed },
   globalRailParticipants: Array.isArray(liveSeed.globalRailParticipants) && liveSeed.globalRailParticipants.length
@@ -328,9 +332,13 @@ function normalizeState(candidate) {
   next.ledgerAudit = Array.isArray(next.ledgerAudit) ? next.ledgerAudit : [];
   next.documentAnalyses = Array.isArray(next.documentAnalyses) ? next.documentAnalyses : [];
   next.kycEvidence = next.kycEvidence && typeof next.kycEvidence === "object" ? next.kycEvidence : {};
+  next.kycAudit = Array.isArray(next.kycAudit) ? next.kycAudit : [];
   next.sessions = next.sessions && typeof next.sessions === "object" ? next.sessions : {};
   next.passwordResetRequests = Array.isArray(next.passwordResetRequests) ? next.passwordResetRequests : [];
   next.passwordResetAudit = Array.isArray(next.passwordResetAudit) ? next.passwordResetAudit : [];
+  next.registrationChecks = Array.isArray(next.registrationChecks) ? next.registrationChecks : [];
+  next.registrationFaceChecks = Array.isArray(next.registrationFaceChecks) ? next.registrationFaceChecks : [];
+  next.registrationAudit = Array.isArray(next.registrationAudit) ? next.registrationAudit : [];
   next.loginAttempts = Array.isArray(next.loginAttempts) ? next.loginAttempts : [];
   next.creditGrant = next.creditGrant && typeof next.creditGrant === "object"
     ? { ...joaoCreditGrantSeed, ...next.creditGrant }
@@ -1503,29 +1511,93 @@ function publicLoginMatches(user, username) {
     || (user.cpf && normalized === user.cpf);
 }
 
-function imageEvidence(value, label, minBytes) {
+function canUseOutgoingBanking(user) {
+  const status = user.statusKyc || "APROVADO_AUTO";
+  return status === "APROVADO_AUTO" || status === "APROVADO_IDENTIDADE";
+}
+
+function outgoingKycBlocked(user) {
+  return json({
+    message: "Sua conta pode consultar e receber valores, mas operacoes de saida aguardam a validacao de identidade.",
+    code: "KYC_IDENTITY_PENDING",
+    statusKyc: user.statusKyc || "PENDENTE_VALIDACAO_IDENTIDADE",
+  }, { status: 403 });
+}
+
+function imageDimensions(mime, base64) {
+  let binary;
+  try {
+    binary = atob(base64);
+  } catch {
+    return null;
+  }
+  const byte = (index) => binary.charCodeAt(index);
+  if (mime === "image/png" && binary.length >= 24
+    && byte(0) === 0x89 && binary.slice(1, 4) === "PNG") {
+    const width = ((byte(16) << 24) | (byte(17) << 16) | (byte(18) << 8) | byte(19)) >>> 0;
+    const height = ((byte(20) << 24) | (byte(21) << 16) | (byte(22) << 8) | byte(23)) >>> 0;
+    return width && height ? { width, height } : null;
+  }
+  if (mime !== "image/jpeg" || binary.length < 12 || byte(0) !== 0xff || byte(1) !== 0xd8) return null;
+  const startOfFrame = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+  let offset = 2;
+  while (offset + 8 < binary.length) {
+    if (byte(offset) !== 0xff) {
+      offset += 1;
+      continue;
+    }
+    const marker = byte(offset + 1);
+    if (marker === 0xd9 || marker === 0xda) break;
+    if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7)) {
+      offset += 2;
+      continue;
+    }
+    const segmentLength = (byte(offset + 2) << 8) | byte(offset + 3);
+    if (segmentLength < 2 || offset + segmentLength + 2 > binary.length) break;
+    if (startOfFrame.has(marker)) {
+      const height = (byte(offset + 5) << 8) | byte(offset + 6);
+      const width = (byte(offset + 7) << 8) | byte(offset + 8);
+      return width && height ? { width, height } : null;
+    }
+    offset += segmentLength + 2;
+  }
+  return null;
+}
+
+function imageEvidence(value, label, minBytes, minWidth = 1, minHeight = 1) {
   const raw = String(value || "");
   const match = raw.match(/^data:(image\\/(jpeg|png));base64,([A-Za-z0-9+/=]+)$/);
   if (!match) return { label, ok: false, present: Boolean(raw), message: label + " deve ser imagem JPEG ou PNG em base64." };
   const base64 = match[3];
   const bytes = Math.floor((base64.length * 3) / 4);
+  if (bytes > 5 * 1024 * 1024) {
+    return { label, ok: false, present: true, mime: match[1], bytes, message: label + " excede o limite de 5 MB." };
+  }
+  const dimensions = imageDimensions(match[1], base64);
+  const sizeOk = bytes >= minBytes;
+  const dimensionsOk = Boolean(dimensions && dimensions.width >= minWidth && dimensions.height >= minHeight);
+  const ok = sizeOk && dimensionsOk;
   return {
     label,
-    ok: bytes >= minBytes,
+    ok,
     present: true,
     mime: match[1],
     bytes,
-    fingerprint: match[1] + ":" + bytes + ":" + base64.slice(0, 24),
-    message: bytes >= minBytes ? null : label + " esta muito pequena para analise.",
+    width: dimensions?.width || 0,
+    height: dimensions?.height || 0,
+    fingerprint: match[1] + ":" + bytes + ":" + base64.slice(0, 32) + ":" + base64.slice(-32),
+    message: !sizeOk
+      ? label + " esta muito pequena para analise."
+      : (!dimensionsOk ? label + " nao possui resolucao valida para analise." : null),
   };
 }
 
 function buildKycAnalysis(body, user) {
   const documentNumber = digits(body.cpf || body.document || user?.cpf);
   const documentType = documentTypeFor(body.type, documentNumber);
-  const front = imageEvidence(body.documentFrontImage, "Frente do documento", 3500);
-  const back = imageEvidence(body.documentBackImage, "Verso do documento", 3500);
-  const face = imageEvidence(body.faceImage, "Biometria facial", 2500);
+  const front = imageEvidence(body.documentFrontImage, "Frente do documento", 3500, 220, 140);
+  const back = imageEvidence(body.documentBackImage, "Verso do documento", 3500, 220, 140);
+  const face = imageEvidence(body.faceImage, "Biometria facial", 2500, 240, 240);
   const duplicateEvidence =
     front.fingerprint
     && (front.fingerprint === back.fingerprint || front.fingerprint === face.fingerprint || back.fingerprint === face.fingerprint);
@@ -1538,22 +1610,114 @@ function buildKycAnalysis(body, user) {
     id: state.documentAnalyses.length + 1,
     documentType,
     documentNumber,
-    status: evidenceOk ? "APROVADO_AUTO" : "REJEITADO_EVIDENCIA_INSUFICIENTE",
-    riskLevel: evidenceOk ? "BAIXO" : "ALTO",
-    riskScore: evidenceOk ? (documentChecksumOk ? 7 : 18) : 92,
-    provider: "BRAVUS_SELF_KYC_SITES",
+    status: evidenceOk ? "EVIDENCIA_CAPTURADA_AUTO" : "REJEITADO_EVIDENCIA_INSUFICIENTE",
+    riskLevel: evidenceOk ? "PENDENTE_IDENTIDADE" : "ALTO",
+    riskScore: evidenceOk ? (documentChecksumOk ? 18 : 35) : 92,
+    provider: "BRAVUS_CAPTURE_QUALITY_SITES",
     subjectName: body.fullName || user?.fullName || "Titular informado",
-    registrationStatus: documentChecksumOk ? "DOCUMENTO_COM_EVIDENCIA_KYC" : "DOCUMENTO_COM_EVIDENCIA_PENDENTE_VALIDACAO_OFICIAL",
-    biometricStatus: face.ok ? "FACE_CAPTURADA" : "FACE_AUSENTE",
+    registrationStatus: documentChecksumOk ? "EVIDENCIA_DOCUMENTAL_CAPTURADA" : "DOCUMENTO_PENDENTE_VALIDACAO_OFICIAL",
+    biometricStatus: face.ok ? "CAPTURA_QUALIDADE_VALIDADA" : "FACE_AUSENTE",
     biometricChallenge: body.biometricChallenge || "FACE_CAMERA_CAPTURE_V1",
     evidence: {
-      documentFront: { present: front.present, mime: front.mime || null, bytes: front.bytes || 0 },
-      documentBack: { present: back.present, mime: back.mime || null, bytes: back.bytes || 0 },
-      face: { present: face.present, mime: face.mime || null, bytes: face.bytes || 0 },
+      documentFront: { present: front.present, mime: front.mime || null, bytes: front.bytes || 0, width: front.width || 0, height: front.height || 0 },
+      documentBack: { present: back.present, mime: back.mime || null, bytes: back.bytes || 0, width: back.width || 0, height: back.height || 0 },
+      face: { present: face.present, mime: face.mime || null, bytes: face.bytes || 0, width: face.width || 0, height: face.height || 0 },
     },
     errorMessage: evidenceOk ? null : messages.join(" "),
     createdAt: now(),
   };
+}
+
+function isMobileRegistrationClient(request, body) {
+  const client = request.headers.get("x-bravus-client");
+  return (client === "android-apk" && body.clientChannel === "ANDROID_APK")
+    || (client === "ios-app" && body.clientChannel === "IOS_APP")
+    || (client === "mobile-app" && body.clientChannel === "MOBILE_APP");
+}
+
+function registrationIdentity(body) {
+  const cpf = String(body.cpf || "").replace(/\\D/g, "");
+  return {
+    cpf,
+    username: String(body.username || "").trim().toLowerCase(),
+    email: String(body.email || "").trim().toLowerCase(),
+  };
+}
+
+function registrationAvailability(body) {
+  const identity = registrationIdentity(body);
+  const fieldErrors = {};
+  if (identity.cpf.length !== 11) fieldErrors.cpf = "Informe CPF com 11 digitos.";
+  else if (!validCpf(identity.cpf)) fieldErrors.cpf = "Informe um CPF valido.";
+  if (identity.username.length < 3) fieldErrors.username = "Informe um usuario com pelo menos 3 caracteres.";
+  if (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(identity.email)) fieldErrors.email = "Informe um e-mail valido.";
+
+  const users = Object.values(state.users);
+  const cpfConflict = identity.cpf.length === 11 && users.some((item) => item.cpf === identity.cpf);
+  const usernameConflict = identity.username.length >= 3
+    && users.some((item) => item.username.toLowerCase() === identity.username);
+  const emailConflict = Boolean(identity.email)
+    && users.some((item) => item.email.toLowerCase() === identity.email);
+  const conflict = cpfConflict || usernameConflict || emailConflict;
+  let code = "REGISTRATION_AVAILABLE";
+  let message = "Dados disponiveis para abertura da conta.";
+  if (cpfConflict) {
+    code = "ACCOUNT_ALREADY_EXISTS";
+    message = "Este CPF ja possui conta no Bravus. Entre na conta ou redefina a senha.";
+  } else if (usernameConflict) {
+    code = "USERNAME_ALREADY_EXISTS";
+    message = "Este usuario ja esta em uso. Escolha outro usuario.";
+  } else if (emailConflict) {
+    code = "EMAIL_ALREADY_EXISTS";
+    message = "Este e-mail ja esta vinculado a uma conta. Entre ou redefina a senha.";
+  } else if (Object.keys(fieldErrors).length) {
+    code = "REGISTRATION_INVALID_INPUT";
+    message = "Revise os dados antes de continuar.";
+  }
+  return {
+    available: !conflict && Object.keys(fieldErrors).length === 0,
+    accountExists: cpfConflict,
+    code,
+    message,
+    fieldErrors,
+    nextAction: cpfConflict || emailConflict ? "LOGIN_OR_PASSWORD_RESET" : (usernameConflict ? "EDIT_USERNAME" : "CONTINUE"),
+    identity,
+  };
+}
+
+async function registrationSubjectHash(identity) {
+  return sha256Text([identity.username, identity.email, identity.cpf].join("|"));
+}
+
+async function recordRegistrationCheck(request, availability) {
+  const cutoff = Date.now() - 15 * 60 * 1000;
+  state.registrationChecks = state.registrationChecks
+    .filter((item) => new Date(item.createdAt).getTime() >= cutoff)
+    .slice(0, 299);
+  const actorHash = await sha256Text(request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "mobile-client");
+  if (state.registrationChecks.filter((item) => item.actorHash === actorHash).length >= 15) {
+    return { rateLimited: true, actorHash };
+  }
+  const subjectHash = await registrationSubjectHash(availability.identity);
+  state.registrationChecks.unshift({
+    id: crypto.randomUUID(), actorHash, subjectHash, outcome: availability.code, createdAt: now(),
+  });
+  state.registrationAudit.unshift({
+    id: crypto.randomUUID(), eventType: "AVAILABILITY_CHECKED", actor: "PUBLIC_MOBILE",
+    subjectHash, detail: availability.code, createdAt: now(),
+  });
+  state.registrationAudit = state.registrationAudit.slice(0, 500);
+  return { rateLimited: false, actorHash, subjectHash };
+}
+
+async function validatedRegistrationFaceCheck(body) {
+  const tokenHash = await sha256Text(String(body.faceVerificationToken || ""));
+  const subjectHash = await registrationSubjectHash(registrationIdentity(body));
+  const faceSha256 = await sha256Text(String(body.faceImage || ""));
+  const check = state.registrationFaceChecks.find((item) => item.tokenHash === tokenHash) || null;
+  if (!check || check.status !== "VALIDATED" || check.subjectHash !== subjectHash || check.faceSha256 !== faceSha256) return null;
+  if (new Date(check.expiresAt).getTime() <= Date.now()) return null;
+  return check;
 }
 
 function analyzeDocumentRequest(body) {
@@ -1900,56 +2064,125 @@ async function handleApi(request) {
     return json({ status: "CONSUMED" });
   }
 
+  if (request.method === "POST" && path === "/auth/register/availability") {
+    const body = await request.json().catch(() => ({}));
+    if (!isMobileRegistrationClient(request, body)) {
+      return json({ message: "A abertura de conta esta disponivel somente no app mobile Bravus Bank.", code: "MOBILE_APP_REQUIRED" }, { status: 403 });
+    }
+    const availability = registrationAvailability(body);
+    const recorded = await recordRegistrationCheck(request, availability);
+    if (recorded.rateLimited) {
+      return json({ message: "Muitas verificacoes. Aguarde antes de tentar novamente.", code: "RATE_LIMITED" }, { status: 429 });
+    }
+    const { identity, ...publicAvailability } = availability;
+    return json(publicAvailability, { headers: { "cache-control": "no-store" } });
+  }
+
+  if (request.method === "POST" && path === "/auth/register/face-check") {
+    const body = await request.json().catch(() => ({}));
+    if (!isMobileRegistrationClient(request, body)) {
+      return json({ message: "A abertura de conta esta disponivel somente no app mobile Bravus Bank.", code: "MOBILE_APP_REQUIRED" }, { status: 403 });
+    }
+    const availability = registrationAvailability(body);
+    const recorded = await recordRegistrationCheck(request, availability);
+    if (recorded.rateLimited) {
+      return json({ message: "Muitas verificacoes. Aguarde antes de tentar novamente.", code: "RATE_LIMITED" }, { status: 429 });
+    }
+    if (!availability.available) {
+      const { identity, ...publicAvailability } = availability;
+      return json(publicAvailability, { status: 409, headers: { "cache-control": "no-store" } });
+    }
+    if (String(body.biometricChallenge || "") !== "FACE_CAMERA_CAPTURE_V1") {
+      return badRequest("Desafio de captura facial invalido.", "REGISTRATION_FACE_CHALLENGE_INVALID");
+    }
+    const face = imageEvidence(body.faceImage, "Biometria facial", 2500, 240, 240);
+    if (!face.ok) return badRequest(face.message, "REGISTRATION_FACE_INVALID");
+
+    const token = randomToken(32);
+    const tokenHash = await sha256Text(token);
+    const faceSha256 = await sha256Text(String(body.faceImage));
+    const createdAt = now();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    state.registrationFaceChecks = state.registrationFaceChecks
+      .filter((item) => new Date(item.expiresAt).getTime() > Date.now())
+      .slice(0, 199);
+    state.registrationFaceChecks.unshift({
+      id: crypto.randomUUID(), tokenHash, subjectHash: recorded.subjectHash, faceSha256,
+      status: "VALIDATED", createdAt, expiresAt,
+      quality: { mime: face.mime, bytes: face.bytes, width: face.width, height: face.height },
+    });
+    state.registrationAudit.unshift({
+      id: crypto.randomUUID(), eventType: "FACE_CAPTURE_VALIDATED", actor: "PUBLIC_MOBILE",
+      subjectHash: recorded.subjectHash, detail: "Captura e resolucao validadas automaticamente.", createdAt,
+    });
+    state.registrationAudit = state.registrationAudit.slice(0, 500);
+    return json({
+      status: "CAPTURE_VALIDATED",
+      faceVerificationToken: token,
+      expiresAt,
+      message: "Captura facial validada automaticamente.",
+    }, { headers: { "cache-control": "no-store" } });
+  }
+
   if (request.method === "POST" && path === "/auth/register") {
     const body = await request.json().catch(() => ({}));
-    const client = request.headers.get("x-bravus-client");
-    const mobileClient =
-      (client === "android-apk" && body.clientChannel === "ANDROID_APK")
-      || (client === "ios-app" && body.clientChannel === "IOS_APP")
-      || (client === "mobile-app" && body.clientChannel === "MOBILE_APP");
-    if (!mobileClient) {
-      return json("A abertura de conta esta disponivel somente no app mobile Bravus Bank.", { status: 403 });
+    if (!isMobileRegistrationClient(request, body)) {
+      return json({ message: "A abertura de conta esta disponivel somente no app mobile Bravus Bank.", code: "MOBILE_APP_REQUIRED" }, { status: 403 });
     }
-    if (String(body.cpf || "").replace(/\\D/g, "").length !== 11) {
-      return json("Informe CPF com 11 digitos para abertura de conta.", { status: 400 });
+    const availability = registrationAvailability(body);
+    const recorded = await recordRegistrationCheck(request, availability);
+    if (recorded.rateLimited) {
+      return json({ message: "Muitas verificacoes. Aguarde antes de tentar novamente.", code: "RATE_LIMITED" }, { status: 429 });
     }
-    const normalizedCpf = String(body.cpf || "").replace(/\\D/g, "");
-    const kycAnalysis = buildKycAnalysis({ ...body, cpf: normalizedCpf }, null);
-    if (kycAnalysis.status !== "APROVADO_AUTO") {
-      return json(kycAnalysis.errorMessage || "Envie frente, verso do documento e capture a biometria facial.", { status: 400 });
+    if (!availability.available) {
+      const { identity, ...publicAvailability } = availability;
+      return json(publicAvailability, { status: 409, headers: { "cache-control": "no-store" } });
     }
-    const username = String(body.username || "cliente." + normalizedCpf.slice(-4)).trim().toLowerCase();
-    const email = String(body.email || "").trim().toLowerCase();
+    const { cpf: normalizedCpf, username, email } = availability.identity;
+    const fullName = String(body.fullName || "").trim();
+    if (fullName.length < 5) {
+      return badRequest("Informe o nome completo do titular.", "REGISTRATION_FULL_NAME_REQUIRED");
+    }
     if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$/.test(String(body.password || ""))) {
       return badRequest(
         "Use no minimo 8 caracteres, com letra maiuscula, minuscula e numero.",
         "WEAK_PASSWORD",
       );
     }
-    if (Object.values(state.users).some((item) => item.cpf === normalizedCpf)) {
-      return json("CPF ja cadastrado no Bravus.", { status: 400 });
+    if (!body.faceVerificationToken) {
+      return badRequest("Valide a captura facial antes de concluir o cadastro.", "REGISTRATION_FACE_VERIFICATION_REQUIRED");
     }
-    if (Object.values(state.users).some((item) => item.username.toLowerCase() === username || item.email.toLowerCase() === email)) {
-      return json("Usuario ou e-mail ja cadastrado no Bravus.", { status: 400 });
+    const faceCheck = await validatedRegistrationFaceCheck(body);
+    if (!faceCheck) {
+      return badRequest("A validacao facial expirou ou nao corresponde a este cadastro. Capture novamente.", "REGISTRATION_FACE_VERIFICATION_INVALID");
     }
+    const kycAnalysis = buildKycAnalysis({ ...body, cpf: normalizedCpf }, null);
+    if (kycAnalysis.status !== "EVIDENCIA_CAPTURADA_AUTO") {
+      return badRequest(kycAnalysis.errorMessage || "Envie frente, verso do documento e capture a biometria facial.", "REGISTRATION_EVIDENCE_INVALID");
+    }
+    let documentFront;
+    let documentBack;
     let enrolledFace;
     try {
+      documentFront = await stageBiometricEvidence({ value: body.documentFrontImage, kind: "KYC_DOCUMENT_FRONT", username });
+      documentBack = await stageBiometricEvidence({ value: body.documentBackImage, kind: "KYC_DOCUMENT_BACK", username });
       enrolledFace = await stageBiometricEvidence({ value: body.faceImage, kind: "ENROLLED_FACE", username });
     } catch (error) {
-      return json({ message: "Nao foi possivel proteger a biometria de abertura.", code: error.message }, { status: 503 });
+      pendingBiometricWrites = [];
+      return json({ message: "Nao foi possivel proteger as evidencias de abertura.", code: error.message }, { status: 503 });
     }
     const user = {
       ...joao,
       id: Math.max(...Object.values(state.users).map((item) => item.id)) + 1,
       username,
       email: email || ("cliente" + normalizedCpf.slice(-4) + "@bravusbank.com"),
-      fullName: body.fullName || "Novo Cliente",
+      fullName,
       cpf: normalizedCpf,
       phone: String(body.phone || "").replace(/\\D/g, ""),
       accountNumber: accountNumberForDocument(normalizedCpf),
       balance: 0,
       roles: ["ROLE_USER"],
-      statusKyc: "APROVADO_AUTO",
+      statusKyc: "PENDENTE_VALIDACAO_IDENTIDADE",
       kycAnalysisId: kycAnalysis.id,
       passwordCredential: await createPasswordCredential(body.password),
     };
@@ -1962,10 +2195,19 @@ async function handleApi(request) {
       documentNumber: kycAnalysis.documentNumber,
       biometricStatus: kycAnalysis.biometricStatus,
       evidence: kycAnalysis.evidence,
+      documentFrontEvidenceId: documentFront.id,
+      documentBackEvidenceId: documentBack.id,
       faceEvidenceId: enrolledFace.id,
       faceSha256: enrolledFace.sha256,
       createdAt: kycAnalysis.createdAt,
     };
+    faceCheck.status = "CONSUMED";
+    faceCheck.consumedAt = now();
+    state.registrationAudit.unshift({
+      id: crypto.randomUUID(), eventType: "ACCOUNT_CREATED", actor: user.username,
+      subjectHash: recorded.subjectHash, detail: "Conta criada apos disponibilidade e captura validadas.", createdAt: now(),
+    });
+    state.registrationAudit = state.registrationAudit.slice(0, 500);
     const token = createSession(user);
     return json(authResponse(user, token));
   }
@@ -1997,6 +2239,11 @@ async function handleApi(request) {
       return json(receiptForOrder(order, user));
     }
     return json(state.externalTransfers.filter((tx) => canReadOrderReceipt(tx, user)));
+  }
+  if (request.method === "POST"
+      && ["/user/withdraw", "/user/transfer", "/user/external-transfers"].includes(path)
+      && !canUseOutgoingBanking(user)) {
+    return outgoingKycBlocked(user);
   }
   if (request.method === "POST" && path === "/user/external-transfers") {
     const body = await request.json().catch(() => ({}));
@@ -2327,6 +2574,79 @@ async function handleApi(request) {
     });
   }
 
+  if (request.method === "GET" && path === "/admin/kyc/pending") {
+    return json(Object.values(state.users)
+      .filter((account) => account.statusKyc === "PENDENTE_VALIDACAO_IDENTIDADE")
+      .map((account) => ({
+        username: account.username,
+        fullName: account.fullName,
+        maskedCpf: maskCpf(account.cpf),
+        statusKyc: account.statusKyc,
+        analysisId: account.kycAnalysisId,
+      })));
+  }
+
+  const kycEvidenceMatch = path.match(/^\\/admin\\/kyc\\/([^/]+)\\/evidence$/);
+  if (request.method === "GET" && kycEvidenceMatch) {
+    const account = state.users[decodeURIComponent(kycEvidenceMatch[1])];
+    const evidence = account ? state.kycEvidence[account.username] : null;
+    if (!account || account.statusKyc !== "PENDENTE_VALIDACAO_IDENTIDADE"
+        || !evidence?.documentFrontEvidenceId || !evidence?.documentBackEvidenceId || !evidence?.faceEvidenceId) {
+      return json({ message: "Evidencias de abertura indisponiveis." }, { status: 404 });
+    }
+    try {
+      const [documentFront, documentBack, face] = await Promise.all([
+        decryptBiometricEvidence(evidence.documentFrontEvidenceId, "KYC_DOCUMENT_FRONT"),
+        decryptBiometricEvidence(evidence.documentBackEvidenceId, "KYC_DOCUMENT_BACK"),
+        decryptBiometricEvidence(evidence.faceEvidenceId, "ENROLLED_FACE"),
+      ]);
+      return json({
+        username: account.username,
+        fullName: account.fullName,
+        maskedCpf: maskCpf(account.cpf),
+        statusKyc: account.statusKyc,
+        documentFront,
+        documentBack,
+        face,
+      }, { headers: { "cache-control": "no-store", pragma: "no-cache" } });
+    } catch {
+      return json({ message: "Nao foi possivel abrir as evidencias protegidas." }, { status: 503 });
+    }
+  }
+
+  const kycReviewMatch = path.match(/^\\/admin\\/kyc\\/([^/]+)\\/(approve|reject)$/);
+  if (request.method === "POST" && kycReviewMatch) {
+    const account = state.users[decodeURIComponent(kycReviewMatch[1])];
+    const body = await request.json().catch(() => ({}));
+    const reason = String(body.reason || "").trim();
+    if (!account || account.statusKyc !== "PENDENTE_VALIDACAO_IDENTIDADE") {
+      return badRequest("A conta nao esta aguardando validacao de identidade.", "KYC_INVALID_STATE");
+    }
+    if (reason.length < 10 || reason.length > 500) {
+      return badRequest("Registre um motivo entre 10 e 500 caracteres.", "KYC_REASON_INVALID");
+    }
+    const previousStatus = account.statusKyc;
+    const approved = kycReviewMatch[2] === "approve";
+    account.statusKyc = approved ? "APROVADO_IDENTIDADE" : "REJEITADO_IDENTIDADE";
+    account.kycReviewedBy = user.username;
+    account.kycReviewReason = reason;
+    account.kycReviewedAt = now();
+    const analysis = state.documentAnalyses.find((item) => item.id === account.kycAnalysisId);
+    if (analysis) {
+      analysis.status = approved ? "APROVADO_REVISAO_HUMANA" : "REJEITADO_REVISAO_HUMANA";
+      analysis.reviewedBy = user.username;
+      analysis.reviewReason = reason;
+      analysis.reviewedAt = account.kycReviewedAt;
+    }
+    state.kycAudit.unshift({
+      id: crypto.randomUUID(), username: account.username, actor: user.username,
+      fromStatus: previousStatus, toStatus: account.statusKyc, reason, createdAt: account.kycReviewedAt,
+    });
+    state.kycAudit = state.kycAudit.slice(0, 500);
+    if (!approved) revokeUserSessions(account.username);
+    return json(userSummary(account));
+  }
+
   if (request.method === "GET" && path === "/admin/password-reset/requests") {
     return json(state.passwordResetRequests
       .filter((item) => item.status === "REVIEW_PENDING" && new Date(item.expiresAt).getTime() > Date.now())
@@ -2414,6 +2734,7 @@ async function handleApi(request) {
     const body = await request.json().catch(() => ({}));
     const origin = Object.values(state.users).find((item) => item.id === Number(body.userId));
     if (!origin) return json("Usuario nao encontrado.", { status: 400 });
+    if (!canUseOutgoingBanking(origin)) return outgoingKycBlocked(origin);
     const amount = Number(body.amountCentavos || 0);
     if (!amount || amount <= 0) return json("Digite um valor valido.", { status: 400 });
     const idempotencyKey = String(request.headers.get("idempotency-key") || body.idempotencyKey || "").trim();

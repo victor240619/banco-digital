@@ -20,6 +20,7 @@ export function getNativePlatform() {
 
 export function isMobileApp() {
   if (typeof window === 'undefined') return false;
+  if (import.meta.env.DEV && import.meta.env.VITE_MOBILE_PREVIEW === 'true') return true;
   const capacitor = window.Capacitor;
   const platform = getNativePlatform();
   if (platform === 'android' || platform === 'ios' || platform === 'native') return true;

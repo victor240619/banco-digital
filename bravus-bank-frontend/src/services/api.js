@@ -94,9 +94,21 @@ export const authService = {
     }
     return data;
   },
+  checkRegistration: async (registrationData) => {
+    const { data } = await api.post('/auth/register/availability', {
+      ...registrationData,
+      clientChannel: getAppClientChannel(),
+    });
+    return data;
+  },
+  verifyRegistrationFace: async (registrationData) => {
+    const { data } = await api.post('/auth/register/face-check', {
+      ...registrationData,
+      clientChannel: getAppClientChannel(),
+    });
+    return data;
+  },
   register: async (userData) => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
     const appHeader = getAppClientHeader();
     const { data } = await api.post(
       '/auth/register',
@@ -108,10 +120,9 @@ export const authService = {
         ? { headers: { 'X-Bravus-Client': appHeader } }
         : undefined
     );
-    if (data.token) {
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data));
-    }
+    if (!data?.token) throw new Error('Cadastro concluido sem sessao valida. Entre novamente.');
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('user', JSON.stringify(data));
     return data;
   },
   logout: () => {
@@ -190,6 +201,13 @@ export const passwordResetAdminService = {
   evidence: (requestId) => api.get(`/admin/password-reset/requests/${requestId}/evidence`),
   approve: (requestId, reason) => api.post(`/admin/password-reset/requests/${requestId}/approve`, { reason }),
   reject: (requestId, reason) => api.post(`/admin/password-reset/requests/${requestId}/reject`, { reason }),
+};
+
+export const kycAdminService = {
+  pending: () => api.get('/admin/kyc/pending'),
+  evidence: (username) => api.get(`/admin/kyc/${encodeURIComponent(username)}/evidence`),
+  approve: (username, reason) => api.post(`/admin/kyc/${encodeURIComponent(username)}/approve`, { reason }),
+  reject: (username, reason) => api.post(`/admin/kyc/${encodeURIComponent(username)}/reject`, { reason }),
 };
 
 export const analysisService = {

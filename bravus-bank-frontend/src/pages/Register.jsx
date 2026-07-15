@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { authService } from '../services/api';
 import { APK_DOWNLOAD_URL, isMobileApp } from '../lib/appChannel';
+import { clearRegistrationDraft, loadRegistrationDraft, saveRegistrationDraft } from '../lib/registrationDraft';
 
 const PASSWORD_MESSAGE = 'Use no mínimo 8 caracteres, com letra maiúscula, minúscula e número.';
 const STRONG_PASSWORD = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
@@ -59,6 +60,7 @@ function Field({
   placeholder,
   minLength,
   autoComplete,
+  onBlur,
 }) {
   return (
     <div>
@@ -76,6 +78,7 @@ function Field({
         minLength={minLength}
         placeholder={placeholder}
         autoComplete={autoComplete}
+        onBlur={onBlur}
       />
     </div>
   );
@@ -135,15 +138,12 @@ export default function Register() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
-  const [formData, setFormData] = useState({
-    username: '',
-    email: '',
+  const availabilityRequestRef = useRef(0);
+  const [formData, setFormData] = useState(() => ({
+    ...loadRegistrationDraft(),
     password: '',
     confirmPassword: '',
-    fullName: '',
-    cpf: '',
-    phone: '',
-  });
+  }));
   const [kyc, setKyc] = useState({
     documentFrontImage: '',
     documentBackImage: '',
@@ -153,9 +153,14 @@ export default function Register() {
   const [cameraError, setCameraError] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [availability, setAvailability] = useState({ status: 'idle', accountExists: false, message: '' });
+  const [faceVerification, setFaceVerification] = useState({ status: 'idle', token: '', message: '' });
   const nativeApp = isMobileApp();
 
   useEffect(() => () => stopCamera(), []);
+  useEffect(() => {
+    if (nativeApp) saveRegistrationDraft(formData);
+  }, [formData, nativeApp]);
 
   if (!nativeApp) {
     return <DownloadAppGate />;
@@ -169,8 +174,78 @@ export default function Register() {
     setCameraActive(false);
   }
 
+  const registrationPayload = () => ({
+    username: formData.username.trim(),
+    email: formData.email.trim(),
+    cpf: onlyDigits(formData.cpf),
+  });
+
+  const checkAvailability = async ({ requireComplete = false } = {}) => {
+    const requestId = availabilityRequestRef.current + 1;
+    availabilityRequestRef.current = requestId;
+    const identity = registrationPayload();
+    if (requireComplete && (identity.username.length < 3 || !identity.email || identity.cpf.length !== 11)) {
+      setError('Preencha usuario, e-mail e CPF antes da verificacao facial.');
+      return false;
+    }
+    setAvailability({ status: 'checking', accountExists: false, message: 'Verificando dados...' });
+    try {
+      const result = await authService.checkRegistration(identity);
+      if (requestId !== availabilityRequestRef.current) return false;
+      const hasConflict = ['ACCOUNT_ALREADY_EXISTS', 'USERNAME_ALREADY_EXISTS', 'EMAIL_ALREADY_EXISTS'].includes(result.code);
+      setAvailability({
+        status: result.available ? 'available' : (hasConflict ? 'conflict' : 'idle'),
+        accountExists: Boolean(result.accountExists),
+        message: result.message || '',
+      });
+      if (hasConflict || (requireComplete && !result.available)) setError(result.message || 'Revise os dados antes de continuar.');
+      return Boolean(result.available);
+    } catch (err) {
+      if (requestId !== availabilityRequestRef.current) return false;
+      const payload = err?.response?.data;
+      const message = typeof payload === 'string' ? payload : payload?.message;
+      setAvailability({ status: 'error', accountExists: false, message: message || 'Falha ao verificar os dados.' });
+      if (requireComplete) setError(message || 'Falha ao verificar os dados.');
+      return false;
+    }
+  };
+
+  const verifyFaceImage = async (faceImage) => {
+    setError('');
+    setCameraError('');
+    const available = await checkAvailability({ requireComplete: true });
+    if (!available) return false;
+    setFaceVerification({ status: 'checking', token: '', message: 'Validando a captura...' });
+    try {
+      const result = await authService.verifyRegistrationFace({
+        ...registrationPayload(),
+        faceImage,
+        biometricChallenge: BIOMETRIC_CHALLENGE,
+      });
+      if (result.status !== 'CAPTURE_VALIDATED' || !result.faceVerificationToken) {
+        throw new Error('A captura facial nao foi validada.');
+      }
+      setKyc((current) => ({ ...current, faceImage }));
+      setFaceVerification({
+        status: 'validated',
+        token: result.faceVerificationToken,
+        message: result.message || 'Captura facial validada automaticamente.',
+      });
+      return true;
+    } catch (err) {
+      const payload = err?.response?.data;
+      const message = typeof payload === 'string' ? payload : payload?.message || err.message;
+      setKyc((current) => ({ ...current, faceImage: '' }));
+      setFaceVerification({ status: 'error', token: '', message: message || 'Falha ao validar a captura.' });
+      setCameraError(message || 'Falha ao validar a captura.');
+      return false;
+    }
+  };
+
   const startCamera = async () => {
     setCameraError('');
+    setError('');
+    if (!await checkAvailability({ requireComplete: true })) return;
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         setCameraError('Camera direta indisponivel neste aparelho. Use a captura de selfie pelo seletor abaixo.');
@@ -191,7 +266,7 @@ export default function Register() {
     }
   };
 
-  const captureFace = () => {
+  const captureFace = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || !video.videoWidth || !video.videoHeight) {
@@ -202,11 +277,9 @@ export default function Register() {
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    setKyc((current) => ({
-      ...current,
-      faceImage: canvas.toDataURL('image/jpeg', 0.9),
-    }));
+    const faceImage = canvas.toDataURL('image/jpeg', 0.9);
     stopCamera();
+    await verifyFaceImage(faceImage);
   };
 
   const handleFileChange = async (event) => {
@@ -214,7 +287,8 @@ export default function Register() {
     setError('');
     try {
       const dataUrl = await readImageAsDataUrl(files?.[0]);
-      setKyc((current) => ({ ...current, [name]: dataUrl }));
+      if (name === 'faceImage') await verifyFaceImage(dataUrl);
+      else setKyc((current) => ({ ...current, [name]: dataUrl }));
     } catch (err) {
       event.target.value = '';
       setKyc((current) => ({ ...current, [name]: '' }));
@@ -230,6 +304,17 @@ export default function Register() {
       value;
 
     setFormData((current) => ({ ...current, [name]: nextValue }));
+    if (['username', 'email', 'cpf'].includes(name)) {
+      availabilityRequestRef.current += 1;
+      setAvailability({ status: 'idle', accountExists: false, message: '' });
+      setFaceVerification({ status: 'idle', token: '', message: '' });
+      setKyc((current) => ({ ...current, faceImage: '' }));
+    }
+  };
+
+  const handleIdentityBlur = () => {
+    const identity = registrationPayload();
+    if (identity.username || identity.email || identity.cpf) checkAvailability();
   };
 
   const handleSubmit = async (event) => {
@@ -256,11 +341,17 @@ export default function Register() {
       return;
     }
 
+    if (faceVerification.status !== 'validated' || !faceVerification.token) {
+      setError('Capture novamente a biometria para concluir a validacao automatica.');
+      return;
+    }
+
     setLoading(true);
 
     try {
+      if (!await checkAvailability({ requireComplete: true })) return;
       const { confirmPassword, ...payload } = formData;
-      await authService.register({
+      const registered = await authService.register({
         ...payload,
         cpf: onlyDigits(payload.cpf),
         phone: onlyDigits(payload.phone),
@@ -268,11 +359,17 @@ export default function Register() {
         documentBackImage: kyc.documentBackImage,
         faceImage: kyc.faceImage,
         biometricChallenge: BIOMETRIC_CHALLENGE,
+        faceVerificationToken: faceVerification.token,
       });
+      if (!registered?.token) throw new Error('Cadastro concluido sem sessao valida.');
+      clearRegistrationDraft();
       navigate('/dashboard', { replace: true });
     } catch (err) {
       const payload = err?.response?.data;
-      const message = typeof payload === 'string' ? payload : payload?.message;
+      const message = typeof payload === 'string' ? payload : payload?.message || err.message;
+      if (payload?.accountExists || payload?.code === 'ACCOUNT_ALREADY_EXISTS') {
+        setAvailability({ status: 'conflict', accountExists: true, message });
+      }
       setError(message || 'Erro ao criar conta. Tente novamente.');
     } finally {
       setLoading(false);
@@ -299,15 +396,30 @@ export default function Register() {
 
           {error && <div className="alert-error mb-5" role="alert">{error}</div>}
           {cameraError && <div className="alert-error mb-5" role="alert">{cameraError}</div>}
+          {availability.accountExists && (
+            <div className="mb-5 flex flex-wrap gap-3" aria-label="Acoes para conta existente">
+              <Link to="/login" className="btn-primary !py-2 !px-4">Entrar na conta</Link>
+              <Link to="/redefinir-senha" className="btn-secondary !py-2 !px-4">Redefinir senha</Link>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Usuário" name="username" value={formData.username} onChange={handleChange} required placeholder="seu.usuario" minLength={3} autoComplete="username" />
-              <Field label="E-mail" name="email" type="email" value={formData.email} onChange={handleChange} required placeholder="voce@email.com" autoComplete="email" />
+              <Field label="Usuário" name="username" value={formData.username} onChange={handleChange} onBlur={handleIdentityBlur} required placeholder="seu.usuario" minLength={3} autoComplete="username" />
+              <Field label="E-mail" name="email" type="email" value={formData.email} onChange={handleChange} onBlur={handleIdentityBlur} required placeholder="voce@email.com" autoComplete="email" />
               <Field label="Nome completo" name="fullName" value={formData.fullName} onChange={handleChange} required placeholder="Seu nome completo" autoComplete="name" />
-              <Field label="CPF" name="cpf" value={formData.cpf} onChange={handleChange} required placeholder="000.000.000-00" autoComplete="off" />
+              <Field label="CPF" name="cpf" value={formData.cpf} onChange={handleChange} onBlur={handleIdentityBlur} required placeholder="000.000.000-00" autoComplete="off" />
               <Field label="Telefone" name="phone" type="tel" value={formData.phone} onChange={handleChange} placeholder="(00) 00000-0000" autoComplete="tel" />
             </div>
+
+            {availability.status === 'available' && (
+              <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200" role="status">
+                <span className="inline-flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4" />
+                  {availability.message}
+                </span>
+              </div>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Senha" name="password" type="password" value={formData.password} onChange={handleChange} required minLength={8} placeholder="Mínimo 8 caracteres" autoComplete="new-password" />
@@ -373,7 +485,10 @@ export default function Register() {
                       <button
                         type="button"
                         className="btn-secondary !py-2 !px-3"
-                        onClick={() => setKyc((current) => ({ ...current, faceImage: '' }))}
+                        onClick={() => {
+                          setKyc((current) => ({ ...current, faceImage: '' }));
+                          setFaceVerification({ status: 'idle', token: '', message: '' });
+                        }}
                         disabled={loading}
                       >
                         <RotateCcw className="h-4 w-4" />
@@ -397,9 +512,9 @@ export default function Register() {
                     )}
                   </div>
                   <div className="flex flex-col justify-center gap-3">
-                    <button type="button" className="btn-primary w-full" onClick={captureFace} disabled={!cameraActive || loading}>
-                      <Camera className="h-4 w-4" />
-                      Capturar biometria
+                    <button type="button" className="btn-primary w-full" onClick={captureFace} disabled={!cameraActive || loading || faceVerification.status === 'checking'}>
+                      {faceVerification.status === 'checking' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                      {faceVerification.status === 'checking' ? 'Validando captura...' : 'Capturar biometria'}
                     </button>
                     <label className="btn-secondary w-full cursor-pointer justify-center">
                       <Camera className="h-4 w-4" />
@@ -420,6 +535,14 @@ export default function Register() {
                     <canvas ref={canvasRef} className="hidden" />
                   </div>
                 </div>
+                {faceVerification.status === 'validated' && (
+                  <div className="mt-4 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200" role="status">
+                    <span className="inline-flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4" />
+                      {faceVerification.message}
+                    </span>
+                  </div>
+                )}
               </div>
             </section>
 
