@@ -1,7 +1,3 @@
-DROP TRIGGER IF EXISTS `bravus_master_credit_events_no_update`;
---> statement-breakpoint
-DROP TRIGGER IF EXISTS `bravus_master_credit_events_no_delete`;
---> statement-breakpoint
 DROP TABLE IF EXISTS `bravus_master_credit_events_v2`;
 --> statement-breakpoint
 CREATE TABLE `bravus_master_credit_events_v2` (
@@ -41,6 +37,10 @@ SELECT
   `amount_centavos`, `actor`, `assessment_reason`, `eligibility_rule`,
   `idempotency_hash`, `created_at`
 FROM `bravus_master_credit_events`;
+--> statement-breakpoint
+DROP TRIGGER IF EXISTS `bravus_master_credit_events_no_update`;
+--> statement-breakpoint
+DROP TRIGGER IF EXISTS `bravus_master_credit_events_no_delete`;
 --> statement-breakpoint
 DROP TABLE `bravus_master_credit_events`;
 --> statement-breakpoint

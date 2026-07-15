@@ -49,6 +49,20 @@ class FakeStatement {
     }
     throw new Error("Unsupported D1 first(): " + this.sql);
   }
+
+  async all() {
+    if (this.sql.startsWith("SELECT grant_id, event_type, account_username, amount_centavos FROM bravus_master_credit_events")) {
+      return {
+        results: [...this.database.masterCreditEvents.values()].map((event) => ({
+          grant_id: event.grantId,
+          event_type: event.eventType,
+          account_username: event.accountUsername,
+          amount_centavos: event.amountCentavos,
+        })),
+      };
+    }
+    throw new Error("Unsupported D1 all(): " + this.sql);
+  }
 }
 
 class FakeD1 {
@@ -481,14 +495,20 @@ assert.equal(persistedBalance.data, 1000, "balance must survive worker restart")
 
 const adminLogin = await call(worker, "POST", "/auth/login", { body: { username: "admin@bravusbank.com", password: "6run0955" } });
 assert.equal(adminLogin.response.status, 200);
+const stateBeforeMissingKycCheck = structuredClone(database.stateRow);
+const stateWithoutExplicitKyc = JSON.parse(stateBeforeMissingKycCheck.payload);
+delete stateWithoutExplicitKyc.users[registrationIdentity.username].statusKyc;
+database.stateRow.payload = JSON.stringify(stateWithoutExplicitKyc);
+database.stateRow.payload_hash = createHash("sha256").update(database.stateRow.payload).digest("hex");
+worker = await loadWorker("missing-kyc-must-fail-closed");
 const usersBeforeProvision = await call(worker, "GET", "/admin/users", { token: adminLogin.data.token });
-const legacyJoaoSummary = usersBeforeProvision.data.find((item) => item.username === "joao.victor");
-assert.equal(legacyJoaoSummary.statusKyc, "STATUS_NAO_INFORMADO");
+const missingKycUserSummary = usersBeforeProvision.data.find((item) => item.username === registrationIdentity.username);
+assert.equal(missingKycUserSummary.statusKyc, "STATUS_NAO_INFORMADO");
 const missingKycCreditRejected = await call(worker, "POST", "/admin/ledger/credit/issue", {
   token: adminLogin.data.token,
   headers: { "idempotency-key": "master-credit-missing-kyc-0001" },
   body: {
-    userId: legacyJoaoSummary.id,
+    userId: missingKycUserSummary.id,
     reservaCodigo: "BRAVUS_MASTER_CREDIT_RESERVE",
     valorCentavos: "1000",
     motivo: "Avaliacao de conta legada sem estado KYC explicito.",
@@ -498,6 +518,8 @@ const missingKycCreditRejected = await call(worker, "POST", "/admin/ledger/credi
 });
 assert.equal(missingKycCreditRejected.response.status, 409);
 assert.equal(missingKycCreditRejected.data.code, "CUSTOMER_KYC_REQUIRED");
+database.stateRow = structuredClone(stateBeforeMissingKycCheck);
+worker = await loadWorker("after-missing-kyc-check");
 const unauthorizedReserve = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: joaoToken });
 assert.equal(unauthorizedReserve.response.status, 403, "institutional reserve must remain admin-only");
 const reserveBeforeProvision = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token });
@@ -719,12 +741,9 @@ assert.equal(interestBearingCreditRejected.data.code, "MASTER_CREDIT_NON_REPAYAB
 const balanceBeforeMasterCredit = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token });
 const persistenceBeforeMasterCredit = await call(worker, "GET", "/admin/persistence/status", { token: adminLogin.data.token });
 const stateBeforeAuditConflict = structuredClone(database.stateRow);
-const reserveActivationEvent = database.masterCreditEvents.get("master-credit-reserve-activation-v1");
-database.masterCreditEvents.delete("master-credit-reserve-activation-v1");
-database.masterCreditEvents.set("forced-audit-conflict", {
-  id: "forced-audit-conflict",
-  grantId: "forced-audit-conflict",
-  eventType: "GRANT_CREATED",
+const reserveActivationEvent = structuredClone(database.masterCreditEvents.get("master-credit-reserve-activation-v1"));
+database.masterCreditEvents.set("master-credit-reserve-activation-v1", {
+  ...reserveActivationEvent,
   idempotencyHash: createHash("sha256").update("master-credit-pending-test-0001").digest("hex"),
 });
 await assert.rejects(
@@ -737,7 +756,6 @@ await assert.rejects(
   "a missing immutable credit event must abort the entire financial commit",
 );
 assert.equal(database.stateRow.payload, stateBeforeAuditConflict.payload, "audit failure must roll back the grant state");
-database.masterCreditEvents.delete("forced-audit-conflict");
 database.masterCreditEvents.set("master-credit-reserve-activation-v1", reserveActivationEvent);
 const [pendingCreditIssue, pendingCreditReplay] = await Promise.all([
   call(worker, "POST", "/admin/ledger/credit/issue", {
@@ -797,6 +815,18 @@ assert.equal(releaseReplayAfterEligibilityChange.response.status, 200, "release 
 assert.equal(releaseReplayAfterEligibilityChange.data.idempotentReplay, true);
 database.stateRow = stateBeforeEligibilityChange;
 worker = await loadWorker("after-idempotent-eligibility-replay");
+const auditStateAfterReplay = JSON.parse(database.stateRow.payload);
+const actualAuditSignaturesAfterReplay = [...database.masterCreditEvents.values()].map((event) => [
+  event.grantId || "", event.eventType || "", event.accountUsername || "", String(event.amountCentavos || ""),
+].join("|")).sort();
+const expectedAuditSignaturesAfterReplay = [{ grantId: null, eventType: "RESERVE_ACTIVATED", accountUsername: null, amountCentavos: "100000000000000000" }]
+  .concat(auditStateAfterReplay.masterCreditGrants.flatMap((grant) => [
+    { grantId: grant.id, eventType: "GRANT_CREATED", accountUsername: grant.username, amountCentavos: grant.amountCentavos },
+    ...(grant.status === "LIBERADO" ? [{ grantId: grant.id, eventType: "GRANT_RELEASED", accountUsername: grant.username, amountCentavos: grant.amountCentavos }] : []),
+  ]))
+  .map((event) => [event.grantId || "", event.eventType, event.accountUsername || "", String(event.amountCentavos)].join("|"))
+  .sort();
+assert.deepEqual(actualAuditSignaturesAfterReplay, expectedAuditSignaturesAfterReplay);
 const duplicateRelease = await call(worker, "POST", "/admin/ledger/credit/" + pendingCreditIssue.data.grant.id + "/release", {
   token: adminLogin.data.token,
   headers: { "idempotency-key": "master-credit-release-other-0001" },
@@ -814,6 +844,15 @@ assert.equal(balanceAfterMasterCredit.data.accounting.ledgerReconciled, true);
 assert.equal(persistenceAfterMasterCredit.data.transactionCount, persistenceBeforeMasterCredit.data.transactionCount + 1);
 assert.equal(persistenceAfterMasterCredit.data.ledgerEntryCount, persistenceBeforeMasterCredit.data.ledgerEntryCount + 2);
 assert.equal(database.masterCreditEvents.size, 3, "release must append one immutable reserve event");
+const releasedAuditEvent = [...database.masterCreditEvents.values()].find((event) => event.eventType === "GRANT_RELEASED");
+const releasedAuditEventOriginal = structuredClone(releasedAuditEvent);
+database.masterCreditEvents.set(releasedAuditEvent.id, { ...releasedAuditEvent, amountCentavos: "12346" });
+await assert.rejects(
+  () => call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token }),
+  /D1_MASTER_CREDIT_AUDIT_MISMATCH/,
+  "event content mismatch must fail closed before returning a balance sheet",
+);
+database.masterCreditEvents.set(releasedAuditEventOriginal.id, releasedAuditEventOriginal);
 worker = await loadWorker("restart-after-provision");
 const reserveAfterRestart = await call(worker, "GET", "/admin/ledger/balance-sheet", { token: adminLogin.data.token });
 assert.equal(reserveAfterRestart.response.status, 200);
@@ -1049,6 +1088,7 @@ console.log(JSON.stringify({
   masterCreditGrantLifecycleVerified: true,
   masterCreditKycAuthorizationVerified: true,
   masterCreditMissingKycBlocked: true,
+  masterCreditEventContentReconciled: true,
   masterCreditOverAllocationRejected: true,
   unsupportedMasterCreditPolicyRejected: true,
   corruptedLedgerRejected: true,

@@ -270,6 +270,7 @@ const joao = {
   accountNumber: "0556916115",
   accountType: "CORRENTE",
   balance: 89000000,
+  statusKyc: "APROVADO_AUTO",
   roles: ["ROLE_USER"],
 };
 const francisca = {
@@ -282,6 +283,7 @@ const francisca = {
   accountNumber: "0082904014",
   accountType: "CORRENTE",
   balance: 0,
+  statusKyc: "APROVADO_AUTO",
   roles: ["ROLE_USER"],
 };
 const admin = {
@@ -294,6 +296,7 @@ const admin = {
   accountNumber: "0000000003",
   accountType: "CORRENTE",
   balance: 0,
+  statusKyc: "APROVADO_AUTO",
   roles: ["ROLE_ADMIN"],
 };
 const initialStateSeed = {
@@ -695,7 +698,7 @@ function authResponse(user, token) {
     fullName: user.fullName,
     accountNumber: user.accountNumber,
     balance: user.balance,
-    statusKyc: user.statusKyc || "APROVADO_AUTO",
+    statusKyc: user.statusKyc || "STATUS_NAO_INFORMADO",
     identityEvidenceRequired: user.statusKyc === "PENDENTE_VALIDACAO_IDENTIDADE" && !user.kycAnalysisId,
     roles: user.roles,
   };
@@ -825,7 +828,7 @@ function recipientViewForUser(user) {
     accountType: party.accountType,
     pixKey: party.pixKey,
     pixKeyType: party.pixKeyType,
-    statusKyc: user.statusKyc || "APROVADO_AUTO",
+    statusKyc: user.statusKyc || "STATUS_NAO_INFORMADO",
   };
 }
 
@@ -1547,7 +1550,7 @@ function bankMe(user) {
     },
     conta: {
       nivel: "PREMIUM",
-      statusKyc: user.statusKyc || "APROVADO_AUTO",
+      statusKyc: user.statusKyc || "STATUS_NAO_INFORMADO",
       ativa: true,
       abertura: "2026-07-12T00:00:00-03:00",
     },
@@ -1620,8 +1623,7 @@ function publicLoginMatches(user, username) {
 }
 
 function canUseOutgoingBanking(user) {
-  const status = user.statusKyc || "APROVADO_AUTO";
-  return status === "APROVADO_AUTO" || status === "APROVADO_IDENTIDADE";
+  return hasExplicitApprovedKyc(user);
 }
 
 function hasExplicitApprovedKyc(user) {
@@ -1857,7 +1859,7 @@ function analyzeDocumentRequest(body) {
     riskScore: checksumOk ? 12 : 55,
     provider: "BRAVUS_SELF_KYC_SITES",
     subjectName: knownUser?.fullName || null,
-    registrationStatus: knownUser ? (knownUser.statusKyc || "APROVADO_AUTO") : "DOCUMENTO_NAO_VINCULADO_A_CONTA_BRAVUS",
+    registrationStatus: knownUser ? (knownUser.statusKyc || "STATUS_NAO_INFORMADO") : "DOCUMENTO_NAO_VINCULADO_A_CONTA_BRAVUS",
     biometricStatus: knownUser ? "KYC_BRAVUS_LOCALIZADO" : "SEM_BIOMETRIA_BRAVUS",
     errorMessage: checksumOk ? null : "Digito verificador nao passou na validacao local.",
     createdAt: now(),
@@ -2116,16 +2118,49 @@ function validateMasterCreditGrantPolicy(grant) {
   }
 }
 
-async function validateMasterCreditAudit(db, pendingEventCount = 0) {
-  const row = await db.prepare("SELECT COUNT(*) AS count FROM bravus_master_credit_events").first();
-  const actual = Number(row?.count || 0);
-  const released = state.masterCreditGrants.filter((grant) => grant.status === "LIBERADO").length;
-  const expected = 1 + state.masterCreditGrants.length + released;
+function masterCreditEventSignature(event) {
+  return [
+    event.grantId ?? event.grant_id ?? "",
+    event.eventType ?? event.event_type ?? "",
+    event.accountUsername ?? event.account_username ?? "",
+    String(event.amountCentavos ?? event.amount_centavos ?? ""),
+  ].join("|");
+}
+
+async function validateMasterCreditAudit(db, pendingEvents = []) {
+  const result = await db.prepare("SELECT grant_id, event_type, account_username, amount_centavos FROM bravus_master_credit_events").all();
+  const persistedEvents = Array.isArray(result?.results) ? result.results : [];
+  const expectedEvents = [{
+    grantId: null,
+    eventType: "RESERVE_ACTIVATED",
+    accountUsername: null,
+    amountCentavos: masterCreditReserveSeed.totalAmountCentavos,
+  }];
+  for (const grant of state.masterCreditGrants) {
+    validateMasterCreditGrantPolicy(grant);
+    expectedEvents.push({
+      grantId: grant.id,
+      eventType: "GRANT_CREATED",
+      accountUsername: grant.username,
+      amountCentavos: grant.amountCentavos,
+    });
+    if (grant.status === "LIBERADO") {
+      expectedEvents.push({
+        grantId: grant.id,
+        eventType: "GRANT_RELEASED",
+        accountUsername: grant.username,
+        amountCentavos: grant.amountCentavos,
+      });
+    }
+  }
+  const actualSignatures = [...persistedEvents, ...pendingEvents].map(masterCreditEventSignature).sort();
+  const expectedSignatures = expectedEvents.map(masterCreditEventSignature).sort();
   return {
-    actual,
-    expected,
-    pendingEventCount,
-    valid: actual + pendingEventCount === expected,
+    actual: persistedEvents.length,
+    expected: expectedEvents.length,
+    pendingEventCount: pendingEvents.length,
+    valid: actualSignatures.length === expectedSignatures.length
+      && actualSignatures.every((signature, index) => signature === expectedSignatures[index]),
   };
 }
 
@@ -2321,7 +2356,7 @@ async function persistD1State(db, previous, request, actor) {
   const masterReserve = await loadMasterCreditReserve(db);
   const masterAllocation = masterCreditAllocation(masterReserve);
   if (!masterAllocation.balanced) throw new Error("D1_MASTER_CREDIT_ALLOCATION_FAILED");
-  const masterAudit = await validateMasterCreditAudit(db, pendingMasterCreditEventWrites.length);
+  const masterAudit = await validateMasterCreditAudit(db, pendingMasterCreditEventWrites);
   if (!masterAudit.valid) throw new Error("D1_MASTER_CREDIT_AUDIT_MISMATCH");
 
   const payload = JSON.stringify(state);
