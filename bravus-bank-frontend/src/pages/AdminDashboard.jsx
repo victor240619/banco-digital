@@ -625,7 +625,7 @@ function AccountProvisionForm({ initialData, onCreated, onError }) {
           <div>
             <h2 id="manual-account-title" className="font-display text-lg font-semibold">Criar conta manualmente</h2>
             <div className="mt-1 flex flex-wrap gap-2 text-xs text-ink-400">
-              <span>Saldo inicial R$ 0,00</span>
+              <span>Saldo inicial KYD 0,00</span>
               <span>·</span>
               <span>KYC pendente</span>
               <span>·</span>
@@ -1090,7 +1090,7 @@ function UserAccountDetail({ username, onBack, onChanged, onError }) {
         <div className="grid gap-6 xl:grid-cols-2">
           <form onSubmit={placeHold} className="card-premium p-5 sm:p-6 space-y-4">
             <SectionTitle icon={Banknote} title="Nova retencao" subtitle="Reduz o saldo disponivel sem apagar ou alterar o saldo contabil." />
-            <Field label="Valor em reais"><input className="input-premium w-full" inputMode="decimal" placeholder="0,00" value={holdForm.amountReais} disabled={!manageable || busy} onChange={(event) => setHoldForm({ ...holdForm, amountReais: event.target.value })} /></Field>
+            <Field label="Valor em KYD"><input className="input-premium w-full" inputMode="decimal" placeholder="0,00" value={holdForm.amountReais} disabled={!manageable || busy} onChange={(event) => setHoldForm({ ...holdForm, amountReais: event.target.value })} /></Field>
             <Field label="Motivo da retencao"><textarea className="input-premium min-h-24 w-full resize-y" maxLength={500} value={holdForm.reason} disabled={!manageable || busy} onChange={(event) => setHoldForm({ ...holdForm, reason: event.target.value })} /></Field>
             <button type="submit" className="btn-primary" disabled={!manageable || busy || holdForm.reason.trim().length < 10}><Lock className="h-4 w-4" /> Reter saldo</button>
           </form>
@@ -1622,8 +1622,8 @@ function CreditView({ users, bs, onSuccess, onError }) {
     try {
       await ledgerAdminService.issueCredit(payload, issueAttempt.current.key);
       onSuccess(form.liberarAgora
-        ? `Crédito de R$ ${form.valorReais} emitido e liberado.`
-        : `Crédito de R$ ${form.valorReais} emitido como pendente.`);
+        ? `Crédito de KYD ${form.valorReais} emitido e liberado.`
+        : `Crédito de KYD ${form.valorReais} emitido como pendente.`);
       setForm({ ...form, valorReais: '', motivo: '', observacoes: '' });
       issueAttempt.current = null;
       const { data } = await ledgerAdminService.grantsByUser(form.userId);
@@ -1686,7 +1686,7 @@ function CreditView({ users, bs, onSuccess, onError }) {
             </select>
           </Field>
 
-          <Field label="Valor (R$)">
+          <Field label="Valor (KYD)">
             <input type="number" step="0.01" min="0.01" className="input-premium w-full"
                    value={form.valorReais}
                    onChange={(e) => setForm({ ...form, valorReais: e.target.value })} />
@@ -1813,7 +1813,7 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
         participantCode: form.participantCode || null,
       }, transferAttempt.current.key);
       transferAttempt.current = null;
-      onSuccess(`Ordem de R$ ${form.amountReais} registrada no trilho Bravus.`);
+      onSuccess(`Ordem de KYD ${form.amountReais} registrada no trilho Bravus.`);
       setForm({ ...form, amountReais: '', description: '' });
     } catch (err) {
       onError(err?.response?.data?.message || err?.response?.data || 'Falha no envio bancario externo.');
@@ -1843,7 +1843,7 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
             </select>
           </Field>
 
-          <Field label="Valor (R$)">
+          <Field label="Valor (KYD)">
             <input className="input-premium w-full" type="number" min="0.01" step="0.01"
                    value={form.amountReais}
                    onChange={(e) => setForm({ ...form, amountReais: e.target.value })} />
@@ -2311,12 +2311,12 @@ function CaymanRailView({ rail, users, onSuccess, onError }) {
     }
   }
 
-  const moneyMinor = (amount, currency) => {
+  const moneyMinor = (amount) => {
     const value = ((amount || 0) / 100).toLocaleString('en-KY', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
-    return `${currency || 'KYD'} ${value}`;
+    return `KYD ${value}`;
   };
 
   return (
@@ -2479,8 +2479,6 @@ function CaymanRailView({ rail, users, onSuccess, onError }) {
               <select className="input-premium w-full" value={instructionForm.currency}
                       onChange={(e) => setInstructionForm({ ...instructionForm, currency: e.target.value })}>
                 <option value="KYD">KYD</option>
-                <option value="USD">USD</option>
-                <option value="BRL">BRL</option>
               </select>
             </Field>
             <Field label="Beneficiario">
@@ -2532,7 +2530,7 @@ function CaymanRailView({ rail, users, onSuccess, onError }) {
                 <span className="font-medium">#{i.id} {i.status}</span>
                 <span className="text-xs text-ink-300">{i.regulatoryGate}</span>
               </div>
-              <div className="text-xs text-ink-400 mt-1">{moneyMinor(i.amountMinor, i.currency)} - {i.beneficiaryName}</div>
+              <div className="text-xs text-ink-400 mt-1">{moneyMinor(i.amountMinor)} - {i.beneficiaryName}</div>
               <div className="text-xs text-ink-500 mt-1 truncate">{i.complianceResult || i.errorMessage}</div>
             </div>
           ))}

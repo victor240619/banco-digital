@@ -125,7 +125,7 @@ export default function Home() {
                   <div className="pill-gold">Premium</div>
                 </div>
                 <div className="mt-3 font-display tabular-nums text-4xl font-bold">
-                  R$ <span className="gradient-text">128.450,90</span>
+                  KYD <span className="gradient-text">128.450,90</span>
                 </div>
                 <div className="mt-1 text-xs text-ink-400">Ag. 0001 · CC 0042-7</div>
 
@@ -141,9 +141,9 @@ export default function Home() {
                   <div className="text-xs text-ink-400 mb-2">Últimas movimentações</div>
                   <ul className="space-y-2">
                     {[
-                      { t: 'PIX recebido', v: '+ R$ 1.200,00', c: 'text-emerald-300' },
-                      { t: 'Assinatura Bravus', v: '- R$ 49,90', c: 'text-red-300' },
-                      { t: 'Transferência', v: '- R$ 850,00', c: 'text-red-300' },
+                      { t: 'PIX recebido', v: '+ KYD 1.200,00', c: 'text-emerald-300' },
+                      { t: 'Assinatura Bravus', v: '- KYD 49,90', c: 'text-red-300' },
+                      { t: 'Transferência', v: '- KYD 850,00', c: 'text-red-300' },
                     ].map((m, i) => (
                       <li key={i} className="flex items-center justify-between text-sm">
                         <span className="text-ink-200">{m.t}</span>

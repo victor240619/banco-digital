@@ -1,10 +1,11 @@
 export const formatCurrency = (amount) => {
   const value = Number(amount);
-  if (!Number.isFinite(value)) return 'R$ 0,00';
+  if (!Number.isFinite(value)) return 'KYD 0,00';
 
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
-    currency: 'BRL',
+    currency: 'KYD',
+    currencyDisplay: 'code',
   }).format(value / 100);
 };
 
@@ -18,7 +19,7 @@ export const formatCurrencyExact = (amountInCents) => {
   const whole = absolute / 100n;
   const fraction = String(absolute % 100n).padStart(2, '0');
   const grouped = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-  return `${negative ? '-' : ''}R$ ${grouped},${fraction}`;
+  return `${negative ? '-' : ''}KYD ${grouped},${fraction}`;
 };
 
 export const reaisToCentavosExact = (value) => {

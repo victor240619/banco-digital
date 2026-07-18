@@ -1052,7 +1052,7 @@ export default function UserDashboard() {
     { id: 'transfers', label: 'Transferencias', Icon: ArrowRightLeft, badge: 'Bravus e bancos' },
     { id: 'dda', label: 'DDA Boletos Registrados', Icon: ClipboardCheck, badge: '0 pendentes' },
     { id: 'cards', label: 'Cartoes', Icon: CreditCard, badge: 'Conta ativa' },
-    { id: 'credit', label: 'Emprestimos e Recebiveis', Icon: Landmark, badge: showBalance ? formatCurrency(creditAvailable) : 'R$ ******', accent: true },
+    { id: 'credit', label: 'Emprestimos e Recebiveis', Icon: Landmark, badge: showBalance ? formatCurrency(creditAvailable) : 'KYD ******', accent: true },
     { id: 'deposit-check', label: 'Deposito de Cheque', Icon: ArrowDownToLine, badge: 'Digital' },
     { id: 'checks', label: 'Cheques', Icon: FileText, badge: '0 folhas' },
     { id: 'schedules', label: 'Agendamentos', Icon: CalendarDays, badge: '0 hoje' },
@@ -1061,7 +1061,7 @@ export default function UserDashboard() {
     { id: 'beneficiaries', label: 'Favorecidos', Icon: UsersRound, badge: `${externalOrders.length} recentes` },
     { id: 'pix', label: 'Pix', Icon: Send, badge: me?.dadosBancarios?.tipoChavePix || 'Chave' },
     { id: 'receipts', label: 'Comprovantes', Icon: Receipt, badge: `${externalOrders.length} ordens` },
-    { id: 'limits', label: 'Limites', Icon: Smartphone, badge: showBalance ? formatCurrency(me?.saldos?.limitePixDiarioCentavos ?? 0) : 'R$ ******' },
+    { id: 'limits', label: 'Limites', Icon: Smartphone, badge: showBalance ? formatCurrency(me?.saldos?.limitePixDiarioCentavos ?? 0) : 'KYD ******' },
     { id: 'security', label: 'Seguranca', Icon: ShieldCheck, badge: 'Ativa' },
   ];
 
@@ -1218,9 +1218,9 @@ export default function UserDashboard() {
           </div>
           <div className="mt-1 break-words font-display text-4xl font-bold tabular-nums sm:text-5xl">
             {showBalance ? (
-              <>R$ <span className="gradient-text">{formatCurrency(balance).replace('R$', '').trim()}</span></>
+              <>KYD <span className="gradient-text">{formatCurrency(balance).replace('KYD', '').trim()}</span></>
             ) : (
-              <span className="text-ink-400">R$ ••••••</span>
+              <span className="text-ink-400">KYD ••••••</span>
             )}
           </div>
           <div className="mt-2 text-xs text-ink-400 font-mono">Conta {accountNumber}</div>
@@ -1231,7 +1231,7 @@ export default function UserDashboard() {
                 <CreditCard className="h-4 w-4 text-bravus-200" /> Crédito disponível
               </div>
               <div className="mt-1 font-display text-lg font-semibold tabular-nums">
-                {showBalance ? formatCurrency(creditAvailable) : 'R$ ••••••'}
+                {showBalance ? formatCurrency(creditAvailable) : 'KYD ••••••'}
               </div>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
@@ -1239,10 +1239,10 @@ export default function UserDashboard() {
                 <Landmark className="h-4 w-4 text-red-200" /> Dívida total
               </div>
               <div className="mt-1 font-display text-lg font-semibold tabular-nums text-red-100">
-                {showBalance ? formatCurrency(creditDebt) : 'R$ ••••••'}
+                {showBalance ? formatCurrency(creditDebt) : 'KYD ••••••'}
               </div>
               <div className="mt-1 text-[11px] text-ink-400">
-                Principal {showBalance ? formatCurrency(creditDebtPrincipal) : 'R$ •••'} + juros
+                Principal {showBalance ? formatCurrency(creditDebtPrincipal) : 'KYD •••'} + juros
               </div>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
@@ -1250,10 +1250,10 @@ export default function UserDashboard() {
                 <Activity className="h-4 w-4 text-emerald-200" /> Juros acumulados
               </div>
               <div className="mt-1 font-display text-lg font-semibold tabular-nums">
-                {showBalance ? formatCurrency(interestAccrued) : 'R$ ••••••'}
+                {showBalance ? formatCurrency(interestAccrued) : 'KYD ••••••'}
               </div>
               <div className="mt-1 text-[11px] text-ink-400">
-                Usado {showBalance ? formatCurrency(creditUsed) : 'R$ •••'}
+                Usado {showBalance ? formatCurrency(creditUsed) : 'KYD •••'}
               </div>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
@@ -1380,7 +1380,7 @@ export default function UserDashboard() {
                     <Tooltip
                       contentStyle={{ background: '#0b0f1c', border: '1px solid #ffffff20', borderRadius: 12 }}
                       labelStyle={{ color: '#fff' }}
-                      formatter={(v) => [`R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'Saldo']}
+                      formatter={(v) => [`KYD ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'Saldo']}
                     />
                     <Area type="monotone" dataKey="saldo" stroke="#eecb54" strokeWidth={2} fill="url(#g1)" />
                   </AreaChart>
@@ -1492,7 +1492,7 @@ export default function UserDashboard() {
               )}
 
               <div>
-                <label className="form-label">Valor (R$)</label>
+                <label className="form-label">Valor (KYD)</label>
                 <input
                   type="number" step="0.01" min="0"
                   className="form-input"
@@ -2176,7 +2176,7 @@ function PortalModuleDetail({
     ],
     investments: [
       { label: 'Carteira', value: module?.badge || 'Ativa' },
-      { label: 'Moeda', value: 'BRL' },
+      { label: 'Moeda', value: 'KYD' },
       { label: 'Pagina', value: 'Investimentos' },
     ],
     pending: [
@@ -2190,7 +2190,7 @@ function PortalModuleDetail({
       { label: 'Pagina', value: 'Favorecidos' },
     ],
     limits: [
-      { label: 'Pix diario', value: showBalance ? formatCurrency(me?.saldos?.limitePixDiarioCentavos ?? 0) : 'R$ ******' },
+      { label: 'Pix diario', value: showBalance ? formatCurrency(me?.saldos?.limitePixDiarioCentavos ?? 0) : 'KYD ******' },
       { label: 'Conta', value: me?.dadosBancarios?.contaFormatada || me?.accountNumber || '-' },
       { label: 'Pagina', value: 'Limites' },
     ],
@@ -2271,8 +2271,8 @@ function PortalModuleDetail({
 
       {activeModule === 'credit' && (
         <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <Metric label="Credito disponivel" value={showBalance ? formatCurrency(creditSummary?.creditoDisponivelCentavos ?? 0) : 'R$ ******'} />
-          <Metric label="Divida total" value={showBalance ? formatCurrency(creditSummary?.dividaTotalCentavos ?? 0) : 'R$ ******'} />
+          <Metric label="Credito disponivel" value={showBalance ? formatCurrency(creditSummary?.creditoDisponivelCentavos ?? 0) : 'KYD ******'} />
+          <Metric label="Divida total" value={showBalance ? formatCurrency(creditSummary?.dividaTotalCentavos ?? 0) : 'KYD ******'} />
           <Metric label="Taxa anual" value={`${Number(creditSummary?.taxaJurosAnualMedia ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`} />
         </div>
       )}
@@ -2503,7 +2503,7 @@ function TransactionCompactLine({ tx, showBalance, openReceipt, receiptLoading }
           )}
         </div>
         <span className={cn('shrink-0 font-mono', txSignClass(tx.type))}>
-          {txSign(tx.type)} {showBalance ? formatCurrency(tx.amount) : 'R$ ******'}
+          {txSign(tx.type)} {showBalance ? formatCurrency(tx.amount) : 'KYD ******'}
         </span>
       </div>
       {receiptOrderId && (
