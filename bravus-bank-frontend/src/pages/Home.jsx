@@ -213,6 +213,9 @@ export default function Home() {
             <p className="mt-8 max-w-xl text-xs leading-relaxed text-ink-300">
               Canais globais de assistência das bandeiras. A disponibilidade e os custos da chamada podem variar. Informe também o emissor do cartão.
             </p>
+            <Link className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition-colors hover:text-gold-200" to="/canais-atendimento">
+              Conheça todos os canais <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
         </div>
       </section>

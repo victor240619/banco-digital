@@ -11,6 +11,7 @@ const Home = lazy(() => import('./pages/Home'));
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
 const InstitutionalPage = lazy(() => import('./pages/InstitutionalPage'));
+const ServiceChannels = lazy(() => import('./pages/ServiceChannels'));
 const PasswordReset = lazy(() => import('./pages/PasswordReset'));
 const IdentityVerification = lazy(() => import('./pages/IdentityVerification'));
 const UserDashboard = lazy(() => import('./pages/UserDashboard'));
@@ -140,6 +141,7 @@ export default function App() {
               <Route path="/" element={<RootRoute />} />
               <Route path="/produto/:slug" element={<InstitutionalPage section="produto" />} />
               <Route path="/empresa/:slug" element={<InstitutionalPage section="empresa" />} />
+              <Route path="/canais-atendimento" element={<ServiceChannels />} />
               <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
               <Route path="/register/*" element={<PublicRoute><Register /></PublicRoute>} />
               <Route path="/redefinir-senha" element={<PublicRoute><PasswordReset /></PublicRoute>} />

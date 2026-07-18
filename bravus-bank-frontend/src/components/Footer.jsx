@@ -8,6 +8,7 @@ const productLinks = [
   ['Cartões', '/produto/cartoes'],
   ['Transferências', '/produto/transferencias'],
   ['Investimentos', '/produto/investimentos'],
+  ['Canais de atendimento', '/canais-atendimento'],
 ];
 
 const companyLinks = [
