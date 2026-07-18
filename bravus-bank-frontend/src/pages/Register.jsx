@@ -259,7 +259,7 @@ export default function Register() {
             </div>
             <h1 className="title-md">Criar conta Bravus</h1>
             <p className="mt-1.5 text-sm text-ink-300">
-              Crie suas duas senhas de acesso. O numero da conta sera gerado automaticamente e a conta podera receber valores enquanto aguarda a liberacao administrativa.
+              Crie suas duas senhas de acesso. O numero da conta sera gerado automaticamente.
             </p>
           </div>
 
@@ -277,7 +277,7 @@ export default function Register() {
               <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-300" />
               <h2 className="mt-4 text-lg font-semibold text-white">Conta criada com sucesso</h2>
               <p className="mt-2 text-sm text-ink-300">
-                Sua conta {submitted.accountNumber} foi criada e esta em analise. Voce ja pode entrar e receber valores.
+                Sua conta {submitted.accountNumber} foi criada com sucesso. Voce ja pode entrar.
               </p>
               <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-xs text-ink-400">
                 Conta: <span className="font-mono text-ink-100">{submitted.accountNumber}</span>
