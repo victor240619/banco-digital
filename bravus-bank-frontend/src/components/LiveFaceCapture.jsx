@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
-import { FaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
+import { FaceDetector } from '@mediapipe/tasks-vision';
 
 const REQUIRED_STABLE_FRAMES = 8;
 
@@ -79,7 +79,10 @@ export default function LiveFaceCapture({ onCapture }) {
 
   const initializeDetector = async () => {
     if (detectorRef.current) return detectorRef.current;
-    const vision = await FilesetResolver.forVisionTasks('/mediapipe/wasm');
+    const vision = {
+      wasmLoaderPath: '/mediapipe/wasm/vision_wasm_nosimd_internal.js',
+      wasmBinaryPath: '/mediapipe/wasm/vision_wasm_nosimd_internal.wasm',
+    };
     const options = {
       baseOptions: { modelAssetPath: '/mediapipe/models/blaze_face_short_range.tflite' },
       runningMode: 'VIDEO',
