@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Camera, CheckCircle2, Images } from 'lucide-react';
+import DocumentCameraCapture from './DocumentCameraCapture';
 
-export default function DocumentImagePicker({ label, ready, onChange }) {
+export default function DocumentImagePicker({ label, ready, onChange, onCapture }) {
+  const [cameraOpen, setCameraOpen] = useState(false);
+
   return (
     <section className="rounded-lg border border-white/10 bg-black/10 p-4" aria-label={label}>
       <div className="mb-3 flex min-h-6 items-center justify-between gap-3">
@@ -15,18 +18,10 @@ export default function DocumentImagePicker({ label, ready, onChange }) {
       </div>
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <label className="btn-secondary min-h-11 cursor-pointer justify-center !px-3 !py-2 text-center">
+        <button type="button" onClick={() => setCameraOpen(true)} className="btn-secondary min-h-11 justify-center !px-3 !py-2 text-center">
           <Camera className="h-4 w-4 shrink-0" />
           Tirar foto
-          <input
-            className="sr-only"
-            type="file"
-            accept="image/jpeg,image/png"
-            capture="environment"
-            aria-label={`${label}: tirar foto`}
-            onChange={onChange}
-          />
-        </label>
+        </button>
 
         <label className="btn-secondary min-h-11 cursor-pointer justify-center !px-3 !py-2 text-center">
           <Images className="h-4 w-4 shrink-0" />
@@ -40,6 +35,15 @@ export default function DocumentImagePicker({ label, ready, onChange }) {
           />
         </label>
       </div>
+
+      {cameraOpen && (
+        <DocumentCameraCapture
+          label={label}
+          onCapture={onCapture}
+          onClose={() => setCameraOpen(false)}
+          onFallbackFileChange={onChange}
+        />
+      )}
     </section>
   );
 }

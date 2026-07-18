@@ -79,6 +79,11 @@ export default function IdentityVerification() {
     }
   };
 
+  const captureDocument = (name) => (dataUrl) => {
+    setError('');
+    setEvidenceValue(name, dataUrl);
+  };
+
   const submit = async () => {
     if (!evidence.documentFrontImage || !evidence.documentBackImage) {
       setError('Envie frente e verso do documento.');
@@ -142,11 +147,13 @@ export default function IdentityVerification() {
             label="Frente do documento"
             ready={Boolean(evidence.documentFrontImage)}
             onChange={chooseDocument('documentFrontImage')}
+            onCapture={captureDocument('documentFrontImage')}
           />
           <DocumentImagePicker
             label="Verso do documento"
             ready={Boolean(evidence.documentBackImage)}
             onChange={chooseDocument('documentBackImage')}
+            onCapture={captureDocument('documentBackImage')}
           />
         </div>
 

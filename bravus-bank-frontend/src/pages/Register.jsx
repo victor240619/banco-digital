@@ -8,8 +8,9 @@ import { authService } from '../services/api';
 import { clearRegistrationDraft, loadRegistrationDraft, saveRegistrationDraft } from '../lib/registrationDraft';
 import { REGISTRATION_STEP, hasRegistrationDocuments, registrationStep } from '../lib/registrationFlow';
 import DocumentImagePicker from '../components/DocumentImagePicker';
-import LiveFaceCapture from '../components/LiveFaceCapture';
 import ViewportAlert from '../components/ViewportAlert';
+
+const LiveFaceCapture = React.lazy(() => import('../components/LiveFaceCapture'));
 
 const onlyDigits = (value) => value.replace(/\D/g, '');
 
@@ -162,6 +163,12 @@ export default function Register() {
     }
   };
 
+  const handleDocumentCapture = (name) => (dataUrl) => {
+    setError('');
+    setDocuments((current) => ({ ...current, [name]: dataUrl }));
+    requestKeyRef.current = '';
+  };
+
   const restartIdentityVerification = () => {
     requestKeyRef.current = '';
     setError('');
@@ -250,17 +257,19 @@ export default function Register() {
     return (
       <main className="fixed inset-0 z-[100] overflow-y-auto bg-white">
         <div className="mx-auto flex min-h-full w-full max-w-xl items-center justify-center px-4 py-8">
-          <LiveFaceCapture
-            autoStart
-            onCapture={(faceImage) => {
-              setDocuments((current) => ({ ...current, faceImage }));
-              requestKeyRef.current = '';
-            }}
-            onSuccessComplete={() => {
-              returnToReviewRef.current = true;
-              navigate('/register', { replace: true });
-            }}
-          />
+          <React.Suspense fallback={<div className="flex items-center gap-3 text-slate-700"><Loader2 className="h-5 w-5 animate-spin" /> Preparando camera...</div>}>
+            <LiveFaceCapture
+              autoStart
+              onCapture={(faceImage) => {
+                setDocuments((current) => ({ ...current, faceImage }));
+                requestKeyRef.current = '';
+              }}
+              onSuccessComplete={() => {
+                returnToReviewRef.current = true;
+                navigate('/register', { replace: true });
+              }}
+            />
+          </React.Suspense>
         </div>
       </main>
     );
@@ -352,11 +361,13 @@ export default function Register() {
                       label="Foto da frente"
                       ready={Boolean(documents.documentFrontImage)}
                       onChange={handleDocumentChange('documentFrontImage')}
+                      onCapture={handleDocumentCapture('documentFrontImage')}
                     />
                     <DocumentImagePicker
                       label="Foto do verso"
                       ready={Boolean(documents.documentBackImage)}
                       onChange={handleDocumentChange('documentBackImage')}
+                      onCapture={handleDocumentCapture('documentBackImage')}
                     />
                   </div>
                 </section>
