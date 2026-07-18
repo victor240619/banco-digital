@@ -118,7 +118,7 @@ const pages = {
         },
         {
           title: 'Transparência regulatória',
-          text: 'Qualquer licença, registro ou parceria regulada deve ser divulgada com referência verificável. A ausência de um número oficial publicado não deve ser interpretada como autorização da CIMA.',
+          text: 'Informações regulatórias e parcerias devem ser divulgadas com referência verificável e linguagem clara, permitindo consulta nas fontes oficiais aplicáveis.',
         },
       ],
       action: ['Conhecer a conta', '/produto/conta-digital'],

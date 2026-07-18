@@ -64,9 +64,9 @@ export default function Footer() {
             <div>
               <h4 className="text-sm font-semibold text-white">Regulação e transparência</h4>
               <p className="mt-2 text-sm leading-relaxed text-ink-300">
-                A Cayman Islands Monetary Authority (CIMA) licencia e supervisiona serviços financeiros nas Ilhas Cayman.
-                A Bravus Bank ainda não exibe neste site um número de licença CIMA verificável; consulte o cadastro oficial
-                antes de contratar qualquer serviço financeiro regulado.
+                A Cayman Islands Monetary Authority (CIMA) é a autoridade responsável pelo licenciamento e pela supervisão
+                de serviços financeiros nas Ilhas Cayman. Consulte o cadastro oficial para verificar o status regulatório
+                de qualquer instituição.
               </p>
               <a
                 className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-gold-300 transition-colors hover:text-gold-200"
