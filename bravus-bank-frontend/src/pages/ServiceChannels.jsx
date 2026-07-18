@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import EditorialGallery from '../components/EditorialGallery';
 import {
   ArrowLeft,
   ArrowRight,
@@ -32,6 +33,24 @@ const channels = [
     action: 'Consultar informações de cartões',
     to: '/produto/cartoes',
   },
+];
+
+const channelGalleryItems = [
+  { title: 'Banco online', alt: 'Cliente acessando o banco online com vista para o mar de Cayman' },
+  { title: 'Acesso pelo celular', alt: 'Cliente utilizando serviços bancários em um celular' },
+  { title: 'Atendimento por vídeo', alt: 'Conversa de atendimento remoto realizada por vídeo' },
+  { title: 'Suporte assistido', alt: 'Especialista de atendimento utilizando headset' },
+  { title: 'Caixas compatíveis', alt: 'Cliente usando um caixa eletrônico genérico nas Ilhas Cayman' },
+  { title: 'Orientação de segurança', alt: 'Profissionais analisando orientações de segurança em um tablet' },
+];
+
+const channelFaqs = [
+  ['Qual canal devo usar para assuntos da conta?', 'Prefira o ambiente autenticado. Ele ajuda a relacionar a solicitação ao titular sem expor informações desnecessárias.'],
+  ['O acesso online funciona a qualquer hora?', 'O ambiente digital pode ser acessado continuamente, mas funções específicas podem passar por manutenção ou controles temporários de segurança.'],
+  ['A Bravus possui caixas eletrônicos próprios?', 'Esta página não afirma a existência de rede própria. O uso de terminais depende de cartão elegível e rede compatível.'],
+  ['O atendimento solicita senha ou código?', 'Não. Nunca informe senha completa, código temporário ou credencial de autenticação a um atendente.'],
+  ['Como agir em caso de perda ou roubo de cartão?', 'Use os controles disponíveis, informe o emissor e acione os canais globais da bandeira apresentados na página inicial quando aplicável.'],
+  ['Onde verifico o andamento de uma solicitação?', 'Consulte a área autenticada ou o canal pelo qual a solicitação foi aberta, preservando o número de protocolo quando fornecido.'],
 ];
 
 function ChannelImage({ index, title }) {
@@ -93,7 +112,14 @@ export default function ServiceChannels() {
         </div>
       </section>
 
-      <section className="mt-20 border-y border-white/10 bg-white/[0.02]">
+      <EditorialGallery
+        description="Seis formas de visualizar o atendimento Bravus, do autosserviço digital à orientação protegida para situações que exigem acompanhamento."
+        items={channelGalleryItems}
+        sheet="/images/galleries/canais-atendimento.png"
+        title="Atendimento em diferentes momentos"
+      />
+
+      <section className="border-y border-white/10 bg-white/[0.02]">
         <div className="container-app grid gap-8 py-10 md:grid-cols-2 md:gap-14">
           <div className="flex items-start gap-4">
             <Clock3 className="mt-0.5 h-5 w-5 shrink-0 text-gold-300" aria-hidden="true" />
@@ -113,6 +139,27 @@ export default function ServiceChannels() {
               </p>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="container-app py-14 sm:py-20">
+        <div className="max-w-3xl">
+          <p className="text-xs font-semibold uppercase text-gold-300">Perguntas frequentes</p>
+          <h2 className="mt-3 font-display text-3xl font-semibold text-white sm:text-4xl">Antes de iniciar o atendimento</h2>
+          <p className="mt-4 leading-relaxed text-ink-300">
+            Escolha o canal adequado, proteja suas credenciais e mantenha os dados da solicitação organizados para facilitar o acompanhamento.
+          </p>
+        </div>
+        <div className="mt-8 divide-y divide-white/10 border-y border-white/10">
+          {channelFaqs.map(([question, answer]) => (
+            <details className="group py-5" key={question}>
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-6 font-medium text-white">
+                {question}
+                <span className="text-xl font-normal text-gold-300 transition-transform group-open:rotate-45" aria-hidden="true">+</span>
+              </summary>
+              <p className="mt-3 max-w-4xl pr-10 leading-relaxed text-ink-300">{answer}</p>
+            </details>
+          ))}
         </div>
       </section>
     </main>

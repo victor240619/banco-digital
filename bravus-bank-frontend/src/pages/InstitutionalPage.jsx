@@ -1,5 +1,7 @@
 import React, { useEffect } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
+import EditorialGallery from '../components/EditorialGallery';
+import { institutionalEnhancements } from './institutionalEnhancements';
 import {
   ArrowLeft,
   ArrowRight,
@@ -207,6 +209,7 @@ const relatedLinks = {
 export default function InstitutionalPage({ section }) {
   const { slug } = useParams();
   const page = pages[section]?.[slug];
+  const enhancement = institutionalEnhancements[section]?.[slug];
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' });
@@ -215,6 +218,7 @@ export default function InstitutionalPage({ section }) {
   if (!page) return <Navigate to="/" replace />;
 
   const Icon = page.icon;
+  const contentSections = [...page.sections, ...(enhancement?.moreSections || [])];
 
   return (
     <main>
@@ -235,7 +239,7 @@ export default function InstitutionalPage({ section }) {
 
       <section className="border-y border-white/10 bg-white/[0.02]">
         <div className="container-app divide-y divide-white/10">
-          {page.sections.map((item, index) => (
+          {contentSections.map((item, index) => (
             <article className="grid gap-3 py-9 md:grid-cols-[160px_1fr] md:gap-10" key={item.title}>
               <div className="text-xs font-semibold uppercase text-gold-300">
                 {String(index + 1).padStart(2, '0')}
@@ -248,6 +252,37 @@ export default function InstitutionalPage({ section }) {
           ))}
         </div>
       </section>
+
+      {enhancement?.gallery && (
+        <EditorialGallery
+          description={enhancement.galleryDescription}
+          items={enhancement.gallery.items}
+          sheet={enhancement.gallery.sheet}
+          title={enhancement.galleryTitle}
+        />
+      )}
+
+      {enhancement?.faqs?.length > 0 && (
+        <section className="border-y border-white/10 bg-white/[0.02]">
+          <div className="container-app py-14 sm:py-20">
+            <div className="max-w-3xl">
+              <p className="text-xs font-semibold uppercase text-gold-300">Perguntas frequentes</p>
+              <h2 className="mt-3 font-display text-3xl font-semibold text-white sm:text-4xl">Informações importantes</h2>
+            </div>
+            <div className="mt-8 divide-y divide-white/10 border-y border-white/10">
+              {enhancement.faqs.map(([question, answer]) => (
+                <details className="group py-5" key={question}>
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-6 font-medium text-white">
+                    {question}
+                    <span className="text-xl font-normal text-gold-300 transition-transform group-open:rotate-45" aria-hidden="true">+</span>
+                  </summary>
+                  <p className="mt-3 max-w-4xl pr-10 leading-relaxed text-ink-300">{answer}</p>
+                </details>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="container-app py-14 sm:py-20">
         <div className="flex flex-col justify-between gap-8 border-b border-white/10 pb-12 md:flex-row md:items-end">
