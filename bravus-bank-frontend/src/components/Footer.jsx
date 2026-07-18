@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import Logo from './Logo';
-import { ExternalLink, Landmark, Lock, ShieldCheck } from 'lucide-react';
+import { Landmark, Lock, ShieldCheck } from 'lucide-react';
 
 const productLinks = [
   ['Conta Digital', '/produto/conta-digital'],
@@ -66,17 +66,8 @@ export default function Footer() {
               <h4 className="text-sm font-semibold text-white">Regulação e transparência</h4>
               <p className="mt-2 text-sm leading-relaxed text-ink-300">
                 A Cayman Islands Monetary Authority (CIMA) é a autoridade responsável pelo licenciamento e pela supervisão
-                de serviços financeiros nas Ilhas Cayman. Consulte o cadastro oficial para verificar o status regulatório
-                de qualquer instituição.
+                de serviços financeiros nas Ilhas Cayman.
               </p>
-              <a
-                className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-gold-300 transition-colors hover:text-gold-200"
-                href="https://www.cima.ky/search-entities-cima"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Consultar entidades na CIMA <ExternalLink className="h-3.5 w-3.5" />
-              </a>
             </div>
           </div>
         </div>
