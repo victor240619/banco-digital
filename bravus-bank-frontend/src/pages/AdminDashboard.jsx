@@ -712,7 +712,7 @@ function AccountRequestsPanel({ requests = [], onUse, onError }) {
           </div>
           <div>
             <h2 className="font-display text-lg font-semibold">Solicitacoes de abertura</h2>
-            <p className="mt-1 text-sm text-ink-400">Pedidos enviados pelo cadastro publico. A conta real deve ser criada manualmente pelo admin.</p>
+            <p className="mt-1 text-sm text-ink-400">Contas criadas com operacoes de saida bloqueadas ate a revisao administrativa das evidencias.</p>
           </div>
         </div>
         <span className="pill-gold">{requests.length} pendente{requests.length === 1 ? '' : 's'}</span>
@@ -729,10 +729,10 @@ function AccountRequestsPanel({ requests = [], onUse, onError }) {
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => openEvidence(request)} disabled={loadingEvidence === request.requestId}>
-                <Eye className="h-4 w-4" /> Documentos
+                <Eye className="h-4 w-4" /> Evidencias
               </button>
               <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => onUse(request)}>
-                <UserPlus className="h-4 w-4" /> Usar dados
+                <Eye className="h-4 w-4" /> Abrir conta
               </button>
             </div>
           </div>
@@ -752,14 +752,17 @@ function AccountRequestsPanel({ requests = [], onUse, onError }) {
               <XCircle className="h-4 w-4" />
             </button>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-3">
             {[
               ['Documento frente', evidence.documentFront],
               ['Documento verso', evidence.documentBack],
+              ['Captura facial', evidence.face],
             ].map(([label, source]) => (
               <figure key={label}>
                 <div className="aspect-[4/3] overflow-hidden rounded-lg border border-white/10 bg-black/30">
-                  <img src={source} alt={label} className="h-full w-full object-contain" />
+                  {source
+                    ? <img src={source} alt={label} className="h-full w-full object-contain" />
+                    : <div className="flex h-full items-center justify-center px-4 text-center text-sm text-ink-400">Indisponivel em cadastro legado</div>}
                 </div>
                 <figcaption className="mt-2 text-xs text-ink-400">{label}</figcaption>
               </figure>
@@ -773,7 +776,6 @@ function AccountRequestsPanel({ requests = [], onUse, onError }) {
 
 function UsersView({ users, accountRequests, search, setSearch, onCreated, onChanged, onError }) {
   const [selectedUsername, setSelectedUsername] = useState(null);
-  const [requestDraft, setRequestDraft] = useState(null);
 
   if (selectedUsername) {
     return (
@@ -790,10 +792,10 @@ function UsersView({ users, accountRequests, search, setSearch, onCreated, onCha
     <div className="space-y-6">
       <AccountRequestsPanel
         requests={accountRequests}
-        onUse={(request) => setRequestDraft(request)}
+        onUse={(request) => setSelectedUsername(request.username)}
         onError={onError}
       />
-      <AccountProvisionForm initialData={requestDraft} onCreated={onCreated} onError={onError} />
+      <AccountProvisionForm onCreated={onCreated} onError={onError} />
       <section className="card-premium p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative flex-1">

@@ -405,6 +405,52 @@ function normalizeState(candidate) {
   next.registrationFaceChecks = Array.isArray(next.registrationFaceChecks) ? next.registrationFaceChecks : [];
   next.registrationAudit = Array.isArray(next.registrationAudit) ? next.registrationAudit : [];
   next.accountProvisioningRequests = Array.isArray(next.accountProvisioningRequests) ? next.accountProvisioningRequests : [];
+  let nextLegacyKycAnalysisId = Math.max(0, ...next.documentAnalyses.map((item) => Number(item?.id) || 0)) + 1;
+  for (const accountRequest of next.accountProvisioningRequests) {
+    if (accountRequest?.requestType !== "PUBLIC_ACCOUNT_REQUEST") continue;
+    const username = accountRequest.identity?.username;
+    const account = username ? next.users[username] : null;
+    if (!account || !accountRequest.documentFrontEvidenceId || !accountRequest.documentBackEvidenceId) continue;
+    if (!next.kycEvidence[username]) {
+      const analysisId = nextLegacyKycAnalysisId;
+      nextLegacyKycAnalysisId += 1;
+      const evidence = accountRequest.documentEvidence || {
+        documentFront: { present: true },
+        documentBack: { present: true },
+        face: { present: Boolean(accountRequest.faceEvidenceId) },
+      };
+      next.documentAnalyses.unshift({
+        id: analysisId,
+        documentType: "CPF",
+        documentNumber: account.cpf,
+        status: "EVIDENCIA_CAPTURADA_AUTO",
+        riskLevel: "PENDENTE_IDENTIDADE",
+        riskScore: 18,
+        provider: "BRAVUS_CAPTURE_QUALITY_SITES",
+        subjectName: account.fullName,
+        registrationStatus: "EVIDENCIA_DOCUMENTAL_CAPTURADA",
+        biometricStatus: accountRequest.faceEvidenceId ? "CAPTURA_QUALIDADE_VALIDADA" : "CAPTURA_LEGADA_NAO_PRESERVADA",
+        biometricChallenge: "FACE_CAMERA_CAPTURE_V1",
+        evidence,
+        errorMessage: null,
+        createdAt: accountRequest.createdAt || account.createdAt || now(),
+      });
+      next.kycEvidence[username] = {
+        analysisId,
+        documentType: "CPF",
+        documentNumber: account.cpf,
+        biometricStatus: accountRequest.faceEvidenceId ? "CAPTURA_QUALIDADE_VALIDADA" : "CAPTURA_LEGADA_NAO_PRESERVADA",
+        evidence,
+        documentFrontEvidenceId: accountRequest.documentFrontEvidenceId,
+        documentBackEvidenceId: accountRequest.documentBackEvidenceId,
+        faceEvidenceId: accountRequest.faceEvidenceId || null,
+        faceSha256: accountRequest.faceSha256 || null,
+        createdAt: accountRequest.createdAt || account.createdAt || now(),
+      };
+    }
+    account.kycAnalysisId = account.kycAnalysisId || next.kycEvidence[username].analysisId;
+    account.kycEvidenceSubmittedAt = account.kycEvidenceSubmittedAt || next.kycEvidence[username].createdAt;
+  }
   next.masterCreditGrants = Array.isArray(next.masterCreditGrants) ? next.masterCreditGrants : [];
   next.masterCreditRequests = Array.isArray(next.masterCreditRequests) ? next.masterCreditRequests : [];
   next.initialPasswordChallenges = Array.isArray(next.initialPasswordChallenges) ? next.initialPasswordChallenges : [];
@@ -2245,15 +2291,19 @@ async function createPublicAccountRequest(body, recorded, availability) {
   }
   let documentFront;
   let documentBack;
+  let face;
   try {
     documentFront = await stageBiometricEvidence({ value: body.documentFrontImage, kind: "KYC_DOCUMENT_FRONT", username: identity.username });
     documentBack = await stageBiometricEvidence({ value: body.documentBackImage, kind: "KYC_DOCUMENT_BACK", username: identity.username });
+    face = await stageBiometricEvidence({ value: body.faceImage, kind: "ENROLLED_FACE", username: identity.username });
   } catch (error) {
     pendingBiometricWrites = [];
-    return { error: json({ message: "Nao foi possivel proteger as fotos do documento.", code: error.message }, { status: 503 }) };
+    return { error: json({ message: "Nao foi possivel proteger as evidencias de identidade.", code: error.message }, { status: 503 }) };
   }
   const createdAt = now();
   const accountNumber = randomFourDigitAccountNumber();
+  evidenceAnalysis.subjectName = fullName;
+  state.documentAnalyses.unshift(evidenceAnalysis);
   const createdAccount = {
     ...joao,
     id: Math.max(0, ...Object.values(state.users).map((item) => Number(item.id) || 0)) + 1,
@@ -2266,7 +2316,8 @@ async function createPublicAccountRequest(body, recorded, availability) {
     balance: 0,
     roles: ["ROLE_USER"],
     statusKyc: "PENDENTE_VALIDACAO_IDENTIDADE",
-    kycAnalysisId: null,
+    kycAnalysisId: evidenceAnalysis.id,
+    kycEvidenceSubmittedAt: createdAt,
     credentialState: "ACTIVE",
     initialCredentialExpiresAt: null,
     passwordCredential: await createPasswordCredential(password),
@@ -2275,6 +2326,18 @@ async function createPublicAccountRequest(body, recorded, availability) {
     createdAt,
   };
   state.users[createdAccount.username] = createdAccount;
+  state.kycEvidence[createdAccount.username] = {
+    analysisId: evidenceAnalysis.id,
+    documentType: evidenceAnalysis.documentType,
+    documentNumber: evidenceAnalysis.documentNumber,
+    biometricStatus: evidenceAnalysis.biometricStatus,
+    evidence: evidenceAnalysis.evidence,
+    documentFrontEvidenceId: documentFront.id,
+    documentBackEvidenceId: documentBack.id,
+    faceEvidenceId: face.id,
+    faceSha256: face.sha256,
+    createdAt,
+  };
   const requestEntry = {
     id: crypto.randomUUID(),
     requestType: "PUBLIC_ACCOUNT_REQUEST",
@@ -2286,6 +2349,8 @@ async function createPublicAccountRequest(body, recorded, availability) {
     phone,
     documentFrontEvidenceId: documentFront.id,
     documentBackEvidenceId: documentBack.id,
+    faceEvidenceId: face.id,
+    faceSha256: face.sha256,
     documentEvidence: evidenceAnalysis.evidence,
     subjectHash: recorded.subjectHash,
     actor: "PUBLIC",
@@ -2307,6 +2372,7 @@ async function createPublicAccountRequest(body, recorded, availability) {
       accountCreated: true,
       accountNumber,
       documentEvidenceReceived: true,
+      faceEvidenceReceived: true,
     }, { status: 202, headers: { "cache-control": "no-store" } }),
   };
 }
@@ -4345,6 +4411,15 @@ async function handleApi(request) {
       analysis.reviewReason = reason;
       analysis.reviewedAt = account.kycReviewedAt;
     }
+    const accountRequest = publicAccountRequests().find((item) =>
+      item.identity?.username === account.username && item.status === "PENDING_ADMIN_REVIEW"
+    );
+    if (accountRequest) {
+      accountRequest.status = approved ? "APPROVED" : "REJECTED";
+      accountRequest.reviewedBy = user.username;
+      accountRequest.reviewReason = reason;
+      accountRequest.reviewedAt = account.kycReviewedAt;
+    }
     const auditEntry = {
       id: crypto.randomUUID(), username: account.username, actor: user.username,
       fromStatus: previousStatus, toStatus: account.statusKyc, reason, createdAt: account.kycReviewedAt,
@@ -4434,6 +4509,7 @@ async function handleApi(request) {
         maskedCpf: maskCpf(item.identity?.cpf),
         phone: item.phone || "",
         documentEvidenceReceived: Boolean(item.documentFrontEvidenceId && item.documentBackEvidenceId),
+        faceEvidenceReceived: Boolean(item.faceEvidenceId),
         createdAt: item.createdAt,
       })));
   }
@@ -4445,9 +4521,12 @@ async function handleApi(request) {
       return json({ message: "Fotos do documento indisponiveis para esta solicitacao." }, { status: 404 });
     }
     try {
-      const [documentFront, documentBack] = await Promise.all([
+      const [documentFront, documentBack, face] = await Promise.all([
         decryptBiometricEvidence(accountRequest.documentFrontEvidenceId, "KYC_DOCUMENT_FRONT"),
         decryptBiometricEvidence(accountRequest.documentBackEvidenceId, "KYC_DOCUMENT_BACK"),
+        accountRequest.faceEvidenceId
+          ? decryptBiometricEvidence(accountRequest.faceEvidenceId, "ENROLLED_FACE")
+          : Promise.resolve(null),
       ]);
       return json({
         requestId: accountRequest.id,
@@ -4457,6 +4536,8 @@ async function handleApi(request) {
         maskedCpf: maskCpf(accountRequest.identity?.cpf),
         documentFront,
         documentBack,
+        face,
+        faceEvidenceMissingFromLegacyRegistration: !accountRequest.faceEvidenceId,
       }, { headers: { "cache-control": "no-store", pragma: "no-cache" } });
     } catch {
       return json({ message: "Nao foi possivel abrir as fotos protegidas do documento." }, { status: 503 });

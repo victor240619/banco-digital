@@ -472,6 +472,9 @@ assert.equal(register.data.adminReviewRequired, true);
 assert.equal(register.data.accountCreated, true);
 assert.match(register.data.accountNumber, /^\d{4}$/, "public registration must create a random four-digit account");
 assert.equal(JSON.parse(database.stateRow.payload).users[registrationIdentity.username].accountNumber, register.data.accountNumber);
+assert.equal(register.data.faceEvidenceReceived, true);
+assert.ok(JSON.parse(database.stateRow.payload).users[registrationIdentity.username].kycAnalysisId, "registration evidence must be linked to the account");
+assert.equal(JSON.parse(database.stateRow.payload).users[registrationIdentity.username].kycEvidenceSubmittedAt.length > 0, true);
 const duplicateRegister = await call(worker, "POST", "/auth/register", {
   headers: mobileHeaders,
   body: {
@@ -496,12 +499,14 @@ const accountRequestEvidence = await call(worker, "GET", "/admin/account-request
 assert.equal(accountRequestEvidence.response.status, 200, JSON.stringify(accountRequestEvidence.data));
 assert.match(accountRequestEvidence.data.documentFront, /^data:image\/png;base64,/);
 assert.match(accountRequestEvidence.data.documentBack, /^data:image\/png;base64,/);
+assert.match(accountRequestEvidence.data.face, /^data:image\/png;base64,/);
 assert.equal(accountRequestEvidence.response.headers.get("cache-control"), "no-store");
 
 const registrationLogin = await call(worker, "POST", "/auth/login", {
   body: { username: registrationIdentity.cpf, password: "PermanentD1123" },
 });
 assert.equal(registrationLogin.response.status, 200, "new account must accept its alphanumeric password immediately");
+assert.equal(registrationLogin.data.identityEvidenceRequired, false, "registration evidence must not be requested twice after login");
 const numericRegistrationLogin = await call(worker, "POST", "/auth/login", {
   body: { username: registrationIdentity.cpf, password: "87654321" },
 });
@@ -1214,7 +1219,7 @@ const revokedByLogout = await call(worker, "GET", "/user/profile", { token: prov
 assert.equal(revokedByLogout.response.status, 401, "logout must revoke the server-side session");
 const pendingKyc = await call(worker, "GET", "/admin/kyc/pending", { token: adminLogin.data.token });
 assert.equal(pendingKyc.data.some((item) => item.username === registrationIdentity.username), true);
-const registrationKycEnrollment = await call(worker, "POST", "/user/kyc/enroll", {
+const duplicateRegistrationKycEnrollment = await call(worker, "POST", "/user/kyc/enroll", {
   token: customerLogin.data.token,
   headers: { "idempotency-key": "registration-kyc-documents-only-0001" },
   body: {
@@ -1222,13 +1227,14 @@ const registrationKycEnrollment = await call(worker, "POST", "/user/kyc/enroll",
     documentBackImage: image(22, 4200),
   },
 });
-assert.equal(registrationKycEnrollment.response.status, 201, JSON.stringify(registrationKycEnrollment.data));
+assert.equal(duplicateRegistrationKycEnrollment.response.status, 400, "registration documents must not be requested twice");
+assert.equal(duplicateRegistrationKycEnrollment.data.code, "KYC_EVIDENCE_ALREADY_SUBMITTED");
 const kycEvidence = await call(worker, "GET", "/admin/kyc/" + registrationIdentity.username + "/evidence", { token: adminLogin.data.token });
 assert.equal(kycEvidence.response.status, 200, JSON.stringify(kycEvidence.data));
 assert.match(kycEvidence.data.documentFront, /^data:image\/png;base64,/);
 assert.match(kycEvidence.data.documentBack, /^data:image\/png;base64,/);
-assert.equal(kycEvidence.data.face, null, "post-login KYC no longer captures facial biometrics");
-assert.equal(kycEvidence.data.faceRemovedByPolicy, true);
+assert.match(kycEvidence.data.face, /^data:image\/png;base64,/, "registration facial capture must be reviewable by the administrator");
+assert.equal(kycEvidence.data.faceRemovedByPolicy, false);
 assert.equal(kycEvidence.response.headers.get("cache-control"), "no-store");
 const invalidKycApproval = await call(worker, "POST", "/admin/kyc/" + registrationIdentity.username + "/approve", {
   token: adminLogin.data.token,
@@ -1241,6 +1247,7 @@ const kycApproval = await call(worker, "POST", "/admin/kyc/" + registrationIdent
 });
 assert.equal(kycApproval.response.status, 200, JSON.stringify(kycApproval.data));
 assert.equal(kycApproval.data.statusKyc, "APROVADO_IDENTIDADE");
+assert.equal((await call(worker, "GET", "/admin/account-requests", { token: adminLogin.data.token })).data.some((item) => item.requestId === register.data.requestId), false, "reviewed registrations must leave the pending queue");
 assert.equal(database.kycAudits.size, 2, "KYC decisions must be mirrored to immutable audit storage");
 const approvedEvidence = await call(worker, "GET", "/admin/kyc/" + registrationIdentity.username + "/evidence", { token: adminLogin.data.token });
 assert.equal(approvedEvidence.response.status, 200, "KYC evidence must remain reviewable after a decision");
