@@ -943,6 +943,7 @@ function userSummary(user) {
     heldBalanceCentavos: held.toString(),
     availableBalanceCentavos: available.toString(),
     statusKyc: user.statusKyc || "STATUS_NAO_INFORMADO",
+    outboundOperationsEnabled: canUseOutgoingBanking(user),
     credentialState: user.credentialState || "ACTIVE",
     identityEvidenceRequired: user.statusKyc === "PENDENTE_VALIDACAO_IDENTIDADE" && !user.kycAnalysisId,
     roles: user.roles,
@@ -965,6 +966,7 @@ function authResponse(user, token) {
     heldBalanceCentavos: heldBalanceCentavos(user).toString(),
     availableBalanceCentavos: availableBalanceCentavos(user).toString(),
     statusKyc: user.statusKyc || "STATUS_NAO_INFORMADO",
+    outboundOperationsEnabled: canUseOutgoingBanking(user),
     identityEvidenceRequired: user.statusKyc === "PENDENTE_VALIDACAO_IDENTIDADE" && !user.kycAnalysisId,
     roles: user.roles,
   };

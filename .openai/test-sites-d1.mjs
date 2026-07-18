@@ -511,6 +511,10 @@ const numericRegistrationLogin = await call(worker, "POST", "/auth/login", {
   body: { username: registrationIdentity.cpf, password: "87654321" },
 });
 assert.equal(numericRegistrationLogin.response.status, 200, "new account must also accept its eight-digit numeric password");
+assert.equal(registrationLogin.data.outboundOperationsEnabled, false, "pending account login must expose its outgoing restriction");
+const pendingRegistrationProfile = await call(worker, "GET", "/user/profile", { token: registrationLogin.data.token });
+assert.equal(pendingRegistrationProfile.response.status, 200);
+assert.equal(pendingRegistrationProfile.data.outboundOperationsEnabled, false, "pending account profile must expose its outgoing restriction");
 const customerToken = registrationLogin.data.token;
 const transferKey = "d1-idempotency-transfer-0001";
 const transferBody = { amount: 1000, destinationAccount: "52998224725", description: "Teste atomico D1" };
