@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, CheckCircle2, FileText, Loader2, ShieldCheck,
@@ -34,8 +34,31 @@ export default function IdentityVerification() {
   const navigate = useNavigate();
   const idempotencyKeyRef = useRef('');
   const [evidence, setEvidence] = useState({ documentFrontImage: '', documentBackImage: '' });
+  const [checkingProfile, setCheckingProfile] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    const reconcileIdentityStatus = async () => {
+      try {
+        const { data } = await userService.getProfile();
+        if (!active) return;
+        if (data?.identityEvidenceRequired === false) {
+          authService.updateCurrentUser({ identityEvidenceRequired: false });
+          navigate('/dashboard', { replace: true });
+          return;
+        }
+      } catch {
+        // Keep the enrollment page available when profile refresh is temporarily unavailable.
+      }
+      if (active) setCheckingProfile(false);
+    };
+    void reconcileIdentityStatus();
+    return () => {
+      active = false;
+    };
+  }, [navigate]);
 
   const setEvidenceValue = (name, value) => {
     idempotencyKeyRef.current = '';
@@ -75,6 +98,17 @@ export default function IdentityVerification() {
       setLoading(false);
     }
   };
+
+  if (checkingProfile) {
+    return (
+      <main className="container-app native-safe-bottom py-4 sm:py-8">
+        <section className="card-premium mx-auto flex max-w-xl items-center justify-center gap-3 p-8 text-sm text-ink-200">
+          <Loader2 className="h-4 w-4 animate-spin text-gold-300" />
+          Verificando documentos enviados...
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="container-app native-safe-bottom py-4 sm:py-8">
