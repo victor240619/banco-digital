@@ -1,9 +1,10 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { MotionConfig } from 'framer-motion';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
+import ViewportAlert from './components/ViewportAlert';
 import { authService } from './services/api';
 import { isMobileApp } from './lib/appChannel';
 
@@ -117,16 +118,10 @@ export default function App() {
       <div className="flex min-h-screen min-w-0 flex-col">
         <Navbar nativeApp={nativeApp} />
 
-        {error && (
-          <div
-            onClick={() => setError(null)}
-            className="cursor-pointer bg-red-500/15 border-y border-red-500/30 text-red-200 text-sm py-2 px-4 flex items-center justify-center gap-2"
-          >
-            <AlertCircle className="h-4 w-4" />
-            <span>{typeof error === 'string' ? error : 'Ocorreu um erro inesperado.'}</span>
-            <span className="text-red-300/80 text-xs">(clique para fechar)</span>
-          </div>
-        )}
+        <ViewportAlert
+          message={error ? (typeof error === 'string' ? error : 'Ocorreu um erro inesperado.') : ''}
+          onDismiss={() => setError(null)}
+        />
 
         {isLoading && (
           <div className="fixed top-16 right-4 z-50 bg-white/[0.06] backdrop-blur-xl border border-white/10 rounded-full px-3 py-1.5 text-xs text-ink-200 flex items-center gap-2 shadow-card">

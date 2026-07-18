@@ -4,6 +4,8 @@ import {
   ArrowLeft, CheckCircle2, FileText, Loader2, ShieldCheck,
 } from 'lucide-react';
 import Logo from '../components/Logo';
+import DocumentImagePicker from '../components/DocumentImagePicker';
+import ViewportAlert from '../components/ViewportAlert';
 import { authService, userService } from '../services/api';
 
 const readImageAsDataUrl = (file) => new Promise((resolve, reject) => {
@@ -70,7 +72,10 @@ export default function IdentityVerification() {
     try {
       setEvidenceValue(name, await readImageAsDataUrl(event.target.files?.[0]));
     } catch (readError) {
-      setError(readError.message);
+      setEvidenceValue(name, '');
+      setError(readError.message || 'Falha ao carregar imagem.');
+    } finally {
+      event.target.value = '';
     }
   };
 
@@ -112,6 +117,7 @@ export default function IdentityVerification() {
 
   return (
     <main className="container-app native-safe-bottom py-4 sm:py-8">
+      <ViewportAlert message={error} onDismiss={() => setError('')} />
       <section className="card-premium mx-auto max-w-xl p-5 sm:p-8">
         <Logo className="mb-6 w-fit" />
         <div className="flex items-start gap-3">
@@ -131,17 +137,17 @@ export default function IdentityVerification() {
           <EvidenceStatus ready={Boolean(evidence.documentBackImage)} label="Verso" />
         </div>
 
-        {error && <div className="alert-error mt-5" role="alert">{error}</div>}
-
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <label className="block rounded-lg border border-white/10 bg-white/[0.03] p-4">
-            <span className="text-sm font-medium">Frente do documento</span>
-            <input className="mt-3 block w-full text-sm" type="file" accept="image/jpeg,image/png" capture="environment" onChange={chooseDocument('documentFrontImage')} />
-          </label>
-          <label className="block rounded-lg border border-white/10 bg-white/[0.03] p-4">
-            <span className="text-sm font-medium">Verso do documento</span>
-            <input className="mt-3 block w-full text-sm" type="file" accept="image/jpeg,image/png" capture="environment" onChange={chooseDocument('documentBackImage')} />
-          </label>
+          <DocumentImagePicker
+            label="Frente do documento"
+            ready={Boolean(evidence.documentFrontImage)}
+            onChange={chooseDocument('documentFrontImage')}
+          />
+          <DocumentImagePicker
+            label="Verso do documento"
+            ready={Boolean(evidence.documentBackImage)}
+            onChange={chooseDocument('documentBackImage')}
+          />
         </div>
 
         <div className="mt-5 flex flex-wrap gap-3">

@@ -2,11 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, CheckCircle2, FileText, Loader2, ShieldCheck, UserPlus,
+  ArrowRight, CheckCircle2, FileText, Loader2, RotateCcw, ShieldCheck, UserPlus,
 } from 'lucide-react';
 import { authService } from '../services/api';
 import { clearRegistrationDraft, loadRegistrationDraft, saveRegistrationDraft } from '../lib/registrationDraft';
+import { REGISTRATION_STEP, hasRegistrationDocuments, registrationStep } from '../lib/registrationFlow';
+import DocumentImagePicker from '../components/DocumentImagePicker';
 import LiveFaceCapture from '../components/LiveFaceCapture';
+import ViewportAlert from '../components/ViewportAlert';
 
 const onlyDigits = (value) => value.replace(/\D/g, '');
 
@@ -64,14 +67,25 @@ export default function Register() {
   const availabilityRequestRef = useRef(0);
   const validatedIdentityRef = useRef('');
   const requestKeyRef = useRef('');
+  const reviewRef = useRef(null);
+  const returnToReviewRef = useRef(false);
   const [formData, setFormData] = useState(() => loadRegistrationDraft());
   const [documents, setDocuments] = useState({ documentFrontImage: '', documentBackImage: '', faceImage: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(null);
   const [availability, setAvailability] = useState({ status: 'idle', accountExists: false, message: '' });
+  const biometricPage = location.pathname.endsWith('/biometria');
+  const currentStep = registrationStep(documents);
 
   useEffect(() => { saveRegistrationDraft(formData); }, [formData]);
+
+  useEffect(() => {
+    if (biometricPage || currentStep !== REGISTRATION_STEP.REVIEW || !returnToReviewRef.current) return undefined;
+    returnToReviewRef.current = false;
+    const frame = requestAnimationFrame(() => reviewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+    return () => cancelAnimationFrame(frame);
+  }, [biometricPage, currentStep]);
 
   const registrationPayload = () => ({
     username: String(formData.username || '').trim().toLowerCase(),
@@ -141,10 +155,17 @@ export default function Register() {
       setDocuments((current) => ({ ...current, [name]: dataUrl }));
       requestKeyRef.current = '';
     } catch (readError) {
-      event.target.value = '';
       setDocuments((current) => ({ ...current, [name]: '' }));
       setError(readError.message || 'Falha ao carregar imagem.');
+    } finally {
+      event.target.value = '';
     }
+  };
+
+  const restartIdentityVerification = () => {
+    requestKeyRef.current = '';
+    setError('');
+    setDocuments({ documentFrontImage: '', documentBackImage: '', faceImage: '' });
   };
 
   const beginBiometrics = async () => {
@@ -161,7 +182,7 @@ export default function Register() {
       setError('Crie uma senha numerica com exatamente 8 digitos.');
       return;
     }
-    if (!documents.documentFrontImage || !documents.documentBackImage) {
+    if (!hasRegistrationDocuments(documents)) {
       setError('Envie a frente e o verso do documento antes da biometria.');
       return;
     }
@@ -188,7 +209,7 @@ export default function Register() {
       setError('Este dispositivo precisa de suporte seguro para gerar o protocolo.');
       return;
     }
-    if (!documents.documentFrontImage || !documents.documentBackImage || !documents.faceImage) {
+    if (registrationStep(documents) !== REGISTRATION_STEP.REVIEW) {
       setError('Envie a frente, o verso do documento e a selfie facial.');
       return;
     }
@@ -222,8 +243,7 @@ export default function Register() {
     }
   };
 
-  const biometricPage = location.pathname.endsWith('/biometria');
-  if (biometricPage && (!documents.documentFrontImage || !documents.documentBackImage)) {
+  if (biometricPage && !hasRegistrationDocuments(documents)) {
     return <Navigate to="/register" replace />;
   }
   if (biometricPage) {
@@ -236,7 +256,10 @@ export default function Register() {
               setDocuments((current) => ({ ...current, faceImage }));
               requestKeyRef.current = '';
             }}
-            onSuccessComplete={() => navigate('/register', { replace: true })}
+            onSuccessComplete={() => {
+              returnToReviewRef.current = true;
+              navigate('/register', { replace: true });
+            }}
           />
         </div>
       </main>
@@ -245,6 +268,7 @@ export default function Register() {
 
   return (
     <main className="container-app py-12 sm:py-16">
+      <ViewportAlert message={error} onDismiss={() => setError('')} />
       <motion.div
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
@@ -262,8 +286,6 @@ export default function Register() {
               Crie suas duas senhas de acesso. O numero da conta sera gerado automaticamente.
             </p>
           </div>
-
-          {error && <div className="alert-error mb-5" role="alert">{error}</div>}
 
           {availability.accountExists && (
             <div className="mb-5 flex flex-wrap gap-3" aria-label="Acoes para conta existente">
@@ -307,62 +329,62 @@ export default function Register() {
                 </div>
               )}
 
-              <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <div className="inline-flex items-center gap-2 font-semibold text-white">
-                    <ShieldCheck className="h-5 w-5 text-gold-300" />
-                    Documento do titular
+              {currentStep !== REGISTRATION_STEP.REVIEW && (
+                <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="inline-flex items-center gap-2 font-semibold text-white">
+                      <ShieldCheck className="h-5 w-5 text-gold-300" />
+                      Documento do titular
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <span className={documents.documentFrontImage ? 'pill-green' : 'pill-red'}>
+                        {documents.documentFrontImage ? <CheckCircle2 className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                        Frente
+                      </span>
+                      <span className={documents.documentBackImage ? 'pill-green' : 'pill-red'}>
+                        {documents.documentBackImage ? <CheckCircle2 className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                        Verso
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <span className={documents.documentFrontImage ? 'pill-green' : 'pill-red'}>
-                      {documents.documentFrontImage ? <CheckCircle2 className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-                      Frente
-                    </span>
-                    <span className={documents.documentBackImage ? 'pill-green' : 'pill-red'}>
-                      {documents.documentBackImage ? <CheckCircle2 className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-                      Verso
-                    </span>
-                  </div>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block rounded-lg border border-white/10 bg-black/10 p-4">
-                    <span className="text-sm font-medium text-ink-100">Foto da frente *</span>
-                    <input
-                      className="mt-3 block w-full text-sm text-ink-300"
-                      type="file"
-                      accept="image/jpeg,image/png"
-                      capture="environment"
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <DocumentImagePicker
+                      label="Foto da frente"
+                      ready={Boolean(documents.documentFrontImage)}
                       onChange={handleDocumentChange('documentFrontImage')}
-                      required
                     />
-                  </label>
-                  <label className="block rounded-lg border border-white/10 bg-black/10 p-4">
-                    <span className="text-sm font-medium text-ink-100">Foto do verso *</span>
-                    <input
-                      className="mt-3 block w-full text-sm text-ink-300"
-                      type="file"
-                      accept="image/jpeg,image/png"
-                      capture="environment"
+                    <DocumentImagePicker
+                      label="Foto do verso"
+                      ready={Boolean(documents.documentBackImage)}
                       onChange={handleDocumentChange('documentBackImage')}
-                      required
                     />
-                  </label>
-                </div>
-              </section>
+                  </div>
+                </section>
+              )}
 
-              {!documents.faceImage ? (
+              {currentStep !== REGISTRATION_STEP.REVIEW ? (
                 <button type="button" onClick={beginBiometrics} className="btn-primary w-full !py-3">
                   Continuar para verificacao facial
                   <ArrowRight className="h-4 w-4" />
                 </button>
               ) : (
-                <div className="space-y-4">
-                  <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">
+                <div ref={reviewRef} className="space-y-4">
+                  <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-4 text-sm text-emerald-200">
                     <span className="inline-flex items-start gap-2">
                       <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                      Captura facial concluida com sucesso. Continue para criar a conta.
+                      Documento e captura facial recebidos. Revise os dados e crie a conta.
                     </span>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="pill-green"><CheckCircle2 className="h-3.5 w-3.5" /> Frente</span>
+                      <span className="pill-green"><CheckCircle2 className="h-3.5 w-3.5" /> Verso</span>
+                      <span className="pill-green"><CheckCircle2 className="h-3.5 w-3.5" /> Selfie</span>
+                    </div>
                   </div>
+
+                  <button type="button" onClick={restartIdentityVerification} className="btn-secondary w-full !py-3">
+                    <RotateCcw className="h-4 w-4" />
+                    Alterar documentos
+                  </button>
 
                   <button type="submit" disabled={loading} className="btn-primary w-full !py-3">
                     {loading ? (
