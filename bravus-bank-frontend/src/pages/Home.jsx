@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ShieldCheck, Zap, Globe2, Banknote, LineChart, Lock,
-  ArrowRight, Download, Sparkles, Smartphone, Award
+  ArrowRight, Download, Sparkles, Smartphone, Award, PhoneCall, ShieldAlert
 } from 'lucide-react';
 import { authService } from '../services/api';
 import { APK_DOWNLOAD_URL } from '../lib/appChannel';
@@ -165,6 +165,55 @@ export default function Home() {
           <Stat value="99.99%" label="Uptime SLA" />
           <Stat value="256-bit" label="Criptografia" />
           <Stat value="24/7" label="Suporte" />
+        </div>
+      </section>
+
+      {/* ============ LOST OR STOLEN CARDS ============ */}
+      <section className="container-app mt-20" aria-labelledby="lost-card-support-title">
+        <div className="relative min-h-[520px] overflow-hidden rounded-lg border border-white/10 sm:min-h-[460px]">
+          <img
+            src="/images/lost-card-support.png"
+            alt="Carteira e cartão sobre uma passarela próxima ao mar"
+            className="absolute inset-0 h-full w-full object-cover object-center sm:object-right"
+            loading="lazy"
+          />
+          <div className="absolute inset-0 bg-slate-950/72 sm:bg-gradient-to-r sm:from-slate-950/95 sm:via-slate-950/78 sm:to-slate-950/10" />
+
+          <div className="relative z-10 flex min-h-[520px] max-w-2xl flex-col justify-center px-6 py-10 sm:min-h-[460px] sm:px-10 lg:px-14">
+            <div className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-lg border border-gold-400/30 bg-slate-950/70 text-gold-300">
+              <ShieldAlert className="h-6 w-6" aria-hidden="true" />
+            </div>
+            <h2 id="lost-card-support-title" className="font-display text-3xl font-bold leading-tight text-white sm:text-4xl">
+              Reporte cartões perdidos ou roubados 24 horas por dia, 7 dias por semana.
+            </h2>
+
+            <div className="mt-8 grid gap-5 sm:grid-cols-2">
+              <a
+                href="tel:+16367227111"
+                className="group border-l-2 border-gold-400 pl-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-300"
+              >
+                <span className="block text-sm font-medium text-ink-200">Serviços Globais Mastercard</span>
+                <span className="mt-1 inline-flex items-center gap-2 font-display text-xl font-semibold text-white group-hover:text-gold-300">
+                  <PhoneCall className="h-5 w-5" aria-hidden="true" />
+                  +1 636 722 7111
+                </span>
+              </a>
+              <a
+                href="tel:+13039671090"
+                className="group border-l-2 border-gold-400 pl-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-300"
+              >
+                <span className="block text-sm font-medium text-ink-200">Visa Global Service</span>
+                <span className="mt-1 inline-flex items-center gap-2 font-display text-xl font-semibold text-white group-hover:text-gold-300">
+                  <PhoneCall className="h-5 w-5" aria-hidden="true" />
+                  +1 303 967 1090
+                </span>
+              </a>
+            </div>
+
+            <p className="mt-8 max-w-xl text-xs leading-relaxed text-ink-300">
+              Canais globais de assistência das bandeiras. A disponibilidade e os custos da chamada podem variar. Informe também o emissor do cartão.
+            </p>
+          </div>
         </div>
       </section>
 
