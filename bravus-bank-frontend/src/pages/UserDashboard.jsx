@@ -802,20 +802,34 @@ export default function UserDashboard() {
     const refresh = (async () => {
       try {
         if (!silent) setLoading(true);
-        const [profileRes, meRes, txRes, creditRes, externalRes] = await Promise.all([
-          requestAccountData(() => userService.getProfile()),
-          userService.getMe().catch(() => ({ data: null })),
-          requestAccountData(() => userService.getTransactions()),
-          userService.getCreditSummary().catch(() => ({ data: null })),
-          userService.getExternalTransfers(8).catch(() => ({ data: [] })),
-        ]);
-        const snapshot = {
-          profile: profileRes.data,
-          me: meRes?.data || null,
-          transactions: Array.isArray(txRes.data) ? txRes.data : [],
-          creditSummary: creditRes?.data || null,
-          externalOrders: Array.isArray(externalRes?.data) ? externalRes.data : [],
-        };
+        let snapshot;
+        try {
+          const dashboardRes = await requestAccountData(() => userService.getDashboard());
+          const dashboard = dashboardRes?.data || {};
+          snapshot = {
+            profile: dashboard.profile,
+            me: dashboard.me || null,
+            transactions: Array.isArray(dashboard.transactions) ? dashboard.transactions : [],
+            creditSummary: dashboard.creditSummary || null,
+            externalOrders: Array.isArray(dashboard.externalOrders) ? dashboard.externalOrders : [],
+          };
+        } catch (dashboardError) {
+          if (dashboardError?.response?.status !== 404) throw dashboardError;
+          const [profileRes, meRes, txRes, creditRes, externalRes] = await Promise.all([
+            requestAccountData(() => userService.getProfile()),
+            userService.getMe().catch(() => ({ data: null })),
+            requestAccountData(() => userService.getTransactions()),
+            userService.getCreditSummary().catch(() => ({ data: null })),
+            userService.getExternalTransfers(8).catch(() => ({ data: [] })),
+          ]);
+          snapshot = {
+            profile: profileRes.data,
+            me: meRes?.data || null,
+            transactions: Array.isArray(txRes.data) ? txRes.data : [],
+            creditSummary: creditRes?.data || null,
+            externalOrders: Array.isArray(externalRes?.data) ? externalRes.data : [],
+          };
+        }
         const signature = JSON.stringify(snapshot);
         if (accountDataSignature.current !== signature) {
           accountDataSignature.current = signature;

@@ -3417,6 +3417,15 @@ async function handleApi(request) {
 
   enforceFinancialConsistency("AUTHENTICATED_REQUEST");
 
+  if (request.method === "GET" && path === "/user/dashboard") {
+    return json({
+      profile: userSummary(user),
+      me: bankMe(user),
+      transactions: state.transactions.filter((tx) => tx.username === user.username).map((tx) => hydrateTransaction(tx, user)),
+      creditSummary: creditSummary(user),
+      externalOrders: state.externalTransfers.filter((tx) => canReadOrderReceipt(tx, user)).slice(0, 8),
+    });
+  }
   if (request.method === "GET" && path === "/user/profile") return json(userSummary(user));
   if (request.method === "GET" && path === "/user/me") return json(bankMe(user));
   if (request.method === "GET" && path === "/user/balance") return json(availableBalanceNumber(user));

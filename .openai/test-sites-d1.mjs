@@ -515,6 +515,13 @@ assert.equal(registrationLogin.data.outboundOperationsEnabled, false, "pending a
 const pendingRegistrationProfile = await call(worker, "GET", "/user/profile", { token: registrationLogin.data.token });
 assert.equal(pendingRegistrationProfile.response.status, 200);
 assert.equal(pendingRegistrationProfile.data.outboundOperationsEnabled, false, "pending account profile must expose its outgoing restriction");
+const pendingRegistrationDashboard = await call(worker, "GET", "/user/dashboard", { token: registrationLogin.data.token });
+assert.equal(pendingRegistrationDashboard.response.status, 200);
+assert.equal(pendingRegistrationDashboard.data.profile.accountNumber, register.data.accountNumber);
+assert.equal(pendingRegistrationDashboard.data.profile.outboundOperationsEnabled, false);
+assert.equal(pendingRegistrationDashboard.data.me.conta.statusKyc, "PENDENTE_VALIDACAO_IDENTIDADE");
+assert.deepEqual(pendingRegistrationDashboard.data.transactions, []);
+assert.deepEqual(pendingRegistrationDashboard.data.externalOrders, []);
 const customerToken = registrationLogin.data.token;
 const transferKey = "d1-idempotency-transfer-0001";
 const transferBody = { amount: 1000, destinationAccount: "52998224725", description: "Teste atomico D1" };

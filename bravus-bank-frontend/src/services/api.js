@@ -163,6 +163,7 @@ export const authService = {
 
 // ====== User ======
 export const userService = {
+  getDashboard: () => api.get('/user/dashboard'),
   getProfile: () => api.get('/user/profile'),
   getMe: () => api.get('/user/me'),
   getBalance: () => api.get('/user/balance'),
