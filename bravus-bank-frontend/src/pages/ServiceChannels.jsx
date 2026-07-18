@@ -115,7 +115,7 @@ export default function ServiceChannels() {
       <EditorialGallery
         description="Seis formas de visualizar o atendimento Bravus, do autosserviço digital à orientação protegida para situações que exigem acompanhamento."
         items={channelGalleryItems}
-        sheet="/images/galleries/canais-atendimento.png"
+        sheet="/images/galleries/canais-atendimento.jpg"
         title="Atendimento em diferentes momentos"
       />
 

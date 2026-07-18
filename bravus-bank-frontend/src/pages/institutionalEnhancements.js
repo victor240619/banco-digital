@@ -1,5 +1,5 @@
 const gallery = (slug, items) => ({
-  sheet: `/images/galleries/${slug}.png`,
+  sheet: `/images/galleries/${slug}.jpg`,
   items: items.map(([title, alt]) => ({ title, alt })),
 });
 
