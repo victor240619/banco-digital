@@ -4,6 +4,7 @@ import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.TransactionRepository;
 import com.bravus.bank.db.repo.UserRepository;
 import com.bravus.bank.external.ExternalTransferRepository;
+import com.bravus.bank.user.OutboundOperationRestrictedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -138,6 +139,27 @@ class PersistentInternalTransferServiceIntegrationTest {
         assertEquals(0L, externalTransferRepository.count());
     }
 
+    @Test
+    void accountUnderReviewCanReceiveButCannotSend() {
+        joao.setOutboundOperationsEnabled(false);
+        userRepository.saveAndFlush(joao);
+
+        OutboundOperationRestrictedException exception = assertThrows(
+                OutboundOperationRestrictedException.class,
+                () -> service.transfer(
+                        joao.getUsername(),
+                        francisca.getAccountNumber(),
+                        1000L,
+                        "Conta em analise",
+                        "transfer-idempotency-key-000005"));
+
+        assertEquals("ACCOUNT_UNDER_REVIEW", exception.getCode());
+        assertEquals(10000L, userRepository.findById(joao.getId()).orElseThrow().getBalance());
+        assertEquals(0L, userRepository.findById(francisca.getId()).orElseThrow().getBalance());
+        assertEquals(0L, requestRepository.count());
+        assertEquals(0L, transactionRepository.count());
+    }
+
     private UserEntity user(
             String username,
             String email,
@@ -153,6 +175,7 @@ class PersistentInternalTransferServiceIntegrationTest {
         user.setAccountNumber(accountNumber);
         user.setBalance(balance);
         user.setIsActive(true);
+        user.setOutboundOperationsEnabled(true);
         user.setStatusKyc("VERIFICADO");
         user.setChavePix(cpf);
         user.setTipoChavePix("CPF");

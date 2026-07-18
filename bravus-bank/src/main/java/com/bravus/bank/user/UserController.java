@@ -31,15 +31,18 @@ public class UserController {
     private final TransactionRepository transactionRepository;
     private final ExternalTransferRepository externalTransferRepository;
     private final PersistentInternalTransferService persistentInternalTransferService;
+    private final OutboundOperationPolicy outboundOperationPolicy;
     
     public UserController(UserRepository userRepository,
                           TransactionRepository transactionRepository,
                           ExternalTransferRepository externalTransferRepository,
-                          PersistentInternalTransferService persistentInternalTransferService) {
+                          PersistentInternalTransferService persistentInternalTransferService,
+                          OutboundOperationPolicy outboundOperationPolicy) {
         this.userRepository = userRepository;
         this.transactionRepository = transactionRepository;
         this.externalTransferRepository = externalTransferRepository;
         this.persistentInternalTransferService = persistentInternalTransferService;
+        this.outboundOperationPolicy = outboundOperationPolicy;
     }
     
     public record UserProfileResponse(
@@ -51,7 +54,8 @@ public class UserController {
             String phone,
             String accountNumber,
             String accountType,
-            Long balance
+            Long balance,
+            Boolean outboundOperationsEnabled
     ) {}
     
     public record TransactionRequest(
@@ -129,7 +133,8 @@ public class UserController {
                 user.getPhone(),
                 user.getAccountNumber(),
                 user.getAccountType(),
-                user.getBalance()
+                user.getBalance(),
+                user.getOutboundOperationsEnabled()
         ));
     }
     
@@ -217,6 +222,7 @@ public class UserController {
         String username = SecurityContextHolder.getContext().getAuthentication().getName();
         UserEntity user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("User not found"));
+        outboundOperationPolicy.assertAllowed(user);
         
         if (user.getBalance() < request.amount()) {
             return ResponseEntity.badRequest().body("Insufficient balance");

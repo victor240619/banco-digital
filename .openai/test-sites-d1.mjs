@@ -403,23 +403,32 @@ const register = await call(worker, "POST", "/auth/register", {
     ...registrationIdentity,
     fullName: "Cliente Persistencia D1",
     phone: "11999990000",
+    password: "PermanentD1123",
+    numericPassword: "87654321",
     documentFrontImage: image(11, 4200),
     documentBackImage: image(22, 4200),
+    faceImage: image(33, 4200),
+    biometricChallenge: "FACE_CAMERA_CAPTURE_V1",
     idempotencyKey: "public-account-request-d1-0001",
   },
 });
 assert.equal(register.response.status, 202, JSON.stringify(register.data));
 assert.equal(register.data.adminReviewRequired, true);
-assert.equal(register.data.accountCreated, false);
-assert.equal(JSON.parse(database.stateRow.payload).users[registrationIdentity.username], undefined, "public request must not create an account");
+assert.equal(register.data.accountCreated, true);
+assert.match(register.data.accountNumber, /^\d{4}$/, "public registration must create a random four-digit account");
+assert.equal(JSON.parse(database.stateRow.payload).users[registrationIdentity.username].accountNumber, register.data.accountNumber);
 const duplicateRegister = await call(worker, "POST", "/auth/register", {
   headers: mobileHeaders,
   body: {
     ...registrationIdentity,
     fullName: "Cliente Persistencia D1",
     phone: "11999990000",
+    password: "PermanentD1123",
+    numericPassword: "87654321",
     documentFrontImage: image(11, 4200),
     documentBackImage: image(22, 4200),
+    faceImage: image(33, 4200),
+    biometricChallenge: "FACE_CAMERA_CAPTURE_V1",
     idempotencyKey: "public-account-request-d1-0001",
   },
 });
@@ -434,27 +443,15 @@ assert.match(accountRequestEvidence.data.documentFront, /^data:image\/png;base64
 assert.match(accountRequestEvidence.data.documentBack, /^data:image\/png;base64,/);
 assert.equal(accountRequestEvidence.response.headers.get("cache-control"), "no-store");
 
-const registrationProvision = await call(worker, "POST", "/admin/accounts/provision", {
-  token: adminLogin.data.token,
-  headers: { "idempotency-key": "account-provision-from-public-request-0001" },
-  body: {
-    ...registrationIdentity,
-    fullName: "Cliente Persistencia D1",
-    phone: "11999990000",
-    initialPassword: "NovaSenha123",
-  },
+const registrationLogin = await call(worker, "POST", "/auth/login", {
+  body: { username: registrationIdentity.cpf, password: "PermanentD1123" },
 });
-assert.equal(registrationProvision.response.status, 201, JSON.stringify(registrationProvision.data));
-const registrationInitialLogin = await call(worker, "POST", "/auth/login", {
-  body: { username: registrationIdentity.cpf, password: "NovaSenha123" },
+assert.equal(registrationLogin.response.status, 200, "new account must accept its alphanumeric password immediately");
+const numericRegistrationLogin = await call(worker, "POST", "/auth/login", {
+  body: { username: registrationIdentity.cpf, password: "87654321" },
 });
-assert.equal(registrationInitialLogin.response.status, 403, "admin-created account must require password change on first login");
-assert.equal(registrationInitialLogin.data.code, "INITIAL_PASSWORD_CHANGE_REQUIRED");
-const completedRegistrationInitial = await call(worker, "POST", "/auth/initial-password/complete", {
-  body: { initialPasswordChangeToken: registrationInitialLogin.data.initialPasswordChangeToken, newPassword: "PermanentD1123" },
-});
-assert.equal(completedRegistrationInitial.response.status, 200, JSON.stringify(completedRegistrationInitial.data));
-const customerToken = completedRegistrationInitial.data.token;
+assert.equal(numericRegistrationLogin.response.status, 200, "new account must also accept its eight-digit numeric password");
+const customerToken = registrationLogin.data.token;
 const transferKey = "d1-idempotency-transfer-0001";
 const transferBody = { amount: 1000, destinationAccount: "52998224725", description: "Teste atomico D1" };
 const transfer = await call(worker, "POST", "/user/transfer", {
@@ -673,8 +670,8 @@ assert.equal(
   "manual account creation must not create transactions",
 );
 assert.equal(persistenceAfterProvision.data.userCount, persistenceBeforeProvision.data.userCount + 1);
-assert.equal(persistenceAfterProvision.data.immutableAccountProvisioningAuditCount, 2);
-assert.equal(database.accountProvisioningAudits.size, 2, "manual account creation must have immutable D1 audit records");
+assert.equal(persistenceAfterProvision.data.immutableAccountProvisioningAuditCount, 1);
+assert.equal(database.accountProvisioningAudits.size, 1, "manual account creation must have an immutable D1 audit record");
 assert.equal(
   JSON.parse(database.stateRow.payload).registrationAudit.some((item) =>
     item.eventType === "ACCOUNT_PROVISIONED_PENDING_IDENTITY"

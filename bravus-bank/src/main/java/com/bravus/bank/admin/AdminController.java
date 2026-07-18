@@ -32,6 +32,7 @@ public class AdminController {
             String accountNumber,
             Long balance,
             Boolean isActive,
+            Boolean outboundOperationsEnabled,
             String createdAt
     ) {}
     
@@ -77,6 +78,7 @@ public class AdminController {
                         u.getAccountNumber(),
                         u.getBalance(),
                         u.getIsActive(),
+                        u.getOutboundOperationsEnabled(),
                         u.getCreatedAt().toString()
                 ))
                 .collect(Collectors.toList());
@@ -97,8 +99,27 @@ public class AdminController {
                 user.getAccountNumber(),
                 user.getBalance(),
                 user.getIsActive(),
+                user.getOutboundOperationsEnabled(),
                 user.getCreatedAt().toString()
         ));
+    }
+
+    @PutMapping("/users/{id}/transfers/enable")
+    public ResponseEntity<?> enableTransfers(@PathVariable Long id) {
+        UserEntity user = userRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        user.setOutboundOperationsEnabled(true);
+        userRepository.save(user);
+        return ResponseEntity.ok("Transferencias liberadas para o usuario.");
+    }
+
+    @PutMapping("/users/{id}/transfers/disable")
+    public ResponseEntity<?> disableTransfers(@PathVariable Long id) {
+        UserEntity user = userRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        user.setOutboundOperationsEnabled(false);
+        userRepository.save(user);
+        return ResponseEntity.ok("Transferencias bloqueadas para o usuario.");
     }
     
     @PutMapping("/users/{id}/activate")

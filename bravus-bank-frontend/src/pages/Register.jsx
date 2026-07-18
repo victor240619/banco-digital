@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { authService } from '../services/api';
 import { clearRegistrationDraft, loadRegistrationDraft, saveRegistrationDraft } from '../lib/registrationDraft';
+import LiveFaceCapture from '../components/LiveFaceCapture';
 
 const onlyDigits = (value) => value.replace(/\D/g, '');
 
@@ -33,7 +34,7 @@ const formatPhone = (value) => {
   return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').replace(/[-\s]+$/, '');
 };
 
-function Field({ label, name, value, onChange, type = 'text', required, placeholder, minLength, autoComplete, onBlur }) {
+function Field({ label, name, value, onChange, type = 'text', required, placeholder, minLength, maxLength, autoComplete, onBlur, inputMode, pattern }) {
   return (
     <div>
       <label className="form-label" htmlFor={name}>{label}{required && ' *'}</label>
@@ -46,9 +47,12 @@ function Field({ label, name, value, onChange, type = 'text', required, placehol
         onChange={onChange}
         required={required}
         minLength={minLength}
+        maxLength={maxLength}
         placeholder={placeholder}
         autoComplete={autoComplete}
         onBlur={onBlur}
+        inputMode={inputMode}
+        pattern={pattern}
       />
     </div>
   );
@@ -58,7 +62,7 @@ export default function Register() {
   const availabilityRequestRef = useRef(0);
   const requestKeyRef = useRef('');
   const [formData, setFormData] = useState(() => loadRegistrationDraft());
-  const [documents, setDocuments] = useState({ documentFrontImage: '', documentBackImage: '' });
+  const [documents, setDocuments] = useState({ documentFrontImage: '', documentBackImage: '', faceImage: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(null);
@@ -77,7 +81,7 @@ export default function Register() {
     availabilityRequestRef.current = requestId;
     const identity = registrationPayload();
     if (requireComplete && (identity.username.length < 3 || !identity.email || identity.cpf.length !== 11)) {
-      setError('Preencha usuario, e-mail e CPF antes de enviar a solicitacao.');
+      setError('Preencha usuario, e-mail e CPF antes de abrir a conta.');
       return false;
     }
     setAvailability({ status: 'checking', accountExists: false, message: 'Verificando dados...' });
@@ -107,6 +111,7 @@ export default function Register() {
     const nextValue =
       name === 'cpf' ? formatCpf(value) :
       name === 'phone' ? formatPhone(value) :
+      name === 'numericPassword' ? onlyDigits(value).slice(0, 8) :
       value;
     setFormData((current) => ({ ...current, [name]: nextValue }));
     if (['username', 'email', 'cpf'].includes(name)) {
@@ -141,12 +146,20 @@ export default function Register() {
       setError('Informe CPF com 11 digitos.');
       return;
     }
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{8,64}$/.test(String(formData.password || ''))) {
+      setError('A senha alfanumerica deve ter pelo menos 8 caracteres, com letra maiuscula, minuscula e numero.');
+      return;
+    }
+    if (onlyDigits(String(formData.numericPassword || '')).length !== 8) {
+      setError('Crie uma senha numerica com exatamente 8 digitos.');
+      return;
+    }
     if (!globalThis.crypto?.randomUUID) {
       setError('Este dispositivo precisa de suporte seguro para gerar o protocolo.');
       return;
     }
-    if (!documents.documentFrontImage || !documents.documentBackImage) {
-      setError('Envie a foto da frente e do verso do documento.');
+    if (!documents.documentFrontImage || !documents.documentBackImage || !documents.faceImage) {
+      setError('Envie a frente, o verso do documento e a selfie facial.');
       return;
     }
     setLoading(true);
@@ -157,8 +170,12 @@ export default function Register() {
         ...formData,
         cpf: onlyDigits(String(formData.cpf || '')),
         phone: onlyDigits(String(formData.phone || '')),
+        password: String(formData.password || ''),
+        numericPassword: onlyDigits(String(formData.numericPassword || '')),
         documentFrontImage: documents.documentFrontImage,
         documentBackImage: documents.documentBackImage,
+        faceImage: documents.faceImage,
+        biometricChallenge: 'FACE_CAMERA_CAPTURE_V1',
         idempotencyKey: requestKeyRef.current,
       });
       clearRegistrationDraft();
@@ -187,11 +204,11 @@ export default function Register() {
           <div className="mb-7">
             <div className="pill-gold mb-3">
               <UserPlus className="h-3.5 w-3.5" />
-              Solicitacao de abertura
+              Abertura de conta
             </div>
-            <h1 className="title-md">Pedir abertura de conta Bravus</h1>
+            <h1 className="title-md">Criar conta Bravus</h1>
             <p className="mt-1.5 text-sm text-ink-300">
-              O cadastro nao cria conta automaticamente. Ele envia uma notificacao ao administrador, que cria a conta internamente e informa a senha temporaria.
+              Crie suas duas senhas de acesso. O numero da conta sera gerado automaticamente e a conta podera receber valores enquanto aguarda a liberacao administrativa.
             </p>
           </div>
 
@@ -207,12 +224,12 @@ export default function Register() {
           {submitted ? (
             <div className="text-center">
               <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-300" />
-              <h2 className="mt-4 text-lg font-semibold text-white">Solicitacao enviada ao admin</h2>
+              <h2 className="mt-4 text-lg font-semibold text-white">Conta criada com sucesso</h2>
               <p className="mt-2 text-sm text-ink-300">
-                O administrador recebeu o pedido. A conta sera criada manualmente, com senha temporaria para primeiro acesso.
+                Sua conta {submitted.accountNumber} foi criada e esta em analise. Voce ja pode entrar e receber valores.
               </p>
               <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-xs text-ink-400">
-                Protocolo: <span className="font-mono text-ink-100">{submitted.requestId}</span>
+                Conta: <span className="font-mono text-ink-100">{submitted.accountNumber}</span>
               </div>
               <Link to="/login" className="btn-primary mt-6 w-full">
                 Ir para login
@@ -226,6 +243,8 @@ export default function Register() {
                 <Field label="Nome completo" name="fullName" value={formData.fullName || ''} onChange={handleChange} required placeholder="Seu nome completo" autoComplete="name" />
                 <Field label="CPF" name="cpf" value={formData.cpf || ''} onChange={handleChange} onBlur={handleIdentityBlur} required placeholder="000.000.000-00" autoComplete="off" />
                 <Field label="Telefone" name="phone" type="tel" value={formData.phone || ''} onChange={handleChange} placeholder="(00) 00000-0000" autoComplete="tel" />
+                <Field label="Senha alfanumerica" name="password" type="password" value={formData.password || ''} onChange={handleChange} required placeholder="Ex.: Bravus123" minLength={8} maxLength={64} pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9]{8,64}" autoComplete="new-password" />
+                <Field label="Senha numerica de 8 digitos" name="numericPassword" type="password" value={formData.numericPassword || ''} onChange={handleChange} required placeholder="00000000" minLength={8} maxLength={8} inputMode="numeric" pattern="[0-9]{8}" autoComplete="off" />
               </div>
 
               {availability.status === 'available' && (
@@ -280,26 +299,35 @@ export default function Register() {
                 </div>
               </section>
 
-              <div className="rounded-xl border border-gold-400/25 bg-gold-400/10 px-4 py-3 text-sm text-gold-100">
-                <span className="inline-flex items-start gap-2">
-                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-                  Senha e conta serao criadas somente na area administrativa do Bravus.
-                </span>
-              </div>
+              <LiveFaceCapture onCapture={(faceImage) => {
+                setDocuments((current) => ({ ...current, faceImage }));
+                requestKeyRef.current = '';
+              }} />
 
-              <button type="submit" disabled={loading} className="btn-primary w-full !py-3">
-                {loading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Enviando solicitacao...
-                  </>
-                ) : (
-                  <>
-                    Solicitar abertura
-                    <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
-              </button>
+              {documents.faceImage && (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-gold-400/25 bg-gold-400/10 px-4 py-3 text-sm text-gold-100">
+                    <span className="inline-flex items-start gap-2">
+                      <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                      Verificacao concluida. A conta sera aberta em analise e podera receber valores, mas nao realizar transferencias ou saques ate a aprovacao.
+                    </span>
+                  </div>
+
+                  <button type="submit" disabled={loading} className="btn-primary w-full !py-3">
+                    {loading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Criando conta...
+                      </>
+                    ) : (
+                      <>
+                        Continuar e criar minha conta
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </form>
           )}
 

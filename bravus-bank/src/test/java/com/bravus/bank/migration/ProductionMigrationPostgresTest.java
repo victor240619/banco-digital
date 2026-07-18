@@ -23,12 +23,28 @@ class ProductionMigrationPostgresTest {
                     .validateOnMigrate(true)
                     .load();
 
-            assertEquals(18, flyway.migrate().migrationsExecuted);
+            assertEquals(20, flyway.migrate().migrationsExecuted);
             assertEquals(0, flyway.migrate().migrationsExecuted);
 
             try (Connection connection = postgres.getPostgresDatabase().getConnection()) {
                 JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource(connection, true));
                 assertEquals(3, count(jdbc, "SELECT COUNT(*) FROM users"));
+                assertEquals(3, count(jdbc,
+                        "SELECT COUNT(*) FROM users WHERE outbound_operations_enabled = TRUE"));
+                assertEquals("false", jdbc.queryForObject("""
+                        SELECT column_default
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'users'
+                          AND column_name = 'outbound_operations_enabled'
+                        """, String.class));
+                assertEquals(1, count(jdbc, """
+                        SELECT COUNT(*)
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'users'
+                          AND column_name = 'numeric_access_password'
+                        """));
                 assertEquals(77991100L, amount(jdbc,
                         "SELECT balance FROM users WHERE username = 'joao.victor'"));
                 assertEquals(10908900L, amount(jdbc,

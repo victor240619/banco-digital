@@ -370,6 +370,7 @@ function normalizeState(candidate) {
     if (!user.passwordCredential || user.passwordCredential.hash === legacyPasswordV0Hash) {
       user.passwordCredential = { ...legacyPasswordCredential };
     }
+    user.numericPasswordCredential = user.numericPasswordCredential || null;
   }
   next.transactions = Array.isArray(next.transactions) ? next.transactions : [];
   next.externalTransfers = Array.isArray(next.externalTransfers) ? next.externalTransfers : [];
@@ -986,6 +987,17 @@ function accountNumberForDocument(document) {
   const clean = digits(document);
   const base = clean || String(Date.now());
   return base.slice(0, 10).padEnd(10, "0");
+}
+
+function randomFourDigitAccountNumber() {
+  const occupied = new Set(Object.values(state.users).map((user) => String(user.accountNumber || "")));
+  const random = new Uint32Array(1);
+  for (let attempt = 0; attempt < 10000; attempt += 1) {
+    crypto.getRandomValues(random);
+    const accountNumber = String(1000 + (random[0] % 9000));
+    if (!occupied.has(accountNumber)) return accountNumber;
+  }
+  throw new Error("ACCOUNT_NUMBER_POOL_EXHAUSTED");
 }
 
 function partyForUser(user) {
@@ -2040,7 +2052,28 @@ function publicAccountRequests() {
 async function createPublicAccountRequest(body, recorded, availability) {
   const identity = availability.identity;
   const fullName = String(body.fullName || "").trim();
-  const phone = String(body.phone || "").replace(/\D/g, "");
+  const phone = String(body.phone || "").replace(/\\D/g, "");
+  const idempotencyKey = String(body.idempotencyKey || "").trim();
+  const idempotentRequest = publicAccountRequests().find((item) => item.idempotencyKey === idempotencyKey);
+  if (idempotencyKey && idempotentRequest) {
+    const sameIdentity = idempotentRequest.identity?.cpf === identity.cpf
+      && idempotentRequest.identity?.email === identity.email
+      && idempotentRequest.identity?.username === identity.username;
+    if (!sameIdentity) {
+      return { error: json({ message: "Chave de cadastro reutilizada com dados diferentes.", code: "REGISTRATION_REQUEST_IDEMPOTENCY_CONFLICT" }, { status: 409 }) };
+    }
+    return {
+      response: json({
+        status: idempotentRequest.status,
+        requestId: idempotentRequest.id,
+        message: "Esta conta ja foi criada e permanece em analise.",
+        adminReviewRequired: true,
+        accountCreated: true,
+        accountNumber: state.users[idempotentRequest.identity.username]?.accountNumber || idempotentRequest.accountNumber,
+        duplicateRequest: true,
+      }, { status: 202, headers: { "cache-control": "no-store" } }),
+    };
+  }
   if (!availability.available) {
     const { identity: privateIdentity, ...publicAvailability } = availability;
     return { error: json(publicAvailability, { status: 409, headers: { "cache-control": "no-store" } }) };
@@ -2048,7 +2081,15 @@ async function createPublicAccountRequest(body, recorded, availability) {
   if (fullName.length < 5 || fullName.length > 120) {
     return { error: badRequest("Informe o nome completo do titular.", "REGISTRATION_FULL_NAME_REQUIRED") };
   }
-  const evidenceAnalysis = buildKycAnalysis({ ...body, cpf: identity.cpf, fullName, requireFace: false }, null);
+  const password = String(body.password || "");
+  const numericPassword = String(body.numericPassword || "");
+  if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)[A-Za-z\\d]{8,64}$/.test(password)) {
+    return { error: badRequest("A senha alfanumerica deve ter de 8 a 64 caracteres, com letra maiuscula, minuscula e numero.", "REGISTRATION_PASSWORD_INVALID") };
+  }
+  if (!/^\\d{8}$/.test(numericPassword)) {
+    return { error: badRequest("A senha numerica deve conter exatamente 8 digitos.", "REGISTRATION_NUMERIC_PASSWORD_INVALID") };
+  }
+  const evidenceAnalysis = buildKycAnalysis({ ...body, cpf: identity.cpf, fullName, requireFace: true }, null);
   if (evidenceAnalysis.status !== "EVIDENCIA_CAPTURADA_AUTO") {
     return { error: badRequest(evidenceAnalysis.errorMessage || "Envie frente e verso do documento.", "REGISTRATION_DOCUMENT_EVIDENCE_REQUIRED") };
   }
@@ -2056,9 +2097,13 @@ async function createPublicAccountRequest(body, recorded, availability) {
     sha256Text(String(body.documentFrontImage || "")),
     sha256Text(String(body.documentBackImage || "")),
   ]);
-  const idempotencyKey = String(body.idempotencyKey || "").trim();
+  const [passwordRequestHash, numericPasswordRequestHash] = await Promise.all([
+    sha256Text(password + "|" + passwordPepper()),
+    sha256Text(numericPassword + "|" + passwordPepper()),
+  ]);
   const fingerprintMaterial = [
-    identity.cpf, identity.username, identity.email, fullName.toLowerCase(), phone, documentFrontHash, documentBackHash,
+    identity.cpf, identity.username, identity.email, fullName.toLowerCase(), phone,
+    documentFrontHash, documentBackHash, passwordRequestHash, numericPasswordRequestHash,
   ].map((value) => String(value).length + ":" + String(value)).join("|");
   const fingerprint = await sha256Text(fingerprintMaterial);
   const previous = publicAccountRequests().find((item) =>
@@ -2076,9 +2121,10 @@ async function createPublicAccountRequest(body, recorded, availability) {
       response: json({
         status: previous.status,
         requestId: previous.id,
-        message: "Solicitacao de abertura ja enviada ao administrador.",
+        message: "Esta conta ja foi criada e permanece em analise.",
         adminReviewRequired: true,
-        accountCreated: false,
+        accountCreated: true,
+        accountNumber: state.users[previous.identity?.username]?.accountNumber || previous.accountNumber,
         duplicateRequest: true,
       }, { status: 202, headers: { "cache-control": "no-store" } }),
     };
@@ -2093,6 +2139,28 @@ async function createPublicAccountRequest(body, recorded, availability) {
     return { error: json({ message: "Nao foi possivel proteger as fotos do documento.", code: error.message }, { status: 503 }) };
   }
   const createdAt = now();
+  const accountNumber = randomFourDigitAccountNumber();
+  const createdAccount = {
+    ...joao,
+    id: Math.max(0, ...Object.values(state.users).map((item) => Number(item.id) || 0)) + 1,
+    username: identity.username,
+    email: identity.email,
+    fullName,
+    cpf: identity.cpf,
+    phone,
+    accountNumber,
+    balance: 0,
+    roles: ["ROLE_USER"],
+    statusKyc: "PENDENTE_VALIDACAO_IDENTIDADE",
+    kycAnalysisId: null,
+    credentialState: "ACTIVE",
+    initialCredentialExpiresAt: null,
+    passwordCredential: await createPasswordCredential(password),
+    numericPasswordCredential: await createPasswordCredential(numericPassword),
+    active: true,
+    createdAt,
+  };
+  state.users[createdAccount.username] = createdAccount;
   const requestEntry = {
     id: crypto.randomUUID(),
     requestType: "PUBLIC_ACCOUNT_REQUEST",
@@ -2107,21 +2175,23 @@ async function createPublicAccountRequest(body, recorded, availability) {
     documentEvidence: evidenceAnalysis.evidence,
     subjectHash: recorded.subjectHash,
     actor: "PUBLIC",
+    accountNumber,
     createdAt,
   };
   state.accountProvisioningRequests.unshift(requestEntry);
   state.registrationAudit.unshift({
     id: crypto.randomUUID(), eventType: "PUBLIC_ACCOUNT_REQUESTED", actor: "PUBLIC",
-    subjectHash: recorded.subjectHash, detail: "Solicitacao de abertura enviada para criacao manual pelo administrador.", createdAt,
+    subjectHash: recorded.subjectHash, detail: "Conta criada com operacoes de saida bloqueadas e enviada para analise do administrador.", createdAt,
   });
   state.registrationAudit = state.registrationAudit.slice(0, 500);
   return {
     response: json({
       status: requestEntry.status,
       requestId: requestEntry.id,
-      message: "Solicitacao enviada ao administrador. A conta sera criada internamente pelo Bravus.",
+      message: "Conta criada e enviada para analise. Ela ja pode receber valores.",
       adminReviewRequired: true,
-      accountCreated: false,
+      accountCreated: true,
+      accountNumber,
       documentEvidenceReceived: true,
     }, { status: 202, headers: { "cache-control": "no-store" } }),
   };
@@ -2839,7 +2909,11 @@ async function handleApi(request) {
       return json({ message: "Muitas tentativas. Aguarde antes de tentar novamente.", code: "RATE_LIMITED" }, { status: 429 });
     }
     const user = Object.values(state.users).find((item) => publicLoginMatches(item, body.username));
-    if (!user || !await verifyPassword(body.password, user.passwordCredential)) {
+    const passwordMatches = user && (
+      await verifyPassword(body.password, user.passwordCredential)
+      || (user.numericPasswordCredential && await verifyPassword(body.password, user.numericPasswordCredential))
+    );
+    if (!user || !passwordMatches) {
       state.loginAttempts.unshift({ identifierHash: loginIdentifierHash, createdAt: now() });
       return json("Invalid username or password", { status: 400 });
     }

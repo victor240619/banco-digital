@@ -77,6 +77,7 @@ public class LocalDevDataConfig {
                 admin.setBalance(0L);
             }
             admin.setIsActive(true);
+            admin.setOutboundOperationsEnabled(true);
             admin.setStatusKyc("APROVADO_AUTO");
             Set<RoleEntity> roles = new HashSet<>();
             roles.add(adminRole);
@@ -99,6 +100,7 @@ public class LocalDevDataConfig {
                 customer.setBalance(0L);
             }
             customer.setIsActive(true);
+            customer.setOutboundOperationsEnabled(true);
             customer.setStatusKyc("APROVADO_AUTO");
             customer.setNivelConta("PREMIUM");
             customer.setChavePix(CUSTOMER_CPF);

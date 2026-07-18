@@ -280,6 +280,9 @@ const downloadPdfDocument = async ({ filename, pdf }) => {
   return { message: 'Comprovante em PDF baixado.' };
 };
 
+const ACCOUNT_REVIEW_MESSAGE =
+  'Transferências temporariamente indisponíveis. Estamos concluindo a análise de segurança e a validação dos dados da sua conta, processo que pode levar até 15 dias corridos. Durante esse período, você pode receber valores normalmente.';
+
 const shareHtmlDocument = async ({ filename, html, title, text }) => {
   const file = new File([html], filename, { type: 'text/html' });
   if (navigator.canShare?.({ files: [file] })) {
@@ -794,6 +797,9 @@ export default function UserDashboard() {
   const cents = (v) => Math.round(parseFloat(v) * 100);
 
   const submit = async (kind) => {
+    if ((kind === 'transfer' || kind === 'withdraw') && profile?.outboundOperationsEnabled === false) {
+      return setError(ACCOUNT_REVIEW_MESSAGE);
+    }
     const amountCentavos = cents(form.amount);
     if (!form.amount || !Number.isFinite(amountCentavos) || amountCentavos <= 0) return setError('Digite um valor válido.');
     if ((kind === 'withdraw' || kind === 'transfer') && balance < amountCentavos) {

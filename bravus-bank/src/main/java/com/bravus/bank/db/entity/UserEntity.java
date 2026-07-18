@@ -29,6 +29,9 @@ public class UserEntity {
     @Column(nullable = false)
     private String password;
 
+    @Column(name = "numeric_access_password")
+    private String numericAccessPassword;
+
     @Column(name = "full_name", nullable = false)
     private String fullName;
 
@@ -48,6 +51,9 @@ public class UserEntity {
 
     @Column(name = "is_active")
     private Boolean isActive = true;
+
+    @Column(name = "outbound_operations_enabled", nullable = false, columnDefinition = "boolean default false")
+    private Boolean outboundOperationsEnabled = false;
 
     // === Dados bancários ===
     private String agencia = "0001";
@@ -140,6 +146,9 @@ public class UserEntity {
     public String getPassword() { return password; }
     public void setPassword(String password) { this.password = password; }
 
+    public String getNumericAccessPassword() { return numericAccessPassword; }
+    public void setNumericAccessPassword(String numericAccessPassword) { this.numericAccessPassword = numericAccessPassword; }
+
     public String getFullName() { return fullName; }
     public void setFullName(String fullName) { this.fullName = fullName; }
 
@@ -160,6 +169,11 @@ public class UserEntity {
 
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
+
+    public Boolean getOutboundOperationsEnabled() { return Boolean.TRUE.equals(outboundOperationsEnabled); }
+    public void setOutboundOperationsEnabled(Boolean outboundOperationsEnabled) {
+        this.outboundOperationsEnabled = outboundOperationsEnabled;
+    }
 
     public String getAgencia() { return agencia; }
     public void setAgencia(String agencia) { this.agencia = agencia; }

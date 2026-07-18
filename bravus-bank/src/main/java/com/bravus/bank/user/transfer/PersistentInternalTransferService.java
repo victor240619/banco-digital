@@ -8,6 +8,7 @@ import com.bravus.bank.external.ExternalTransferEntity;
 import com.bravus.bank.external.ExternalTransferRepository;
 import com.bravus.bank.ledger.repo.CreditGrantRepository;
 import com.bravus.bank.ledger.service.CreditService;
+import com.bravus.bank.user.OutboundOperationPolicy;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -32,6 +33,7 @@ public class PersistentInternalTransferService {
     private final AccountLedgerEntryRepository accountLedgerRepository;
     private final CreditGrantRepository creditGrantRepository;
     private final CreditService creditService;
+    private final OutboundOperationPolicy outboundOperationPolicy;
 
     public PersistentInternalTransferService(
             UserRepository userRepository,
@@ -40,7 +42,8 @@ public class PersistentInternalTransferService {
             InternalTransferRequestRepository requestRepository,
             AccountLedgerEntryRepository accountLedgerRepository,
             CreditGrantRepository creditGrantRepository,
-            CreditService creditService) {
+            CreditService creditService,
+            OutboundOperationPolicy outboundOperationPolicy) {
         this.userRepository = userRepository;
         this.transactionRepository = transactionRepository;
         this.externalTransferRepository = externalTransferRepository;
@@ -48,6 +51,7 @@ public class PersistentInternalTransferService {
         this.accountLedgerRepository = accountLedgerRepository;
         this.creditGrantRepository = creditGrantRepository;
         this.creditService = creditService;
+        this.outboundOperationPolicy = outboundOperationPolicy;
     }
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
@@ -64,6 +68,7 @@ public class PersistentInternalTransferService {
         String idempotencyKey = normalizeIdempotencyKey(suppliedIdempotencyKey);
         UserEntity initialFrom = userRepository.findByUsername(username)
                 .orElseThrow(() -> new InternalTransferException("SOURCE_NOT_FOUND", "Conta de origem nao encontrada."));
+        outboundOperationPolicy.assertAllowed(initialFrom);
         UserEntity initialTo = findDestination(destination)
                 .orElseThrow(() -> new InternalTransferException(
                         "BRAVUS_DESTINATION_NOT_FOUND",

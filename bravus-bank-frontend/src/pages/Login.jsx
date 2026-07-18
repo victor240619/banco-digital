@@ -113,7 +113,7 @@ export default function Login() {
             <p className="mt-1.5 text-sm text-ink-300">
               {passwordChange
                 ? 'A senha inicial nao libera o painel. Defina uma senha forte para concluir o primeiro acesso.'
-                : 'Use suas credenciais para acessar sua conta.'}
+                : 'Use sua senha alfanumerica ou sua senha numerica de 8 digitos.'}
             </p>
           </div>
 
@@ -208,7 +208,7 @@ export default function Login() {
                 type="password"
                 value={form.password}
                 onChange={updateField('password')}
-                placeholder="Digite sua senha"
+                placeholder="Digite uma das suas senhas"
                 required
                 autoComplete="current-password"
               />

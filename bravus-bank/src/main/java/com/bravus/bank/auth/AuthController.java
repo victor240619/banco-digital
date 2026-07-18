@@ -8,14 +8,11 @@ import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.RoleRepository;
 import com.bravus.bank.db.repo.UserRepository;
 import com.bravus.bank.security.JwtService;
-import com.bravus.bank.validator.PasswordValidator;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -34,8 +31,8 @@ public class AuthController {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AccessCredentialVerifier accessCredentialVerifier;
     private final JwtService jwtService;
-    private final AuthenticationManager authenticationManager;
     private final UserDetailsService userDetailsService;
     private final DocumentAnalysisService documentAnalysisService;
     private final AccountOpeningKycService accountOpeningKycService;
@@ -45,16 +42,16 @@ public class AuthController {
             UserRepository userRepository,
             RoleRepository roleRepository,
             PasswordEncoder passwordEncoder,
+            AccessCredentialVerifier accessCredentialVerifier,
             JwtService jwtService,
-            AuthenticationManager authenticationManager,
             UserDetailsService userDetailsService,
             DocumentAnalysisService documentAnalysisService,
             AccountOpeningKycService accountOpeningKycService) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
+        this.accessCredentialVerifier = accessCredentialVerifier;
         this.jwtService = jwtService;
-        this.authenticationManager = authenticationManager;
         this.userDetailsService = userDetailsService;
         this.documentAnalysisService = documentAnalysisService;
         this.accountOpeningKycService = accountOpeningKycService;
@@ -68,7 +65,8 @@ public class AuthController {
     public record RegisterRequest(
             @NotBlank @Size(min = 3, max = 100) String username,
             @NotBlank @Email String email,
-            @NotBlank @Size(min = 8) String password,
+            @NotBlank @Size(min = 8, max = 64) String password,
+            @NotBlank @Size(min = 8, max = 8) String numericPassword,
             @NotBlank String fullName,
             String cpf,
             String phone,
@@ -77,6 +75,20 @@ public class AuthController {
             String faceImage,
             String biometricChallenge,
             String clientChannel
+    ) {}
+
+    public record RegistrationAvailabilityRequest(
+            String username,
+            String email,
+            String cpf,
+            String clientChannel
+    ) {}
+
+    public record RegistrationAvailabilityResponse(
+            boolean available,
+            boolean accountExists,
+            String code,
+            String message
     ) {}
     
     public record AuthResponse(
@@ -92,11 +104,6 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody @Valid LoginRequest request) {
         try {
-            authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(request.username(), request.password())
-            );
-            
-            UserDetails userDetails = userDetailsService.loadUserByUsername(request.username());
             String normalizedLoginDocument = normalizeDocument(request.username());
             UserEntity user = userRepository.findByUsername(request.username())
                     .or(() -> userRepository.findByEmail(request.username()))
@@ -104,6 +111,10 @@ public class AuthController {
                             ? userRepository.findByCpf(normalizedLoginDocument)
                             : java.util.Optional.empty())
                     .orElseThrow(() -> new RuntimeException("User not found"));
+            if (!Boolean.TRUE.equals(user.getIsActive()) || !accessCredentialVerifier.matches(user, request.password())) {
+                throw new RuntimeException("Invalid credentials");
+            }
+            UserDetails userDetails = userDetailsService.loadUserByUsername(user.getUsername());
             String token = jwtService.generateToken(userDetails, user.getCredentialsVersion());
             
             Set<String> roles = user.getRoles().stream()
@@ -128,9 +139,9 @@ public class AuthController {
     @Transactional
     public ResponseEntity<?> register(@RequestBody @Valid RegisterRequest request,
                                       @RequestHeader(value = "X-Bravus-Client", required = false) String bravusClient) {
-        if (!isAndroidApkRegistration(request, bravusClient)) {
+        if (!isAllowedRegistrationClient(request, bravusClient)) {
             return ResponseEntity.status(403)
-                    .body("A abertura de conta esta disponivel somente no app mobile Bravus Bank.");
+                    .body("Canal de abertura de conta nao autorizado.");
         }
         String normalizedCpf = normalizeDocument(request.cpf());
         if (normalizedCpf == null || normalizedCpf.length() != 11) {
@@ -149,9 +160,11 @@ public class AuthController {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
 
-        // Validate password strength
-        if (!PasswordValidator.isValid(request.password())) {
-            return ResponseEntity.badRequest().body(PasswordValidator.getRequirements());
+        if (!RegistrationCredentialPolicy.isValidAlphanumericPassword(request.password())) {
+            return ResponseEntity.badRequest().body("A senha alfanumerica deve ter de 8 a 64 caracteres, com letra maiuscula, minuscula e numero.");
+        }
+        if (!RegistrationCredentialPolicy.isValidNumericPassword(request.numericPassword())) {
+            return ResponseEntity.badRequest().body("A senha numerica deve conter exatamente 8 digitos.");
         }
         
         // Validate unique fields
@@ -165,8 +178,6 @@ public class AuthController {
                 && (userRepository.existsByCpf(normalizedCpf) || userRepository.existsByCpf(request.cpf()))) {
             return ResponseEntity.badRequest().body("CPF already registered");
         }
-        
-        // Generate unique account number
         String accountNumber = generateAccountNumber();
         
         // Create user
@@ -174,12 +185,14 @@ public class AuthController {
         user.setUsername(request.username());
         user.setEmail(request.email());
         user.setPassword(passwordEncoder.encode(request.password()));
+        user.setNumericAccessPassword(passwordEncoder.encode(request.numericPassword()));
         user.setFullName(request.fullName());
         user.setCpf(normalizedCpf);
         user.setPhone(request.phone());
         user.setAccountNumber(accountNumber);
         user.setBalance(0L);
         user.setIsActive(true);
+        user.setOutboundOperationsEnabled(false);
         
         // Assign USER role
         RoleEntity userRole = roleRepository.findByName("ROLE_USER")
@@ -214,14 +227,35 @@ public class AuthController {
         ));
     }
     
+    @PostMapping("/register/availability")
+    public ResponseEntity<RegistrationAvailabilityResponse> registrationAvailability(
+            @RequestBody RegistrationAvailabilityRequest request) {
+        String normalizedCpf = normalizeDocument(request.cpf());
+        if (normalizedCpf != null && normalizedCpf.length() == 11 && userRepository.existsByCpf(normalizedCpf)) {
+            return ResponseEntity.ok(new RegistrationAvailabilityResponse(false, true,
+                    "ACCOUNT_ALREADY_EXISTS", "Ja existe uma conta vinculada a este CPF."));
+        }
+        if (request.username() != null && !request.username().isBlank()
+                && userRepository.existsByUsername(request.username().trim().toLowerCase())) {
+            return ResponseEntity.ok(new RegistrationAvailabilityResponse(false, false,
+                    "USERNAME_ALREADY_EXISTS", "Este nome de usuario ja esta em uso."));
+        }
+        if (request.email() != null && !request.email().isBlank()
+                && userRepository.existsByEmail(request.email().trim().toLowerCase())) {
+            return ResponseEntity.ok(new RegistrationAvailabilityResponse(false, false,
+                    "EMAIL_ALREADY_EXISTS", "Este e-mail ja esta em uso."));
+        }
+        return ResponseEntity.ok(new RegistrationAvailabilityResponse(true, false,
+                "AVAILABLE", "Dados disponiveis para abertura da conta."));
+    }
+
     private String generateAccountNumber() {
-        String accountNumber;
-        do {
-            // Generate cryptographically secure random account number
-            long randomNumber = Math.abs(secureRandom.nextLong()) % 10000000000L;
-            accountNumber = String.format("%010d", randomNumber);
-        } while (userRepository.existsByAccountNumber(accountNumber));
-        return accountNumber;
+        int start = secureRandom.nextInt(10_000);
+        for (int offset = 0; offset < 10_000; offset++) {
+            String candidate = String.format("%04d", (start + offset) % 10_000);
+            if (!userRepository.existsByAccountNumber(candidate)) return candidate;
+        }
+        throw new IllegalStateException("Nao ha numeros de conta de 4 digitos disponiveis.");
     }
 
     private String normalizeDocument(String value) {
@@ -237,7 +271,11 @@ public class AuthController {
         return "BLOQUEADO_ANALISE";
     }
 
-    private boolean isAndroidApkRegistration(RegisterRequest request, String bravusClient) {
+    private boolean isAllowedRegistrationClient(RegisterRequest request, String bravusClient) {
+        if ((bravusClient == null || bravusClient.isBlank())
+                && "WEB".equalsIgnoreCase(request.clientChannel())) {
+            return true;
+        }
         if ("android-apk".equalsIgnoreCase(bravusClient)
                 && "ANDROID_APK".equalsIgnoreCase(request.clientChannel())) {
             return true;

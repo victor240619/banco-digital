@@ -8,6 +8,7 @@ import com.bravus.bank.db.repo.UserRepository;
 import com.bravus.bank.globalrail.GlobalRailService;
 import com.bravus.bank.ledger.repo.CreditGrantRepository;
 import com.bravus.bank.ledger.service.CreditService;
+import com.bravus.bank.user.OutboundOperationPolicy;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -27,6 +28,7 @@ public class ExternalTransferService {
     private final BankingTransferProvider bankingProvider;
     private final DocumentAnalysisService documentAnalysisService;
     private final GlobalRailService globalRailService;
+    private final OutboundOperationPolicy outboundOperationPolicy;
 
     public ExternalTransferService(ExternalTransferRepository transferRepo,
                                    UserRepository userRepo,
@@ -35,7 +37,8 @@ public class ExternalTransferService {
                                    CreditService creditService,
                                    BankingTransferProvider bankingProvider,
                                    DocumentAnalysisService documentAnalysisService,
-                                   GlobalRailService globalRailService) {
+                                   GlobalRailService globalRailService,
+                                   OutboundOperationPolicy outboundOperationPolicy) {
         this.transferRepo = transferRepo;
         this.userRepo = userRepo;
         this.transactionRepo = transactionRepo;
@@ -44,6 +47,7 @@ public class ExternalTransferService {
         this.bankingProvider = bankingProvider;
         this.documentAnalysisService = documentAnalysisService;
         this.globalRailService = globalRailService;
+        this.outboundOperationPolicy = outboundOperationPolicy;
     }
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
@@ -68,6 +72,7 @@ public class ExternalTransferService {
 
         UserEntity user = userRepo.findById(cmd.userId)
                 .orElseThrow(() -> new IllegalArgumentException("Usuario nao encontrado: " + cmd.userId));
+        outboundOperationPolicy.assertAllowed(user);
         UserEntity requestedBy = userRepo.findByUsername(requestedByUsername).orElse(null);
         documentAnalysisService.assertApprovedForUser(user);
 
