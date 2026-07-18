@@ -62,6 +62,7 @@ export default function Register() {
   const location = useLocation();
   const navigate = useNavigate();
   const availabilityRequestRef = useRef(0);
+  const validatedIdentityRef = useRef('');
   const requestKeyRef = useRef('');
   const [formData, setFormData] = useState(() => loadRegistrationDraft());
   const [documents, setDocuments] = useState({ documentFrontImage: '', documentBackImage: '', faceImage: '' });
@@ -82,6 +83,8 @@ export default function Register() {
     const requestId = availabilityRequestRef.current + 1;
     availabilityRequestRef.current = requestId;
     const identity = registrationPayload();
+    const identityKey = JSON.stringify(identity);
+    if (requireComplete && validatedIdentityRef.current === identityKey) return true;
     if (requireComplete && (identity.username.length < 3 || !identity.email || identity.cpf.length !== 11)) {
       setError('Preencha usuario, e-mail e CPF antes de abrir a conta.');
       return false;
@@ -96,6 +99,7 @@ export default function Register() {
         accountExists: Boolean(result.accountExists),
         message: result.message || '',
       });
+      validatedIdentityRef.current = result.available ? identityKey : '';
       if (hasConflict || (requireComplete && !result.available)) setError(result.message || 'Revise os dados antes de continuar.');
       return Boolean(result.available);
     } catch (err) {
@@ -103,6 +107,7 @@ export default function Register() {
       const payload = err?.response?.data;
       const message = typeof payload === 'string' ? payload : payload?.message;
       setAvailability({ status: 'error', accountExists: false, message: message || 'Falha ao verificar os dados.' });
+      validatedIdentityRef.current = '';
       if (requireComplete) setError(message || 'Falha ao verificar os dados.');
       return false;
     }
@@ -118,6 +123,7 @@ export default function Register() {
     setFormData((current) => ({ ...current, [name]: nextValue }));
     if (['username', 'email', 'cpf'].includes(name)) {
       requestKeyRef.current = '';
+      validatedIdentityRef.current = '';
       availabilityRequestRef.current += 1;
       setAvailability({ status: 'idle', accountExists: false, message: '' });
     }

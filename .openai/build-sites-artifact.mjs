@@ -2010,7 +2010,7 @@ function registrationAvailability(body) {
     message = "Este e-mail ja esta vinculado a uma conta. Entre ou redefina a senha.";
   } else if (Object.keys(fieldErrors).length) {
     code = "REGISTRATION_INVALID_INPUT";
-    message = "Revise os dados antes de continuar.";
+    message = Object.values(fieldErrors).join(" ");
   }
   return {
     available: !conflict && Object.keys(fieldErrors).length === 0,
@@ -2033,10 +2033,19 @@ async function recordRegistrationCheck(request, availability) {
     .filter((item) => new Date(item.createdAt).getTime() >= cutoff)
     .slice(0, 299);
   const actorHash = await sha256Text(request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "mobile-client");
+  const subjectHash = await registrationSubjectHash(availability.identity);
+  const repeatedCheck = state.registrationChecks.find((item) =>
+    item.actorHash === actorHash
+    && item.subjectHash === subjectHash
+    && item.outcome === availability.code
+    && Date.now() - new Date(item.createdAt).getTime() < 30 * 1000
+  );
+  if (repeatedCheck) {
+    return { rateLimited: false, actorHash, subjectHash, idempotentReplay: true };
+  }
   if (state.registrationChecks.filter((item) => item.actorHash === actorHash).length >= 15) {
     return { rateLimited: true, actorHash };
   }
-  const subjectHash = await registrationSubjectHash(availability.identity);
   state.registrationChecks.unshift({
     id: crypto.randomUUID(), actorHash, subjectHash, outcome: availability.code, createdAt: now(),
   });

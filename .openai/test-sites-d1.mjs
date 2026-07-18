@@ -383,6 +383,20 @@ const available = await call(worker, "POST", "/auth/register/availability", {
 });
 assert.equal(available.response.status, 200);
 assert.equal(available.data.available, true, JSON.stringify(available.data));
+for (let attempt = 0; attempt < 20; attempt += 1) {
+  const replayedAvailability = await call(worker, "POST", "/auth/register/availability", {
+    headers: mobileHeaders,
+    body: registrationIdentity,
+  });
+  assert.equal(replayedAvailability.response.status, 200, "repeated validation of unchanged data must not consume the rate limit");
+  assert.equal(replayedAvailability.data.available, true);
+}
+const invalidAvailability = await call(worker, "POST", "/auth/register/availability", {
+  headers: mobileHeaders,
+  body: { ...registrationIdentity, cpf: "11111111111" },
+});
+assert.equal(invalidAvailability.response.status, 200);
+assert.equal(invalidAvailability.data.message, "Informe um CPF valido.", "invalid fields must return the specific review reason");
 const webAvailability = await call(worker, "POST", "/auth/register/availability", { body: registrationIdentity });
 assert.equal(webAvailability.response.status, 200, "web clients may submit account opening requests without creating accounts");
 
