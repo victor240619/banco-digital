@@ -4858,6 +4858,13 @@ export default {
     const servedFile = file.alias ? files[file.alias] : file;
     if (!servedFile?.body) return new Response("Not found", { status: 404 });
     const headers = { "content-type": file.type };
+    if (servedFile.type === "text/html; charset=utf-8") {
+      headers["cache-control"] = "no-store, no-cache, must-revalidate";
+      headers.pragma = "no-cache";
+      headers.expires = "0";
+    } else if (requestedPath.startsWith("/assets/")) {
+      headers["cache-control"] = "public, max-age=31536000, immutable";
+    }
     if (file.type === "application/vnd.android.package-archive") {
       headers["content-disposition"] = 'attachment; filename="' + (requestedPath.split("/").pop() || "bravus-bank.apk") + '"';
       headers["x-content-type-options"] = "nosniff";

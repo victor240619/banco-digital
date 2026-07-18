@@ -338,6 +338,10 @@ async function call(worker, method, path, { token, body, headers = {} } = {}) {
   return { response, data };
 }
 
+async function callPage(worker, path) {
+  return worker.fetch(new Request("https://bravus.test" + path), env);
+}
+
 function image(byte, length, width = 640, height = 480) {
   const value = Buffer.alloc(length, byte);
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(value, 0);
@@ -348,6 +352,10 @@ function image(byte, length, width = 640, height = 480) {
 }
 
 let worker = await loadWorker("initial");
+const dashboardShell = await callPage(worker, "/dashboard");
+assert.equal(dashboardShell.status, 200);
+assert.match(dashboardShell.headers.get("content-type") || "", /^text\/html/);
+assert.match(dashboardShell.headers.get("cache-control") || "", /no-store/);
 const unavailable = await worker.fetch(new Request("https://bravus.test/api/auth/login", {
   method: "POST",
   headers: { "content-type": "application/json" },
