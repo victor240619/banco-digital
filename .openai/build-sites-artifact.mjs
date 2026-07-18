@@ -210,6 +210,7 @@ const entrypoint = `const buildTarget = "bravus-sites-api-d1-v2";
 const files = ${JSON.stringify(files)};
 const liveSeed = ${JSON.stringify(liveSeed)};
 const now = () => new Date().toISOString();
+const registrationCheckDeduplicationMs = 30 * 1000;
 const institutionalReserveSeed = Object.freeze({
   code: "BRAVUS_INSTITUTIONAL_RESERVE",
   name: "Reserva Institucional Bravus",
@@ -2038,7 +2039,7 @@ async function recordRegistrationCheck(request, availability) {
     item.actorHash === actorHash
     && item.subjectHash === subjectHash
     && item.outcome === availability.code
-    && Date.now() - new Date(item.createdAt).getTime() < 30 * 1000
+    && Date.now() - new Date(item.createdAt).getTime() < registrationCheckDeduplicationMs
   );
   if (repeatedCheck) {
     return { rateLimited: false, actorHash, subjectHash, idempotentReplay: true };
