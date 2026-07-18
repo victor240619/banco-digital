@@ -656,6 +656,29 @@ const buildStatementDocument = ({ months, transactions, me, profile, user }) => 
   };
 };
 
+const waitForAccountRetry = (delayMs) => new Promise((resolve) => {
+  window.setTimeout(resolve, delayMs);
+});
+
+const shouldRetryAccountRequest = (error) => {
+  const status = error?.response?.status;
+  return !status || status === 408 || status === 429 || status >= 500;
+};
+
+const requestAccountData = async (request, attempts = 3) => {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await request();
+    } catch (error) {
+      lastError = error;
+      if (!shouldRetryAccountRequest(error) || attempt === attempts - 1) throw error;
+      await waitForAccountRetry(350 * (attempt + 1));
+    }
+  }
+  throw lastError;
+};
+
 // ============ Component ============
 export default function UserDashboard() {
   const initialRouteState = routeStateForPath(typeof window !== 'undefined' ? window.location.pathname : '/dashboard');
@@ -780,9 +803,9 @@ export default function UserDashboard() {
       try {
         if (!silent) setLoading(true);
         const [profileRes, meRes, txRes, creditRes, externalRes] = await Promise.all([
-          userService.getProfile(),
+          requestAccountData(() => userService.getProfile()),
           userService.getMe().catch(() => ({ data: null })),
-          userService.getTransactions(),
+          requestAccountData(() => userService.getTransactions()),
           userService.getCreditSummary().catch(() => ({ data: null })),
           userService.getExternalTransfers(8).catch(() => ({ data: [] })),
         ]);
@@ -1057,8 +1080,24 @@ export default function UserDashboard() {
     );
   }
 
+  if (!profile) {
+    return (
+      <main className="container-app native-safe-bottom py-8 lg:py-12">
+        <section className="mx-auto max-w-xl border border-white/10 bg-surface-900 p-6 shadow-card">
+          <h1 className="text-xl font-semibold text-white">Não foi possível carregar sua conta</h1>
+          <p className="mt-2 text-sm leading-6 text-ink-300">
+            Seus dados permanecem protegidos. Verifique a conexão e tente carregar novamente.
+          </p>
+          <button type="button" className="btn-primary mt-5" onClick={() => loadData({ force: true })}>
+            Tentar novamente
+          </button>
+        </section>
+      </main>
+    );
+  }
+
   const balance = profile?.balance ?? 0;
-  const accountNumber = profile?.accountNumber || profile?.customerCode || '0000-0000-00';
+  const accountNumber = profile.accountNumber || profile.customerCode || '-';
   const creditAvailable = creditSummary?.creditoDisponivelCentavos ?? 0;
   const creditGranted = creditSummary?.creditoTotalConcedidoCentavos ?? 0;
   const creditUsed = creditSummary?.creditoTotalUsadoCentavos ?? 0;
