@@ -72,6 +72,7 @@ async function fetchLiveJson(path, token = "sites-admin-token") {
   try {
     const response = await fetch(url, {
       headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8000),
     });
     if (!response.ok) {
       throw new Error(`snapshot ${path} returned ${response.status}`);
@@ -80,7 +81,8 @@ async function fetchLiveJson(path, token = "sites-admin-token") {
   } catch (error) {
     const curl = process.platform === "win32" ? "curl.exe" : "curl";
     const tlsArgs = process.platform === "win32" ? ["--ssl-no-revoke"] : [];
-    const body = await command(curl, ["-fsSL", ...tlsArgs, "-H", `authorization: Bearer ${token}`, url]);
+    const timeoutArgs = ["--connect-timeout", "4", "--max-time", "8"];
+    const body = await command(curl, ["-fsSL", ...tlsArgs, ...timeoutArgs, "-H", `authorization: Bearer ${token}`, url]);
     return JSON.parse(body);
   }
 }
