@@ -361,6 +361,47 @@ const joaoToken = joaoLogin.data.token;
 const joaoBefore = await call(worker, "GET", "/user/balance", { token: joaoToken });
 let adminLogin = await call(worker, "POST", "/auth/login", { body: { username: "admin@bravusbank.com", password: "6run0955" } });
 assert.equal(adminLogin.response.status, 200);
+const institutionMe = await call(worker, "GET", "/user/me", { token: joaoToken });
+assert.equal(institutionMe.response.status, 200);
+assert.equal(institutionMe.data.dadosBancarios.swiftBic, "BRAVKYK0XXX");
+assert.equal(institutionMe.data.dadosBancarios.swiftBicStatus, "INTERNAL_TEST_ONLY_UNREGISTERED");
+assert.equal(institutionMe.data.dadosBancarios.swiftBicRegistered, false);
+assert.equal(institutionMe.data.dadosBancarios.swiftExternalRoutingEnabled, false);
+assert.equal(institutionMe.data.dadosBancarios.internalRoutingCode, "BRAV-KY-INTERNAL");
+const caymanReadiness = await call(worker, "GET", "/admin/cayman-rail/readiness", { token: adminLogin.data.token });
+assert.equal(caymanReadiness.response.status, 200);
+assert.equal(caymanReadiness.data.institution.swiftBic, "BRAVKYK0XXX");
+assert.equal(caymanReadiness.data.productionReady, false);
+const rejectedSelfDeclaredBic = await call(worker, "POST", "/admin/global-rail/participants", {
+  token: adminLogin.data.token,
+  body: {
+    participantCode: "BRAVUS-CAYMAN",
+    legalName: "Bravus Premium Bank",
+    country: "KY",
+    network: "CAYMAN_RAIL",
+    bankCode: "999",
+    swiftBic: "BRAVKYKYXXX",
+    connectionMode: "SELF_LEDGER",
+  },
+});
+assert.equal(rejectedSelfDeclaredBic.response.status, 400);
+assert.equal(rejectedSelfDeclaredBic.data.code, "SWIFT_BIC_NOT_EXTERNAL");
+const externalCaymanBic = await call(worker, "POST", "/admin/global-rail/participants", {
+  token: adminLogin.data.token,
+  body: {
+    participantCode: "CAYMAN-NATIONAL-REFERENCE",
+    legalName: "Cayman National Bank Ltd.",
+    country: "KY",
+    network: "SWIFT",
+    swiftBic: "CNATKYKYXXX",
+    connectionMode: "MANUAL_CONFIRMATION",
+    status: "DRAFT",
+  },
+});
+assert.equal(externalCaymanBic.response.status, 200);
+assert.equal(externalCaymanBic.data.swiftBic, "CNATKYKYXXX");
+assert.equal(externalCaymanBic.data.swiftBicStatus, "EXTERNAL_DECLARED_UNVERIFIED");
+assert.equal(externalCaymanBic.data.swiftExternalRoutingEnabled, false);
 
 const mobileHeaders = { "x-bravus-client": "android-apk" };
 const registrationIdentity = {

@@ -60,3 +60,16 @@ O sistema so considera o trilho pronto quando:
 - Existe pelo menos um participante `ACTIVE`.
 
 Sem isso, ordens ficam bloqueadas para dinheiro real.
+
+## Identidade de roteamento
+
+- `BRAV-KY-INTERNAL` e o identificador interno do Bravus no Cayman Rail.
+- Ele nao e um BIC e nao deve ser informado a terceiros como codigo SWIFT.
+- `BRAVKYK0XXX` e o BIC interno de teste do sistema. A posicao 8 igual a `0`
+  identifica o uso exclusivo de teste e treinamento.
+- O perfil publica `swiftBicStatus = INTERNAL_TEST_ONLY_UNREGISTERED`,
+  `swiftBicRegistered = false`, `swiftConnected = false` e
+  `swiftExternalRoutingEnabled = false` ate a emissao oficial pela SWIFT.
+- BICs de participantes externos aceitam somente 8 ou 11 caracteres no formato
+  ISO 9362 e precisam conter o mesmo codigo de pais do participante.
+- Um BIC nao pode ser autodeclarado para um participante controlado pelo Bravus.

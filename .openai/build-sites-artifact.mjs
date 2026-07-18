@@ -210,6 +210,17 @@ const entrypoint = `const buildTarget = "bravus-sites-api-d1-v2";
 const files = ${JSON.stringify(files)};
 const liveSeed = ${JSON.stringify(liveSeed)};
 const now = () => new Date().toISOString();
+const bravusInstitutionProfile = Object.freeze({
+  institutionName: "Bravus Premium Bank",
+  countryCode: "KY",
+  currency: "KYD",
+  internalRoutingCode: "BRAV-KY-INTERNAL",
+  swiftBic: "BRAVKYK0XXX",
+  swiftBicStatus: "INTERNAL_TEST_ONLY_UNREGISTERED",
+  swiftBicRegistered: false,
+  swiftConnected: false,
+  swiftExternalRoutingEnabled: false,
+});
 const registrationCheckDeduplicationMs = 30 * 1000;
 const institutionalReserveSeed = Object.freeze({
   code: "BRAVUS_INSTITUTIONAL_RESERVE",
@@ -339,8 +350,12 @@ const initialStateSeed = {
     network: "INTERNAL_BRAVUS",
     bankCode: "999",
     ispb: "99999999",
-    swiftBic: "",
-    routingCode: "",
+    swiftBic: "BRAVKYK0XXX",
+    swiftBicStatus: "INTERNAL_TEST_ONLY_UNREGISTERED",
+    swiftBicRegistered: false,
+    swiftConnected: false,
+    swiftExternalRoutingEnabled: false,
+    routingCode: "BRAV-KY-INTERNAL",
     endpointUrl: "",
     authMode: "NONE",
     connectionMode: "SELF_LEDGER",
@@ -418,6 +433,15 @@ function normalizeState(candidate) {
   next.globalRailParticipants = Array.isArray(next.globalRailParticipants) && next.globalRailParticipants.length
     ? next.globalRailParticipants
     : structuredClone(initialStateSeed.globalRailParticipants);
+  for (const participant of next.globalRailParticipants) {
+    if (!isBravusOwned(participant)) continue;
+    participant.routingCode = participant.routingCode || bravusInstitutionProfile.internalRoutingCode;
+    participant.swiftBic = bravusInstitutionProfile.swiftBic;
+    participant.swiftBicStatus = bravusInstitutionProfile.swiftBicStatus;
+    participant.swiftBicRegistered = false;
+    participant.swiftConnected = false;
+    participant.swiftExternalRoutingEnabled = false;
+  }
   joaoCreditGrant = next.creditGrant;
   return next;
 }
@@ -1011,6 +1035,14 @@ function partyForUser(user) {
     bankName: "Bravus Premium Bank",
     bankCode: "999",
     ispb: "99999999",
+    countryCode: bravusInstitutionProfile.countryCode,
+    currency: bravusInstitutionProfile.currency,
+    internalRoutingCode: bravusInstitutionProfile.internalRoutingCode,
+    swiftBic: bravusInstitutionProfile.swiftBic,
+    swiftBicStatus: bravusInstitutionProfile.swiftBicStatus,
+    swiftBicRegistered: false,
+    swiftConnected: false,
+    swiftExternalRoutingEnabled: false,
     agency: "0001",
     accountNumber: user.accountNumber,
     accountDigit: null,
@@ -1030,6 +1062,14 @@ function recipientViewForUser(user) {
     bankName: party.bankName,
     bankCode: party.bankCode,
     ispb: party.ispb,
+    countryCode: party.countryCode,
+    currency: party.currency,
+    internalRoutingCode: party.internalRoutingCode,
+    swiftBic: party.swiftBic,
+    swiftBicStatus: party.swiftBicStatus,
+    swiftBicRegistered: party.swiftBicRegistered,
+    swiftConnected: party.swiftConnected,
+    swiftExternalRoutingEnabled: party.swiftExternalRoutingEnabled,
     agency: party.agency,
     accountNumber: party.accountNumber,
     accountDigit: party.accountDigit,
@@ -1675,6 +1715,28 @@ function inferNetwork(body) {
   return channel;
 }
 
+function normalizeExternalBic(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function externalBicValidationError(value, country, bravusOwned) {
+  const bic = normalizeExternalBic(value);
+  if (!bic) return null;
+  if (bravusOwned) {
+    return "O BIC " + bravusInstitutionProfile.swiftBic
+      + " e interno e nao registrado. Use " + bravusInstitutionProfile.internalRoutingCode
+      + " ate a emissao oficial pela SWIFT.";
+  }
+  if (!/^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?$/.test(bic)) {
+    return "BIC externo invalido. Informe 8 ou 11 caracteres no formato ISO 9362.";
+  }
+  const normalizedCountry = String(country || "").trim().toUpperCase();
+  if (normalizedCountry.length === 2 && bic.slice(4, 6) !== normalizedCountry) {
+    return "O pais do BIC externo deve corresponder ao pais do participante.";
+  }
+  return null;
+}
+
 function isBravusOwned(participant) {
   if (!participant) return false;
   return String(participant.participantCode || "").startsWith("BRAVUS")
@@ -1742,6 +1804,14 @@ function bankMe(user) {
       nomeBanco: "Bravus Premium Bank",
       codigoBanco: "999",
       ispb: "99999999",
+      countryCode: bravusInstitutionProfile.countryCode,
+      currency: bravusInstitutionProfile.currency,
+      internalRoutingCode: bravusInstitutionProfile.internalRoutingCode,
+      swiftBic: bravusInstitutionProfile.swiftBic,
+      swiftBicStatus: bravusInstitutionProfile.swiftBicStatus,
+      swiftBicRegistered: false,
+      swiftConnected: false,
+      swiftExternalRoutingEnabled: false,
       agencia: "0001",
       conta: user.accountNumber,
       contaFormatada: user.accountNumber.slice(0, -1) + "-" + user.accountNumber.slice(-1),
@@ -4538,6 +4608,14 @@ async function handleApi(request) {
     if (!participantCode || !body.legalName) return json("Codigo e nome legal sao obrigatorios.", { status: 400 });
     const network = String(body.network || "GLOBAL").trim().toUpperCase();
     const connectionMode = String(body.connectionMode || "MANUAL_CONFIRMATION").trim().toUpperCase();
+    const country = String(body.country || "KY").toUpperCase().slice(0, 2);
+    const swiftBic = normalizeExternalBic(body.swiftBic);
+    const bicError = externalBicValidationError(swiftBic, country, isBravusOwned({
+      participantCode,
+      bankCode: body.bankCode,
+      network,
+    }));
+    if (bicError) return json({ message: bicError, code: "SWIFT_BIC_NOT_EXTERNAL" }, { status: 400 });
     if (connectionMode === "SELF_LEDGER" && !participantCode.startsWith("BRAVUS") && body.bankCode !== "999" && network !== "INTERNAL_BRAVUS") {
       return json("SELF_LEDGER so pode ser usado em participante controlado pelo Bravus.", { status: 400 });
     }
@@ -4549,11 +4627,15 @@ async function handleApi(request) {
     Object.assign(participant, {
       participantCode,
       legalName: String(body.legalName),
-      country: String(body.country || "KY").toUpperCase().slice(0, 2),
+      country,
       network,
       bankCode: body.bankCode || null,
       ispb: body.ispb || null,
-      swiftBic: body.swiftBic || null,
+      swiftBic: swiftBic || null,
+      swiftBicStatus: swiftBic ? "EXTERNAL_DECLARED_UNVERIFIED" : "NOT_PROVIDED",
+      swiftBicRegistered: false,
+      swiftConnected: false,
+      swiftExternalRoutingEnabled: false,
       routingCode: body.routingCode || null,
       endpointUrl: body.endpointUrl || null,
       authMode: String(body.authMode || "NONE").toUpperCase(),
@@ -4579,9 +4661,31 @@ async function handleApi(request) {
     order.settlementMessage = body.message || "Liquidacao externa confirmada por participante/conector.";
     return json(order);
   }
-  if (request.method === "GET" && path === "/admin/cayman-rail/config") return json({ enabled: false, jurisdiction: "Cayman Islands" });
-  if (request.method === "GET" && path === "/admin/cayman-rail/readiness") return json({ ready: false, message: "Conector real nao configurado no ChatGPT Sites." });
-  if (request.method === "GET" && path === "/admin/cayman-rail/participants") return json([]);
+  if (request.method === "GET" && path === "/admin/cayman-rail/config") return json({
+    id: 1,
+    enabled: true,
+    legalEntityName: "Bravus Premium Bank",
+    jurisdiction: "Cayman Islands",
+    regulatoryStatus: "DRAFT",
+    settlementMode: "INTERNAL_ONLY",
+    productionEnabled: false,
+    institution: bravusInstitutionProfile,
+  });
+  if (request.method === "GET" && path === "/admin/cayman-rail/readiness") return json({
+    ready: false,
+    productionReady: false,
+    companyRegistered: false,
+    cimaLicensed: false,
+    liveSettlement: false,
+    activeParticipants: state.globalRailParticipants.filter((item) => item.status === "ACTIVE").length,
+    blockedInstructions: 0,
+    gate: "LICENSE_REQUIRED",
+    institution: bravusInstitutionProfile,
+    message: "BIC interno configurado. Rede SWIFT externa bloqueada ate registro e habilitacao oficiais.",
+  });
+  if (request.method === "GET" && path === "/admin/cayman-rail/participants") return json(
+    state.globalRailParticipants.filter((item) => item.country === "KY")
+  );
   if (request.method === "GET" && path.startsWith("/admin/cayman-rail/instructions")) return json([]);
   if (request.method === "POST" && path === "/admin/search/unified") {
     const body = await request.json().catch(() => ({}));

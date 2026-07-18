@@ -4,6 +4,7 @@ import com.bravus.bank.external.BankingTransferProvider;
 import com.bravus.bank.external.ExternalTransferEntity;
 import com.bravus.bank.external.ExternalTransferRepository;
 import com.bravus.bank.external.ExternalTransferService;
+import com.bravus.bank.identity.InstitutionRoutingProfile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,11 +53,13 @@ public class GlobalRailService {
 
         participant.setParticipantCode(code);
         participant.setLegalName(cmd.legalName.trim());
-        participant.setCountry(upperOrDefault(cmd.country, "KY"));
+        String country = upperOrDefault(cmd.country, "KY");
+        boolean bravusOwned = isBravusOwned(code, cmd.bankCode, network);
+        participant.setCountry(country);
         participant.setNetwork(network);
         participant.setBankCode(clean(cmd.bankCode));
         participant.setIspb(clean(cmd.ispb));
-        participant.setSwiftBic(upper(clean(cmd.swiftBic)));
+        participant.setSwiftBic(InstitutionRoutingProfile.validateExternalBic(cmd.swiftBic, country, bravusOwned));
         participant.setRoutingCode(clean(cmd.routingCode));
         participant.setEndpointUrl(endpointUrl);
         participant.setAuthMode(upperOrDefault(cmd.authMode, "NONE"));

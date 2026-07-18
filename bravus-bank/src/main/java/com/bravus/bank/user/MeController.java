@@ -2,6 +2,7 @@ package com.bravus.bank.user;
 
 import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.UserRepository;
+import com.bravus.bank.identity.InstitutionRoutingProfile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -52,6 +53,14 @@ public class MeController {
         banco.put("tipoConta", u.getAccountType());
         banco.put("chavePix", u.getChavePix());
         banco.put("tipoChavePix", u.getTipoChavePix());
+        banco.put("countryCode", InstitutionRoutingProfile.COUNTRY_CODE);
+        banco.put("currency", InstitutionRoutingProfile.CURRENCY);
+        banco.put("internalRoutingCode", InstitutionRoutingProfile.INTERNAL_ROUTING_CODE);
+        banco.put("swiftBic", InstitutionRoutingProfile.INTERNAL_SWIFT_BIC);
+        banco.put("swiftBicStatus", InstitutionRoutingProfile.SWIFT_BIC_STATUS);
+        banco.put("swiftBicRegistered", false);
+        banco.put("swiftConnected", false);
+        banco.put("swiftExternalRoutingEnabled", false);
         out.put("dadosBancarios", banco);
 
         // Saldos e limites

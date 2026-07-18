@@ -4,6 +4,7 @@ import com.bravus.bank.compliance.DocumentAnalysisEntity;
 import com.bravus.bank.compliance.DocumentAnalysisService;
 import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.UserRepository;
+import com.bravus.bank.identity.InstitutionRoutingProfile;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -80,6 +81,7 @@ public class CaymanRailService {
         result.put("blockedInstructions", blockedInstructions);
         result.put("productionReady", productionReady);
         result.put("gate", productionReady ? "READY" : "LICENSE_REQUIRED");
+        result.put("institution", InstitutionRoutingProfile.publicView());
         result.put("message", productionReady
                 ? "Trilho Cayman liberado para liquidacao licenciada."
                 : "Trilho Cayman bloqueado para dinheiro real ate registro, licenca CIMA, modo LIVE_LICENSED e participante ativo.");
@@ -103,9 +105,12 @@ public class CaymanRailService {
         CaymanRailParticipantEntity participant = new CaymanRailParticipantEntity();
         participant.setParticipantCode(code);
         participant.setLegalName(cmd.legalName.trim());
-        participant.setInstitutionType(upperOrDefault(cmd.institutionType, "INTERNAL"));
-        participant.setCountry(upperOrDefault(cmd.country, "KY"));
-        participant.setSwiftBic(upper(clean(cmd.swiftBic)));
+        String country = upperOrDefault(cmd.country, "KY");
+        String institutionType = upperOrDefault(cmd.institutionType, "INTERNAL");
+        boolean bravusOwned = code.startsWith("BRAVUS") || "INTERNAL".equals(institutionType);
+        participant.setInstitutionType(institutionType);
+        participant.setCountry(country);
+        participant.setSwiftBic(InstitutionRoutingProfile.validateExternalBic(cmd.swiftBic, country, bravusOwned));
         participant.setLocalRoutingCode(clean(cmd.localRoutingCode));
         participant.setSettlementAccount(clean(cmd.settlementAccount));
         participant.setDirectParticipant(Boolean.TRUE.equals(cmd.directParticipant));

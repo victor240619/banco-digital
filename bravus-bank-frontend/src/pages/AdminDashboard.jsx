@@ -2212,6 +2212,13 @@ function GlobalRailView({ participants, transfers, onSuccess, onError }) {
 function CaymanRailView({ rail, users, onSuccess, onError }) {
   const cfg = rail?.config || {};
   const ready = rail?.readiness || {};
+  const institution = ready?.institution || cfg?.institution || {
+    internalRoutingCode: 'BRAV-KY-INTERNAL',
+    swiftBic: 'BRAVKYK0XXX',
+    swiftBicStatus: 'INTERNAL_TEST_ONLY_UNREGISTERED',
+    swiftConnected: false,
+    swiftExternalRoutingEnabled: false,
+  };
   const participants = rail?.participants || [];
   const instructions = rail?.instructions || [];
   const userOptions = users.filter((u) => !u.roles?.some?.((r) => r.includes?.('ADMIN')));
@@ -2339,6 +2346,17 @@ function CaymanRailView({ rail, users, onSuccess, onError }) {
             <Landmark className="h-5 w-5 text-amber-300" />
             <h3 className="font-display text-lg font-semibold">Trilho Cayman</h3>
           </div>
+          <div className="grid md:grid-cols-2 gap-4 border-y border-white/10 py-4">
+            <Field label="Roteamento interno Cayman">
+              <input className="input-premium w-full font-mono" value={institution.internalRoutingCode} readOnly />
+            </Field>
+            <Field label="SWIFT/BIC interno de homologacao">
+              <input className="input-premium w-full font-mono" value={institution.swiftBic} readOnly />
+            </Field>
+            <div className="md:col-span-2 text-xs text-amber-200/80">
+              {institution.swiftBicStatus} · rede SWIFT externa {institution.swiftExternalRoutingEnabled ? 'habilitada' : 'bloqueada'}
+            </div>
+          </div>
           <div className="grid md:grid-cols-2 gap-4">
             <Field label="Entidade legal">
               <input className="input-premium w-full" value={configForm.legalEntityName}
@@ -2422,10 +2440,12 @@ function CaymanRailView({ rail, users, onSuccess, onError }) {
                      onChange={(e) => setParticipantForm({ ...participantForm, country: e.target.value })} />
             </Field>
           </div>
-          <Field label="BIC/SWIFT">
+          <Field label="BIC/SWIFT externo">
             <input className="input-premium w-full" value={participantForm.swiftBic}
-                   onChange={(e) => setParticipantForm({ ...participantForm, swiftBic: e.target.value })} />
+                   onChange={(e) => setParticipantForm({ ...participantForm, swiftBic: e.target.value.toUpperCase() })}
+                   placeholder="Somente BIC emitido pela SWIFT" />
           </Field>
+          <p className="text-xs text-ink-400">Para o Bravus, use BRAVKYK0XXX apenas dentro deste sistema.</p>
           <Field label="Conta settlement">
             <input className="input-premium w-full" value={participantForm.settlementAccount}
                    onChange={(e) => setParticipantForm({ ...participantForm, settlementAccount: e.target.value })} />

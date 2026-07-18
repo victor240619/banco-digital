@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Building2, CreditCard, Copy, Check, ShieldCheck, Crown,
-  ChevronDown, ChevronUp, KeyRound, MapPin, User2, Phone, Mail,
+  ChevronDown, ChevronUp, KeyRound, MapPin, User2, Phone, Mail, Network,
 } from 'lucide-react';
 
 /**
@@ -36,6 +36,8 @@ export default function BankIdentityCard({ me }) {
       `Agência: ${banco.agencia}`,
       `Conta: ${banco.contaFormatada || banco.conta} (${banco.tipoConta})`,
       `Chave PIX (${banco.tipoChavePix}): ${banco.chavePix}`,
+      `Roteamento Cayman: ${banco.internalRoutingCode || 'BRAV-KY-INTERNAL'}`,
+      `SWIFT/BIC interno: ${banco.swiftBic || 'BRAVKYK0XXX'} (homologacao, nao registrado)`,
     ].join('\n');
     copy('all', txt);
   };
@@ -69,6 +71,9 @@ export default function BankIdentityCard({ me }) {
               </p>
               <p className="text-xs text-white/50 mt-0.5">
                 Cód. {banco.codigoBanco} · ISPB {banco.ispb}
+              </p>
+              <p className="text-xs text-amber-200/70 mt-1 font-mono">
+                {banco.swiftBic || 'BRAVKYK0XXX'} · interno de homologacao
               </p>
             </div>
           </div>
@@ -163,6 +168,8 @@ export default function BankIdentityCard({ me }) {
                 : 'Não cadastrado'} />
             <DetailRow label="Abertura da conta" value={formatDate(conta.abertura)} />
             <DetailRow label="Status KYC" value={conta.statusKyc} />
+            <DetailRow icon={Network} label="Roteamento Cayman" value={banco.internalRoutingCode || 'BRAV-KY-INTERNAL'} />
+            <DetailRow icon={Network} label="SWIFT/BIC interno" value={`${banco.swiftBic || 'BRAVKYK0XXX'} - nao registrado`} />
           </motion.div>
         )}
       </div>
