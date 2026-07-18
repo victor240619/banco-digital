@@ -478,8 +478,14 @@ const register = await call(worker, "POST", "/auth/register", {
 assert.equal(register.response.status, 202, JSON.stringify(register.data));
 assert.equal(register.data.adminReviewRequired, true);
 assert.equal(register.data.accountCreated, true);
-assert.match(register.data.accountNumber, /^\d{4}$/, "public registration must create a random four-digit account");
+assert.match(register.data.accountNumber, /^\d{6}$/, "public registration must create a random six-digit account");
 assert.equal(JSON.parse(database.stateRow.payload).users[registrationIdentity.username].accountNumber, register.data.accountNumber);
+const sixDigitState = JSON.parse(database.stateRow.payload);
+for (const account of Object.values(sixDigitState.users)) {
+  assert.match(account.accountNumber, /^\d{6}$/, `account ${account.username} must use six digits`);
+}
+assert.equal(sixDigitState.users["joao.victor"].accountAliases.includes("0556916115"), true, "legacy account number must remain resolvable as an alias");
+assert.equal(JSON.stringify(sixDigitState).toLowerCase().includes('"ispb"'), false, "Brazilian ISPB fields must be removed from persisted Cayman state");
 assert.equal(register.data.faceEvidenceReceived, true);
 assert.ok(JSON.parse(database.stateRow.payload).users[registrationIdentity.username].kycAnalysisId, "registration evidence must be linked to the account");
 assert.equal(JSON.parse(database.stateRow.payload).users[registrationIdentity.username].kycEvidenceSubmittedAt.length > 0, true);
@@ -528,8 +534,12 @@ assert.equal(pendingRegistrationDashboard.response.status, 200);
 assert.equal(pendingRegistrationDashboard.data.profile.accountNumber, register.data.accountNumber);
 assert.equal(pendingRegistrationDashboard.data.profile.outboundOperationsEnabled, false);
 assert.equal(pendingRegistrationDashboard.data.me.conta.statusKyc, "PENDENTE_VALIDACAO_IDENTIDADE");
+assert.equal(JSON.stringify(pendingRegistrationDashboard.data).toLowerCase().includes('"ispb"'), false, "customer APIs must not expose ISPB");
 assert.deepEqual(pendingRegistrationDashboard.data.transactions, []);
 assert.deepEqual(pendingRegistrationDashboard.data.externalOrders, []);
+const legacyAccountResolution = await call(worker, "GET", "/user/transfer/resolve?destination=0556916115", { token: registrationLogin.data.token });
+assert.equal(legacyAccountResolution.response.status, 200, "legacy account aliases must continue resolving after migration");
+assert.equal(legacyAccountResolution.data.accountNumber.length, 6);
 const customerToken = registrationLogin.data.token;
 const transferKey = "d1-idempotency-transfer-0001";
 const transferBody = { amount: 1000, destinationAccount: "52998224725", description: "Teste atomico D1" };

@@ -69,7 +69,7 @@ export default function BankIdentityCard({ me }) {
                 {banco.nomeBanco || 'Bravus Premium Bank'}
               </p>
               <p className="text-xs text-white/50 mt-0.5">
-                Cód. {banco.codigoBanco} · ISPB {banco.ispb}
+                KY · Roteamento {banco.internalRoutingCode || 'BRAV-KY-INTERNAL'}
               </p>
               <p className="text-xs text-amber-200/70 mt-1 font-mono">
                 {banco.swiftBic || 'BRAVKYK0XXX'} · interno de homologacao

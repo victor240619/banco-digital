@@ -46,7 +46,8 @@ export const formatDate = (dateString) => {
 
 export const formatAccountNumber = (accountNumber) => {
   if (!accountNumber) return '';
-  return String(accountNumber).replace(/(\d{4})(\d{4})(\d{2})/, '$1-$2-$3');
+  const value = String(accountNumber).replace(/\D/g, '');
+  return /^\d{6}$/.test(value) ? value.replace(/(\d{3})(\d{3})/, '$1-$2') : String(accountNumber);
 };
 
 export const getTransactionTypeLabel = (type) => {

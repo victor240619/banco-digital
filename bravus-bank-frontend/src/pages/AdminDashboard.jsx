@@ -1787,7 +1787,7 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
     userId: '', amountReais: '', channel: 'ACH',
     beneficiaryName: '', beneficiaryDocument: '',
     pixKey: '', pixKeyType: 'CPF',
-    bankCode: '', ispb: '', agency: '', accountNumber: '', accountDigit: '', accountType: 'CORRENTE',
+    bankCode: '', routingCode: '', agency: '', accountNumber: '', accountDigit: '', accountType: 'CORRENTE',
     destinationNetwork: 'CAYMAN_ACH', participantCode: '',
     description: '',
   });
@@ -1816,7 +1816,7 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
         pixKey: form.pixKey || null,
         pixKeyType: form.pixKeyType || null,
         bankCode: form.bankCode || null,
-        ispb: form.ispb || null,
+        routingCode: form.routingCode || null,
         agency: form.agency || null,
         accountNumber: form.accountNumber || null,
         accountDigit: form.accountDigit || null,
@@ -1923,8 +1923,8 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
                        onChange={(e) => setForm({ ...form, bankCode: e.target.value })} placeholder="001" />
               </Field>
               <Field label="Código de roteamento / clearing">
-                <input className="input-premium w-full" value={form.ispb}
-                       onChange={(e) => setForm({ ...form, ispb: e.target.value })} />
+                <input className="input-premium w-full" value={form.routingCode}
+                       onChange={(e) => setForm({ ...form, routingCode: e.target.value })} />
               </Field>
               <Field label="Agencia">
                 <input className="input-premium w-full" value={form.agency}
@@ -1989,7 +1989,6 @@ function GlobalRailView({ participants, transfers, onSuccess, onError }) {
     country: 'KY',
     network: 'INTERNAL_BRAVUS',
     bankCode: '999',
-    ispb: '99999999',
     swiftBic: '',
     routingCode: '',
     endpointUrl: '',
@@ -2079,10 +2078,6 @@ function GlobalRailView({ participants, transfers, onSuccess, onError }) {
           <Field label="Banco">
             <input className="input-premium w-full" value={form.bankCode}
                    onChange={(e) => setForm({ ...form, bankCode: e.target.value })} />
-          </Field>
-          <Field label="Referência de clearing">
-            <input className="input-premium w-full" value={form.ispb}
-                   onChange={(e) => setForm({ ...form, ispb: e.target.value })} />
           </Field>
           <Field label="SWIFT/BIC">
             <input className="input-premium w-full" value={form.swiftBic}

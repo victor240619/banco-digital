@@ -285,7 +285,8 @@ const joao = {
   fullName: "Joao Victor Mendonça Guimaraes",
   cpf: "05569161155",
   phone: "",
-  accountNumber: "0556916115",
+  accountNumber: "916115",
+  accountAliases: ["0556916115"],
   accountType: "CORRENTE",
   balance: 89000000,
   statusKyc: "APROVADO_AUTO",
@@ -298,7 +299,8 @@ const francisca = {
   fullName: "Francisca de Assis dos Reis",
   cpf: "00829040145",
   phone: "",
-  accountNumber: "0082904014",
+  accountNumber: "904014",
+  accountAliases: ["0082904014"],
   accountType: "CORRENTE",
   balance: 0,
   statusKyc: "APROVADO_AUTO",
@@ -311,7 +313,8 @@ const admin = {
   fullName: "Administrador Bravus Local",
   cpf: "",
   phone: "",
-  accountNumber: "0000000003",
+  accountNumber: "000003",
+  accountAliases: ["0000000003"],
   accountType: "CORRENTE",
   balance: 0,
   statusKyc: "APROVADO_AUTO",
@@ -351,7 +354,6 @@ const initialStateSeed = {
     country: "KY",
     network: "INTERNAL_BRAVUS",
     bankCode: "999",
-    ispb: "99999999",
     swiftBic: "BRAVKYK0XXX",
     swiftBicStatus: "INTERNAL_TEST_ONLY_UNREGISTERED",
     swiftBicRegistered: false,
@@ -378,6 +380,75 @@ let pendingMasterCreditEventWrites = [];
 let pendingAccountControlEventWrites = [];
 let persistenceMeta = { backend: "D1", revision: 0, payloadHash: null, updatedAt: null };
 
+function sixDigitAccountCandidate(value) {
+  const clean = String(value || "").replace(/\\D/g, "");
+  if (!clean) return null;
+  return clean.length >= 6 ? clean.slice(-6) : clean.padStart(6, "0");
+}
+
+function nextAvailableSixDigitAccount(candidate, occupied) {
+  const start = Number(candidate);
+  for (let offset = 0; offset < 1000000; offset += 1) {
+    const accountNumber = String((start + offset) % 1000000).padStart(6, "0");
+    if (!occupied.has(accountNumber)) return accountNumber;
+  }
+  throw new Error("ACCOUNT_NUMBER_POOL_EXHAUSTED");
+}
+
+function stableAccountSeed(value) {
+  let hash = 0;
+  for (const character of String(value || "BRAVUS")) {
+    hash = (hash * 31 + character.charCodeAt(0)) % 1000000;
+  }
+  return String(hash).padStart(6, "0");
+}
+
+function migrateAccountNumbersToSixDigits(next) {
+  const occupied = new Set();
+  const users = Object.values(next.users).sort((left, right) =>
+    Number(left?.id || 0) - Number(right?.id || 0)
+    || String(left?.username || "").localeCompare(String(right?.username || ""))
+  );
+  let migrated = false;
+  for (const user of users) {
+    const previous = String(user.accountNumber || "").trim();
+    const candidate = sixDigitAccountCandidate(previous)
+      || sixDigitAccountCandidate(user.cpf)
+      || stableAccountSeed(user.username);
+    const accountNumber = nextAvailableSixDigitAccount(candidate, occupied);
+    occupied.add(accountNumber);
+    const aliases = new Set(
+      (Array.isArray(user.accountAliases) ? user.accountAliases : [])
+        .map((alias) => String(alias || "").trim())
+        .filter(Boolean),
+    );
+    if (previous && previous !== accountNumber) aliases.add(previous);
+    aliases.delete(accountNumber);
+    user.accountNumber = accountNumber;
+    user.accountAliases = [...aliases];
+    if (previous !== accountNumber) migrated = true;
+  }
+  next.accountNumberPolicy = {
+    version: "SIX_DIGIT_V1",
+    digits: 6,
+    legacyAliasesEnabled: true,
+    migratedAt: next.accountNumberPolicy?.migratedAt || (migrated ? now() : null),
+  };
+}
+
+function stripObsoleteBrazilianRouting(value, visited = new Set()) {
+  if (!value || typeof value !== "object" || visited.has(value)) return;
+  visited.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) stripObsoleteBrazilianRouting(item, visited);
+    return;
+  }
+  delete value.ispb;
+  delete value.senderIspb;
+  delete value.receiverIspb;
+  for (const item of Object.values(value)) stripObsoleteBrazilianRouting(item, visited);
+}
+
 function normalizeState(candidate) {
   const next = candidate && typeof candidate === "object" ? candidate : {};
   next.users = next.users && typeof next.users === "object" ? next.users : {};
@@ -393,6 +464,7 @@ function normalizeState(candidate) {
     }
     user.numericPasswordCredential = user.numericPasswordCredential || null;
   }
+  migrateAccountNumbersToSixDigits(next);
   next.transactions = Array.isArray(next.transactions) ? next.transactions : [];
   next.externalTransfers = Array.isArray(next.externalTransfers) ? next.externalTransfers : [];
   next.ledgerEntries = Array.isArray(next.ledgerEntries) ? next.ledgerEntries : [];
@@ -490,6 +562,7 @@ function normalizeState(candidate) {
     participant.swiftConnected = false;
     participant.swiftExternalRoutingEnabled = false;
   }
+  stripObsoleteBrazilianRouting(next);
   joaoCreditGrant = next.creditGrant;
   return next;
 }
@@ -1018,6 +1091,7 @@ function findTransferDestination(value) {
   return Object.values(state.users).find((item) =>
     item.accountNumber === raw
     || (onlyDigits && item.accountNumber === onlyDigits)
+    || (onlyDigits && Array.isArray(item.accountAliases) && item.accountAliases.includes(onlyDigits))
     || (onlyDigits && item.cpf === onlyDigits)
     || (onlyDigits && item.chavePix === onlyDigits)
     || String(item.email || "").toLowerCase() === rawLower
@@ -1061,18 +1135,15 @@ function validCnpj(document) {
   return calc(12) === Number(cnpj[12]) && calc(13) === Number(cnpj[13]);
 }
 
-function accountNumberForDocument(document) {
-  const clean = digits(document);
-  const base = clean || String(Date.now());
-  return base.slice(0, 10).padEnd(10, "0");
-}
-
-function randomFourDigitAccountNumber() {
-  const occupied = new Set(Object.values(state.users).map((user) => String(user.accountNumber || "")));
+function randomSixDigitAccountNumber() {
+  const occupied = new Set(Object.values(state.users).flatMap((user) => [
+    String(user.accountNumber || ""),
+    ...(Array.isArray(user.accountAliases) ? user.accountAliases.map(String) : []),
+  ]));
   const random = new Uint32Array(1);
-  for (let attempt = 0; attempt < 10000; attempt += 1) {
+  for (let attempt = 0; attempt < 100000; attempt += 1) {
     crypto.getRandomValues(random);
-    const accountNumber = String(1000 + (random[0] % 9000));
+    const accountNumber = String(100000 + (random[0] % 900000));
     if (!occupied.has(accountNumber)) return accountNumber;
   }
   throw new Error("ACCOUNT_NUMBER_POOL_EXHAUSTED");
@@ -1084,7 +1155,6 @@ function partyForUser(user) {
     document: user.cpf,
     bankName: "Bravus Premium Bank",
     bankCode: "999",
-    ispb: "99999999",
     countryCode: bravusInstitutionProfile.countryCode,
     currency: bravusInstitutionProfile.currency,
     internalRoutingCode: bravusInstitutionProfile.internalRoutingCode,
@@ -1111,7 +1181,6 @@ function recipientViewForUser(user) {
     document: party.document,
     bankName: party.bankName,
     bankCode: party.bankCode,
-    ispb: party.ispb,
     countryCode: party.countryCode,
     currency: party.currency,
     internalRoutingCode: party.internalRoutingCode,
@@ -1136,7 +1205,8 @@ function partyForExternalBody(body) {
     document: String(body.beneficiaryDocument || "").replace(/\\D/g, ""),
     bankName: body.bankName || null,
     bankCode: body.bankCode || null,
-    ispb: body.ispb || null,
+    routingCode: body.routingCode || null,
+    swiftBic: body.swiftBic || null,
     agency: body.agency || null,
     accountNumber: body.accountNumber || null,
     accountDigit: body.accountDigit || null,
@@ -1153,7 +1223,8 @@ function applyTransferParties(tx, payer, beneficiary, role, orderId) {
     senderDocument: payer.document,
     senderBankName: payer.bankName,
     senderBankCode: payer.bankCode,
-    senderIspb: payer.ispb,
+    senderRoutingCode: payer.routingCode || payer.internalRoutingCode || null,
+    senderSwiftBic: payer.swiftBic || null,
     senderAgency: payer.agency,
     senderAccountNumber: payer.accountNumber,
     senderAccountDigit: payer.accountDigit,
@@ -1162,7 +1233,8 @@ function applyTransferParties(tx, payer, beneficiary, role, orderId) {
     receiverDocument: beneficiary.document,
     receiverBankName: beneficiary.bankName,
     receiverBankCode: beneficiary.bankCode,
-    receiverIspb: beneficiary.ispb,
+    receiverRoutingCode: beneficiary.routingCode || beneficiary.internalRoutingCode || null,
+    receiverSwiftBic: beneficiary.swiftBic || null,
     receiverAgency: beneficiary.agency,
     receiverAccountNumber: beneficiary.accountNumber,
     receiverAccountDigit: beneficiary.accountDigit,
@@ -1198,7 +1270,8 @@ function hydrateTransaction(tx, viewer) {
       document: "BRAVUS-LEDGER",
       bankName: "Bravus Premium Bank",
       bankCode: "999",
-      ispb: "99999999",
+      routingCode: bravusInstitutionProfile.internalRoutingCode,
+      swiftBic: bravusInstitutionProfile.swiftBic,
       agency: "0001",
       accountNumber: "BRAVUS-LEDGER",
       accountDigit: null,
@@ -1217,7 +1290,10 @@ function canReadOrderReceipt(order, user) {
   if (!order || !user) return false;
   if (order.username === user.username || order.payerUsername === user.username || order.beneficiaryUsername === user.username) return true;
   if (order.beneficiaryDocument && digits(order.beneficiaryDocument) === user.cpf) return true;
-  if (order.accountNumber && order.accountNumber === user.accountNumber) return true;
+  if (order.accountNumber && (
+    order.accountNumber === user.accountNumber
+    || (Array.isArray(user.accountAliases) && user.accountAliases.includes(String(order.accountNumber)))
+  )) return true;
   if (order.pixKey && String(order.pixKey).toLowerCase() === String(user.email || "").toLowerCase()) return true;
   if (order.pixKey && digits(order.pixKey) === user.cpf) return true;
   return false;
@@ -1328,7 +1404,8 @@ function internalOrderPayload({ order, payer, beneficiary, tx, amount, descripti
     beneficiaryName: beneficiary.fullName,
     beneficiaryDocument: beneficiary.cpf,
     bankCode: "999",
-    ispb: "99999999",
+    routingCode: bravusInstitutionProfile.internalRoutingCode,
+    swiftBic: bravusInstitutionProfile.swiftBic,
     agency: "0001",
     accountNumber: beneficiary.accountNumber,
     accountDigit: null,
@@ -1830,7 +1907,7 @@ function resolveGlobalParticipant(body, network) {
   if (explicit) return state.globalRailParticipants.find((p) => p.participantCode === explicit) || null;
   return state.globalRailParticipants.find((p) =>
     p.network === network
-    && ((body.bankCode && p.bankCode === body.bankCode) || (body.ispb && p.ispb === body.ispb))
+    && ((body.bankCode && p.bankCode === body.bankCode) || (body.routingCode && p.routingCode === body.routingCode))
   ) || null;
 }
 
@@ -1884,7 +1961,6 @@ function bankMe(user) {
     dadosBancarios: {
       nomeBanco: "Bravus Premium Bank",
       codigoBanco: "999",
-      ispb: "99999999",
       countryCode: bravusInstitutionProfile.countryCode,
       currency: bravusInstitutionProfile.currency,
       internalRoutingCode: bravusInstitutionProfile.internalRoutingCode,
@@ -1935,7 +2011,8 @@ function receiptForOrder(order, user) {
     document: order.beneficiaryDocument,
     bankName: order.beneficiaryBankName || null,
     bankCode: order.bankCode,
-    ispb: order.ispb,
+    routingCode: order.routingCode,
+    swiftBic: order.swiftBic,
     agency: order.agency,
     accountNumber: order.accountNumber,
     accountDigit: order.accountDigit,
@@ -2305,7 +2382,7 @@ async function createPublicAccountRequest(body, recorded, availability) {
     return { error: json({ message: "Nao foi possivel proteger as evidencias de identidade.", code: error.message }, { status: 503 }) };
   }
   const createdAt = now();
-  const accountNumber = randomFourDigitAccountNumber();
+  const accountNumber = randomSixDigitAccountNumber();
   evidenceAnalysis.subjectName = fullName;
   state.documentAnalyses.unshift(evidenceAnalysis);
   const createdAccount = {
@@ -3466,7 +3543,7 @@ async function handleApi(request) {
     }
     const idempotencyFingerprint = [
       user.username, amount, body.channel, body.beneficiaryDocument || "", body.pixKey || "",
-      body.bankCode || "", body.ispb || "", body.agency || "", body.accountNumber || "", body.accountDigit || "",
+      body.bankCode || "", body.routingCode || "", body.swiftBic || "", body.agency || "", body.accountNumber || "", body.accountDigit || "",
     ].join("|");
     const previousOrder = state.externalTransfers.find((order) => order.idempotencyKey === idempotencyKey);
     if (previousOrder) {
@@ -3533,7 +3610,8 @@ async function handleApi(request) {
       beneficiaryName: body.beneficiaryName || "Beneficiario externo",
       beneficiaryDocument: String(body.beneficiaryDocument || "").replace(/\\D/g, ""),
       bankCode: body.bankCode || null,
-      ispb: body.ispb || null,
+      routingCode: body.routingCode || null,
+      swiftBic: body.swiftBic || null,
       agency: body.agency || null,
       accountNumber: body.accountNumber || null,
       accountDigit: body.accountDigit || null,
@@ -3639,7 +3717,8 @@ async function handleApi(request) {
           beneficiaryName: externalBody.beneficiaryName,
           beneficiaryDocument: String(externalBody.beneficiaryDocument || "").replace(/\\D/g, ""),
           bankCode: externalBody.bankCode || null,
-          ispb: externalBody.ispb || null,
+          routingCode: externalBody.routingCode || null,
+          swiftBic: externalBody.swiftBic || null,
           agency: externalBody.agency || null,
           accountNumber: externalBody.accountNumber || null,
           accountDigit: externalBody.accountDigit || null,
@@ -3749,7 +3828,8 @@ async function handleApi(request) {
         beneficiaryName: destination.fullName,
         beneficiaryDocument: destination.cpf,
         bankCode: "999",
-        ispb: "99999999",
+        routingCode: bravusInstitutionProfile.internalRoutingCode,
+        swiftBic: bravusInstitutionProfile.swiftBic,
         agency: "0001",
         accountNumber: destination.accountNumber,
         accountDigit: null,
@@ -4218,7 +4298,7 @@ async function handleApi(request) {
       fullName,
       cpf: identity.cpf,
       phone,
-      accountNumber: accountNumberForDocument(identity.cpf),
+      accountNumber: randomSixDigitAccountNumber(),
       balance: 0,
       roles: ["ROLE_USER"],
       statusKyc: "PENDENTE_VALIDACAO_IDENTIDADE",
@@ -4638,7 +4718,7 @@ async function handleApi(request) {
     }
     const idempotencyFingerprint = [
       origin.username, amount, body.channel, body.beneficiaryDocument || "", body.pixKey || "",
-      body.bankCode || "", body.ispb || "", body.agency || "", body.accountNumber || "", body.accountDigit || "",
+      body.bankCode || "", body.routingCode || "", body.swiftBic || "", body.agency || "", body.accountNumber || "", body.accountDigit || "",
     ].join("|");
     const previousOrder = state.externalTransfers.find((order) => order.idempotencyKey === idempotencyKey);
     if (previousOrder) {
@@ -4705,7 +4785,8 @@ async function handleApi(request) {
       beneficiaryName: body.beneficiaryName || "Beneficiario externo",
       beneficiaryDocument: String(body.beneficiaryDocument || "").replace(/\\D/g, ""),
       bankCode: body.bankCode || null,
-      ispb: body.ispb || null,
+      routingCode: body.routingCode || null,
+      swiftBic: body.swiftBic || null,
       agency: body.agency || null,
       accountNumber: body.accountNumber || null,
       accountDigit: body.accountDigit || null,
@@ -4764,7 +4845,6 @@ async function handleApi(request) {
       country,
       network,
       bankCode: body.bankCode || null,
-      ispb: body.ispb || null,
       swiftBic: swiftBic || null,
       swiftBicStatus: swiftBic ? "EXTERNAL_DECLARED_UNVERIFIED" : "NOT_PROVIDED",
       swiftBicRegistered: false,

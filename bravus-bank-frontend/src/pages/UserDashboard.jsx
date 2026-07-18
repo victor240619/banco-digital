@@ -62,7 +62,7 @@ const EMPTY_FORM = {
   beneficiaryName: '',
   beneficiaryDocument: '',
   bankCode: '',
-  ispb: '',
+  routingCode: '',
   agency: '',
   accountNumber: '',
   accountDigit: '',
@@ -483,7 +483,8 @@ const partyRows = (party) => [
   ['Documento', party?.document],
   ['Banco', party?.bankName || party?.bankCode],
   ['Codigo', party?.bankCode],
-  ['ISPB', party?.ispb],
+  ['Roteamento', party?.routingCode || party?.internalRoutingCode],
+  ['SWIFT/BIC', party?.swiftBic],
   ['Agencia', party?.agency],
   ['Conta', [party?.accountNumber, party?.accountDigit].filter(Boolean).join('-')],
   ['Tipo', party?.accountType],
@@ -953,7 +954,7 @@ export default function UserDashboard() {
           beneficiaryName: form.beneficiaryName || resolvedRecipient?.name || resolvedRecipient?.fullName,
           beneficiaryDocument: form.beneficiaryDocument || resolvedRecipient?.document,
           bankCode: form.bankCode || resolvedRecipient?.bankCode,
-          ispb: form.ispb || resolvedRecipient?.ispb,
+          routingCode: form.routingCode || resolvedRecipient?.routingCode || resolvedRecipient?.internalRoutingCode,
           agency: form.agency || resolvedRecipient?.agency,
           accountNumber: form.accountNumber || resolvedRecipient?.accountNumber,
           accountDigit: form.accountDigit || resolvedRecipient?.accountDigit,
@@ -1739,9 +1740,9 @@ export default function UserDashboard() {
                         <input
                           type="text"
                           className="form-input"
-                          placeholder="00000000"
-                          value={form.ispb}
-                          onChange={(e) => setForm({ ...form, ispb: e.target.value })}
+                          placeholder="Código Cayman ou do participante"
+                          value={form.routingCode}
+                          onChange={(e) => setForm({ ...form, routingCode: e.target.value })}
                         />
                       </div>
                     </div>
@@ -2694,7 +2695,8 @@ function ReceiptBlock({ title, party }) {
       <ReceiptLine label="Documento" value={party?.document} />
       <ReceiptLine label="Banco" value={party?.bankName || party?.bankCode} />
       <ReceiptLine label="Código" value={party?.bankCode} />
-      <ReceiptLine label="ISPB" value={party?.ispb} />
+      <ReceiptLine label="Roteamento" value={party?.routingCode || party?.internalRoutingCode} />
+      <ReceiptLine label="SWIFT/BIC" value={party?.swiftBic} />
       <ReceiptLine label="Agência" value={party?.agency} />
       <ReceiptLine label="Conta" value={[party?.accountNumber, party?.accountDigit].filter(Boolean).join('-')} />
       <ReceiptLine label="Tipo" value={party?.accountType} />
