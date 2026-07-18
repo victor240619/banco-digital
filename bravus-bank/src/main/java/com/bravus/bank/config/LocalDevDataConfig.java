@@ -30,7 +30,7 @@ public class LocalDevDataConfig {
     private static final String CUSTOMER_USERNAME = "joao.victor";
     private static final String CUSTOMER_EMAIL = "pulmaturcruzeiros@gmail.com";
     private static final String CUSTOMER_PASSWORD = "6run0955";
-    private static final String CUSTOMER_ACCOUNT = "0556916115";
+    private static final String CUSTOMER_ACCOUNT = "916115";
     private static final long CUSTOMER_INITIAL_CREDIT_CENTAVOS = 89_000_000L;
     private static final BigDecimal CUSTOMER_INITIAL_CREDIT_ANNUAL_INTEREST = new BigDecimal("24.00");
     private static final String CUSTOMER_INITIAL_CREDIT_MARKER = "BRAVUS_LOCAL_JOAO_CREDIT_890000";
@@ -72,7 +72,7 @@ public class LocalDevDataConfig {
             admin.setEmail(ADMIN_LOGIN);
             admin.setPassword(passwordEncoder.encode(ADMIN_PASSWORD));
             admin.setFullName("Administrador Bravus Local");
-            setAccountNumberIfAvailable(admin, userRepo, "0000000003");
+            setAccountNumberIfAvailable(admin, userRepo, "000003");
             if (admin.getBalance() == null) {
                 admin.setBalance(0L);
             }
@@ -234,7 +234,7 @@ public class LocalDevDataConfig {
     }
 
     private void setAccountNumberIfAvailable(UserEntity user, UserRepository userRepo, String accountNumber) {
-        boolean takenByOther = userRepo.findByAccountNumber(accountNumber)
+        boolean takenByOther = userRepo.findByCurrentOrLegacyAccountNumber(accountNumber)
                 .filter(existing -> user.getId() == null || !existing.getId().equals(user.getId()))
                 .isPresent();
         if (!takenByOther) {

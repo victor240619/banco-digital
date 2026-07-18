@@ -300,10 +300,10 @@ public class PersistentInternalTransferService {
         String raw = destination.trim();
         String onlyDigits = digits(raw);
 
-        Optional<UserEntity> found = userRepository.findByAccountNumber(raw);
+        Optional<UserEntity> found = userRepository.findByCurrentOrLegacyAccountNumber(raw);
         if (found.isPresent()) return found;
         if (!onlyDigits.isBlank()) {
-            found = userRepository.findByAccountNumber(onlyDigits);
+            found = userRepository.findByCurrentOrLegacyAccountNumber(onlyDigits);
             if (found.isPresent()) return found;
             if (onlyDigits.length() == 11 || onlyDigits.length() == 14) {
                 found = userRepository.findByCpf(onlyDigits);

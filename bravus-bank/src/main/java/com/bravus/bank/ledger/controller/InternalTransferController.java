@@ -38,7 +38,7 @@ public class InternalTransferController {
         UserEntity from = userRepo.findByUsername(auth.getName())
                 .orElseThrow(() -> new IllegalStateException("Usuário autenticado não encontrado"));
 
-        UserEntity to = userRepo.findByAccountNumber(req.destinationAccountNumber)
+        UserEntity to = userRepo.findByCurrentOrLegacyAccountNumber(req.destinationAccountNumber)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Conta destinatária não encontrada: " + req.destinationAccountNumber));
 

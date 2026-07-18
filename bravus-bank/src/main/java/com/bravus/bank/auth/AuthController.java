@@ -250,12 +250,13 @@ public class AuthController {
     }
 
     private String generateAccountNumber() {
-        int start = secureRandom.nextInt(10_000);
-        for (int offset = 0; offset < 10_000; offset++) {
-            String candidate = String.format("%04d", (start + offset) % 10_000);
-            if (!userRepository.existsByAccountNumber(candidate)) return candidate;
+        int start = secureRandom.nextInt(999_999) + 1;
+        for (int offset = 0; offset < 999_999; offset++) {
+            int number = 1 + ((start - 1 + offset) % 999_999);
+            String candidate = String.format("%06d", number);
+            if (!userRepository.existsByCurrentOrLegacyAccountNumber(candidate)) return candidate;
         }
-        throw new IllegalStateException("Nao ha numeros de conta de 4 digitos disponiveis.");
+        throw new IllegalStateException("Nao ha numeros de conta de 6 digitos disponiveis.");
     }
 
     private String normalizeDocument(String value) {

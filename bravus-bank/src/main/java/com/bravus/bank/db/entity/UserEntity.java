@@ -64,7 +64,8 @@ public class UserEntity {
     @Column(name = "nome_banco")
     private String nomeBanco = "Bravus Premium Bank";
 
-    private String ispb = "99999999";
+    // Legacy database compatibility only. Cayman routing is exposed through InstitutionRoutingProfile.
+    private String ispb;
 
     @Column(name = "chave_pix")
     private String chavePix;

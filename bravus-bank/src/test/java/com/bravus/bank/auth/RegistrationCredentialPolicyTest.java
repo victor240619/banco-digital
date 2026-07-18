@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RegistrationCredentialPolicyTest {
     @Test
     void acceptsExactNumericFormats() {
-        assertTrue(RegistrationCredentialPolicy.isValidAccountNumber("0042"));
+        assertTrue(RegistrationCredentialPolicy.isValidAccountNumber("004200"));
         assertTrue(RegistrationCredentialPolicy.isValidNumericPassword("12345678"));
         assertTrue(RegistrationCredentialPolicy.isValidAlphanumericPassword("Senha123"));
     }
@@ -16,7 +16,8 @@ class RegistrationCredentialPolicyTest {
     @Test
     void rejectsWrongLengthAndNonNumericValues() {
         assertFalse(RegistrationCredentialPolicy.isValidAccountNumber("123"));
-        assertFalse(RegistrationCredentialPolicy.isValidAccountNumber("12A4"));
+        assertFalse(RegistrationCredentialPolicy.isValidAccountNumber("12A400"));
+        assertFalse(RegistrationCredentialPolicy.isValidAccountNumber("000000"));
         assertFalse(RegistrationCredentialPolicy.isValidNumericPassword("1234567"));
         assertFalse(RegistrationCredentialPolicy.isValidNumericPassword("1234A678"));
         assertFalse(RegistrationCredentialPolicy.isValidAlphanumericPassword("senha123"));

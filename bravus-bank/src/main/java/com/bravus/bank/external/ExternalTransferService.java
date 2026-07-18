@@ -305,11 +305,11 @@ public class ExternalTransferService {
         String raw = destination.trim();
         String digits = DocumentUtilsBridge.digits(raw);
 
-        Optional<UserEntity> found = userRepo.findByAccountNumber(raw);
+        Optional<UserEntity> found = userRepo.findByCurrentOrLegacyAccountNumber(raw);
         if (found.isPresent()) return found;
 
         if (!digits.isBlank()) {
-            found = userRepo.findByAccountNumber(digits);
+            found = userRepo.findByCurrentOrLegacyAccountNumber(digits);
             if (found.isPresent()) return found;
             if (digits.length() == 11 || digits.length() == 14) {
                 found = userRepo.findByCpf(digits);

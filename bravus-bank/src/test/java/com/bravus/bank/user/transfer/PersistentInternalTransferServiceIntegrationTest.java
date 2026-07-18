@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 
@@ -47,11 +48,15 @@ class PersistentInternalTransferServiceIntegrationTest {
     @Autowired
     private AccountLedgerEntryRepository accountLedgerRepository;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private UserEntity joao;
     private UserEntity francisca;
 
     @BeforeEach
     void setUp() {
+        jdbcTemplate.update("DELETE FROM account_number_aliases");
         accountLedgerRepository.deleteAll();
         requestRepository.deleteAll();
         externalTransferRepository.deleteAll();
@@ -59,9 +64,9 @@ class PersistentInternalTransferServiceIntegrationTest {
         userRepository.deleteAll();
 
         joao = userRepository.save(user(
-                "joao.transfer", "joao.transfer@example.com", "11111111111", "1111111111", 10000L));
+                "joao.transfer", "joao.transfer@example.com", "11111111111", "111111", 10000L));
         francisca = userRepository.save(user(
-                "francisca.transfer", "francisca.transfer@example.com", "22222222222", "2222222222", 0L));
+                "francisca.transfer", "francisca.transfer@example.com", "22222222222", "222222", 0L));
     }
 
     @Test
@@ -102,6 +107,25 @@ class PersistentInternalTransferServiceIntegrationTest {
         assertEquals(2L, transactionRepository.count());
         assertEquals(2L, accountLedgerRepository.count());
         assertEquals(1L, requestRepository.count());
+    }
+
+    @Test
+    void legacyAccountAliasStillResolvesToTheSixDigitAccount() {
+        jdbcTemplate.update(
+                "INSERT INTO account_number_aliases (user_id, account_number, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                francisca.getId(),
+                "2222222222");
+
+        service.transfer(
+                joao.getUsername(),
+                "2222222222",
+                1000L,
+                "Conta legada",
+                "transfer-idempotency-key-legacy-0001");
+
+        assertEquals("222222", userRepository.findById(francisca.getId()).orElseThrow().getAccountNumber());
+        assertEquals(9000L, userRepository.findById(joao.getId()).orElseThrow().getBalance());
+        assertEquals(1000L, userRepository.findById(francisca.getId()).orElseThrow().getBalance());
     }
 
     @Test

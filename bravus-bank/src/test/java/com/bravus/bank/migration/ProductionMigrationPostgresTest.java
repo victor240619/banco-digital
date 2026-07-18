@@ -23,12 +23,22 @@ class ProductionMigrationPostgresTest {
                     .validateOnMigrate(true)
                     .load();
 
-            assertEquals(20, flyway.migrate().migrationsExecuted);
+            assertEquals(21, flyway.migrate().migrationsExecuted);
             assertEquals(0, flyway.migrate().migrationsExecuted);
 
             try (Connection connection = postgres.getPostgresDatabase().getConnection()) {
                 JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource(connection, true));
                 assertEquals(3, count(jdbc, "SELECT COUNT(*) FROM users"));
+                assertEquals(0, count(jdbc,
+                        "SELECT COUNT(*) FROM users WHERE account_number !~ '^[0-9]{6}$' OR account_number = '000000'"));
+                assertEquals("916115", jdbc.queryForObject(
+                        "SELECT account_number FROM users WHERE username = 'joao.victor'", String.class));
+                assertEquals("904014", jdbc.queryForObject(
+                        "SELECT account_number FROM users WHERE username = 'francisca.reis'", String.class));
+                assertEquals(3, count(jdbc, "SELECT COUNT(*) FROM account_number_aliases"));
+                assertEquals(6, count(jdbc,
+                        "SELECT COUNT(*) FROM account_ledger_entries WHERE account_number IN ('0556916115', '0082904014', 'BRAVUS-LEDGER')"));
+                assertEquals(0, count(jdbc, "SELECT COUNT(*) FROM users WHERE ispb IS NOT NULL"));
                 assertEquals(3, count(jdbc,
                         "SELECT COUNT(*) FROM users WHERE outbound_operations_enabled = TRUE"));
                 assertEquals("false", jdbc.queryForObject("""

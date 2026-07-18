@@ -46,7 +46,6 @@ public class MeController {
         Map<String, Object> banco = new LinkedHashMap<>();
         banco.put("nomeBanco", u.getNomeBanco());
         banco.put("codigoBanco", u.getCodigoBanco());
-        banco.put("ispb", u.getIspb());
         banco.put("agencia", u.getAgencia());
         banco.put("conta", u.getAccountNumber());
         banco.put("contaFormatada", formatAccount(u.getAccountNumber()));

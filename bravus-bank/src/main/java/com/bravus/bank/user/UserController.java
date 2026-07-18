@@ -476,11 +476,11 @@ public class UserController {
         String raw = destination.trim();
         String digits = raw.replaceAll("\\D", "");
 
-        Optional<UserEntity> found = userRepository.findByAccountNumber(raw);
+        Optional<UserEntity> found = userRepository.findByCurrentOrLegacyAccountNumber(raw);
         if (found.isPresent()) return found;
 
         if (!digits.isBlank()) {
-            found = userRepository.findByAccountNumber(digits);
+            found = userRepository.findByCurrentOrLegacyAccountNumber(digits);
             if (found.isPresent()) return found;
             if (digits.length() == 11 || digits.length() == 14) {
                 found = userRepository.findByCpf(digits);

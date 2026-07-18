@@ -20,6 +20,19 @@ public interface UserRepository extends JpaRepository<UserEntity, Long> {
     Optional<UserEntity> findByAccountNumber(String accountNumber);
     Optional<UserEntity> findByChavePix(String chavePix);
 
+    @Query(value = """
+            SELECT u.*
+            FROM users u
+            WHERE u.account_number = :accountNumber
+               OR EXISTS (
+                    SELECT 1
+                    FROM account_number_aliases alias
+                    WHERE alias.user_id = u.id
+                      AND alias.account_number = :accountNumber
+               )
+            """, nativeQuery = true)
+    Optional<UserEntity> findByCurrentOrLegacyAccountNumber(@Param("accountNumber") String accountNumber);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select u from UserEntity u where u.id in :ids order by u.id")
     List<UserEntity> findAllByIdInOrderByIdForUpdate(@Param("ids") Collection<Long> ids);
@@ -27,5 +40,15 @@ public interface UserRepository extends JpaRepository<UserEntity, Long> {
     boolean existsByUsername(String username);
     boolean existsByEmail(String email);
     boolean existsByAccountNumber(String accountNumber);
+
+    @Query(value = """
+            SELECT CASE WHEN EXISTS (
+                SELECT 1 FROM users WHERE account_number = :accountNumber
+                UNION ALL
+                SELECT 1 FROM account_number_aliases WHERE account_number = :accountNumber
+            ) THEN TRUE ELSE FALSE END
+            """, nativeQuery = true)
+    boolean existsByCurrentOrLegacyAccountNumber(@Param("accountNumber") String accountNumber);
+
     boolean existsByCpf(String cpf);
 }
