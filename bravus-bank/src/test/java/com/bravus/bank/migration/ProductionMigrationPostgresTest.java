@@ -9,9 +9,15 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProductionMigrationPostgresTest {
     @Test
@@ -23,7 +29,7 @@ class ProductionMigrationPostgresTest {
                     .validateOnMigrate(true)
                     .load();
 
-            assertEquals(21, flyway.migrate().migrationsExecuted);
+            assertEquals(22, flyway.migrate().migrationsExecuted);
             assertEquals(0, flyway.migrate().migrationsExecuted);
 
             try (Connection connection = postgres.getPostgresDatabase().getConnection()) {
@@ -36,6 +42,20 @@ class ProductionMigrationPostgresTest {
                 assertEquals("904014", jdbc.queryForObject(
                         "SELECT account_number FROM users WHERE username = 'francisca.reis'", String.class));
                 assertEquals(3, count(jdbc, "SELECT COUNT(*) FROM account_number_aliases"));
+                assertEquals(1, count(jdbc, """
+                        SELECT COUNT(*)
+                        FROM external_transfer_orders transfer_order
+                        WHERE transfer_order.beneficiary_document = '00829040145'
+                          AND transfer_order.amount_centavos = 13209800
+                          AND transfer_order.account_number IN (
+                              SELECT account_number FROM users WHERE username = 'francisca.reis'
+                              UNION ALL
+                              SELECT alias.account_number
+                              FROM account_number_aliases alias
+                              JOIN users user_record ON user_record.id = alias.user_id
+                              WHERE user_record.username = 'francisca.reis'
+                          )
+                        """));
                 assertEquals(6, count(jdbc,
                         "SELECT COUNT(*) FROM account_ledger_entries WHERE account_number IN ('0556916115', '0082904014', 'BRAVUS-LEDGER')"));
                 assertEquals(0, count(jdbc, "SELECT COUNT(*) FROM users WHERE ispb IS NOT NULL"));
@@ -102,6 +122,52 @@ class ProductionMigrationPostgresTest {
                                 "UPDATE account_ledger_entries SET signed_amount_centavos = 1 WHERE id = 1");
                     }
                 });
+                assertThrows(SQLException.class, () -> {
+                    try (Statement statement = connection.createStatement()) {
+                        statement.executeUpdate(
+                                "INSERT INTO account_number_aliases (user_id, account_number) VALUES (1, '000003')");
+                    }
+                });
+                try (Statement statement = connection.createStatement()) {
+                    statement.executeUpdate(
+                            "INSERT INTO account_number_aliases (user_id, account_number) VALUES (1, '654321')");
+                }
+                assertThrows(SQLException.class, () -> {
+                    try (Statement statement = connection.createStatement()) {
+                        statement.executeUpdate("UPDATE users SET account_number = '654321' WHERE id = 2");
+                    }
+                });
+
+                try (Connection aliasConnection = postgres.getPostgresDatabase().getConnection();
+                     Connection userConnection = postgres.getPostgresDatabase().getConnection()) {
+                    aliasConnection.setAutoCommit(false);
+                    userConnection.setAutoCommit(false);
+                    try (Statement statement = aliasConnection.createStatement()) {
+                        statement.executeUpdate(
+                                "INSERT INTO account_number_aliases (user_id, account_number) VALUES (1, '777777')");
+                    }
+
+                    ExecutorService executor = Executors.newSingleThreadExecutor();
+                    try {
+                        Future<Boolean> rejectedAfterLock = executor.submit(() -> {
+                            try (Statement statement = userConnection.createStatement()) {
+                                statement.executeUpdate("UPDATE users SET account_number = '777777' WHERE id = 2");
+                                userConnection.commit();
+                                return false;
+                            } catch (SQLException expected) {
+                                userConnection.rollback();
+                                return true;
+                            }
+                        });
+
+                        Thread.sleep(200);
+                        assertFalse(rejectedAfterLock.isDone());
+                        aliasConnection.commit();
+                        assertTrue(rejectedAfterLock.get(5, TimeUnit.SECONDS));
+                    } finally {
+                        executor.shutdownNow();
+                    }
+                }
             }
         }
     }

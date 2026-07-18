@@ -199,7 +199,10 @@ public class ExternalTransferService {
         String viewerCpf = DocumentUtilsBridge.digits(viewer.getCpf());
         String orderDocument = DocumentUtilsBridge.digits(order.getBeneficiaryDocument());
         if (!viewerCpf.isBlank() && viewerCpf.equals(orderDocument)) return true;
-        if (order.getAccountNumber() != null && order.getAccountNumber().equals(viewer.getAccountNumber())) return true;
+        if (order.getAccountNumber() != null) {
+            if (order.getAccountNumber().equals(viewer.getAccountNumber())) return true;
+            if (userRepo.findAccountNumberAliases(viewer.getId()).contains(order.getAccountNumber())) return true;
+        }
         if (order.getPixKey() != null && order.getPixKey().equalsIgnoreCase(viewer.getEmail())) return true;
         return !viewerCpf.isBlank() && order.getPixKey() != null
                 && viewerCpf.equals(DocumentUtilsBridge.digits(order.getPixKey()));
@@ -268,7 +271,7 @@ public class ExternalTransferService {
         order.setBeneficiaryDocument(DocumentUtilsBridge.digits(
                 toUser.getCpf() != null ? toUser.getCpf() : cmd.beneficiaryDocument));
         order.setBankCode("999");
-        order.setIspb("99999999");
+        order.setIspb(null);
         order.setAgency("0001");
         order.setAccountNumber(toUser.getAccountNumber());
         order.setAccountDigit(cmd.accountDigit);

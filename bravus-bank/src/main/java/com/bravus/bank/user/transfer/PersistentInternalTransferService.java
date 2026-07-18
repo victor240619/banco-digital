@@ -232,7 +232,7 @@ public class PersistentInternalTransferService {
         order.setBeneficiaryName(to.getFullName() != null ? to.getFullName() : to.getUsername());
         order.setBeneficiaryDocument(digits(to.getCpf()));
         order.setBankCode("999");
-        order.setIspb("99999999");
+        order.setIspb(null);
         order.setAgency(to.getAgencia() != null ? to.getAgencia() : "0001");
         order.setAccountNumber(to.getAccountNumber());
         order.setAccountType(to.getAccountType() != null ? to.getAccountType() : "CORRENTE");

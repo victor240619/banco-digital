@@ -50,5 +50,8 @@ public interface UserRepository extends JpaRepository<UserEntity, Long> {
             """, nativeQuery = true)
     boolean existsByCurrentOrLegacyAccountNumber(@Param("accountNumber") String accountNumber);
 
+    @Query("select alias.accountNumber from AccountNumberAliasEntity alias where alias.userId = :userId")
+    List<String> findAccountNumberAliases(@Param("userId") Long userId);
+
     boolean existsByCpf(String cpf);
 }

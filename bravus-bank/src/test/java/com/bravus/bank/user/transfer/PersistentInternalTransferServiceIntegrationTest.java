@@ -4,6 +4,7 @@ import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.TransactionRepository;
 import com.bravus.bank.db.repo.UserRepository;
 import com.bravus.bank.external.ExternalTransferRepository;
+import com.bravus.bank.external.ExternalTransferService;
 import com.bravus.bank.user.OutboundOperationPolicy;
 import com.bravus.bank.user.OutboundOperationRestrictedException;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
+import java.util.ArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -41,6 +43,9 @@ class PersistentInternalTransferServiceIntegrationTest {
 
     @Autowired
     private ExternalTransferRepository externalTransferRepository;
+
+    @Autowired
+    private ExternalTransferService externalTransferService;
 
     @Autowired
     private InternalTransferRequestRepository requestRepository;
@@ -83,6 +88,7 @@ class PersistentInternalTransferServiceIntegrationTest {
         assertEquals(2500L, userRepository.findById(francisca.getId()).orElseThrow().getBalance());
         assertEquals(2L, transactionRepository.count());
         assertEquals(1L, externalTransferRepository.count());
+        assertTrue(externalTransferRepository.findAll().stream().allMatch(order -> order.getIspb() == null));
         assertEquals(1L, requestRepository.count());
 
         List<AccountLedgerEntryEntity> entries = accountLedgerRepository.findAll();
@@ -126,6 +132,55 @@ class PersistentInternalTransferServiceIntegrationTest {
         assertEquals("222222", userRepository.findById(francisca.getId()).orElseThrow().getAccountNumber());
         assertEquals(9000L, userRepository.findById(joao.getId()).orElseThrow().getBalance());
         assertEquals(1000L, userRepository.findById(francisca.getId()).orElseThrow().getBalance());
+    }
+
+    @Test
+    void historicalReceiptResolvesThroughLegacyBeneficiaryAccount() {
+        service.transfer(
+                joao.getUsername(),
+                francisca.getAccountNumber(),
+                1200L,
+                "Comprovante legado",
+                "transfer-idempotency-key-receipt-0001");
+        jdbcTemplate.update(
+                "INSERT INTO account_number_aliases (user_id, account_number, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                francisca.getId(),
+                "2222222222");
+        jdbcTemplate.update(
+                "UPDATE external_transfer_orders SET account_number = ? WHERE beneficiary_document = ?",
+                "2222222222",
+                francisca.getCpf());
+
+        List<String> accountNumbers = new ArrayList<>();
+        accountNumbers.add(francisca.getAccountNumber());
+        accountNumbers.addAll(userRepository.findAccountNumberAliases(francisca.getId()));
+
+        assertTrue(externalTransferRepository
+                .findTopByBeneficiaryDocumentAndAccountNumberInAndAmountCentavosOrderByCreatedAtDesc(
+                        francisca.getCpf(), accountNumbers, 1200L)
+                .isPresent());
+    }
+
+    @Test
+    void historicalReceiptAuthorizationAcceptsLegacyBeneficiaryAccount() {
+        PersistentInternalTransferService.TransferResult result = service.transfer(
+                joao.getUsername(),
+                francisca.getAccountNumber(),
+                1300L,
+                "Autorizacao de comprovante legado",
+                "transfer-idempotency-key-receipt-auth-0001");
+        jdbcTemplate.update(
+                "INSERT INTO account_number_aliases (user_id, account_number, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                francisca.getId(),
+                "2222222222");
+        jdbcTemplate.update(
+                "UPDATE external_transfer_orders SET account_number = ?, beneficiary_document = ?, pix_key = NULL WHERE id = ?",
+                "2222222222",
+                "99999999999",
+                result.receiptOrderId());
+
+        assertEquals(result.receiptOrderId(),
+                externalTransferService.findForUser(result.receiptOrderId(), francisca.getId()).getId());
     }
 
     @Test

@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -361,9 +362,12 @@ public class UserController {
         Optional<ExternalTransferEntity> byTransaction = externalTransferRepository.findByTransactionId(tx.getId());
         if (byTransaction.isPresent()) return byTransaction;
         if ("TRANSFER_IN".equals(tx.getType())) {
-            return externalTransferRepository.findTopByBeneficiaryDocumentAndAccountNumberAndAmountCentavosOrderByCreatedAtDesc(
+            List<String> accountNumbers = new ArrayList<>();
+            accountNumbers.add(viewer.getAccountNumber());
+            accountNumbers.addAll(userRepository.findAccountNumberAliases(viewer.getId()));
+            return externalTransferRepository.findTopByBeneficiaryDocumentAndAccountNumberInAndAmountCentavosOrderByCreatedAtDesc(
                     digits(viewer.getCpf()),
-                    viewer.getAccountNumber(),
+                    accountNumbers,
                     tx.getAmount());
         }
         return Optional.empty();
@@ -377,7 +381,7 @@ public class UserController {
                 user.getCpf(),
                 user.getNomeBanco(),
                 user.getCodigoBanco(),
-                user.getIspb(),
+                null,
                 user.getAgencia(),
                 user.getAccountNumber(),
                 null,
@@ -394,7 +398,7 @@ public class UserController {
                 user.getCpf(),
                 user.getNomeBanco(),
                 user.getCodigoBanco(),
-                user.getIspb(),
+                null,
                 user.getAgencia(),
                 user.getAccountNumber(),
                 null,
@@ -408,7 +412,7 @@ public class UserController {
                 order.getBeneficiaryDocument(),
                 null,
                 order.getBankCode(),
-                order.getIspb(),
+                null,
                 order.getAgency(),
                 order.getAccountNumber(),
                 order.getAccountDigit(),
@@ -422,7 +426,7 @@ public class UserController {
                 "BRAVUS-LEDGER",
                 "Bravus Premium Bank",
                 "999",
-                "99999999",
+                null,
                 "0001",
                 "BRAVUS-LEDGER",
                 null,

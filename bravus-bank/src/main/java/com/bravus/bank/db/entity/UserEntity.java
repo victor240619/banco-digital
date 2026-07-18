@@ -1,6 +1,7 @@
 package com.bravus.bank.db.entity;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Pattern;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.HashSet;
@@ -43,7 +44,8 @@ public class UserEntity {
     @Column(nullable = false)
     private Long balance = 0L;
 
-    @Column(name = "account_number", unique = true, nullable = false)
+    @Pattern(regexp = "^(?!000000$)[0-9]{6}$", message = "Account number must contain exactly six digits")
+    @Column(name = "account_number", unique = true, nullable = false, length = 6)
     private String accountNumber;
 
     @Column(name = "account_type")

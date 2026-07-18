@@ -178,6 +178,9 @@ public class AuthController {
                 && (userRepository.existsByCpf(normalizedCpf) || userRepository.existsByCpf(request.cpf()))) {
             return ResponseEntity.badRequest().body("CPF already registered");
         }
+        // The database row lock serializes account allocation across application instances.
+        RoleEntity userRole = roleRepository.findByNameForUpdate("ROLE_USER")
+                .orElseThrow(() -> new RuntimeException("Role not found"));
         String accountNumber = generateAccountNumber();
         
         // Create user
@@ -195,13 +198,11 @@ public class AuthController {
         user.setOutboundOperationsEnabled(false);
         
         // Assign USER role
-        RoleEntity userRole = roleRepository.findByName("ROLE_USER")
-                .orElseThrow(() -> new RuntimeException("Role not found"));
         Set<RoleEntity> roles = new HashSet<>();
         roles.add(userRole);
         user.setRoles(roles);
         
-        user = userRepository.save(user);
+        user = userRepository.saveAndFlush(user);
 
         DocumentAnalysisEntity analysis = documentAnalysisService.analyzeForUser(user);
         accountOpeningKycService.storeForUser(user, kycPayload, "CPF", normalizedCpf);

@@ -74,7 +74,7 @@ class PasswordResetServiceIntegrationTest {
 
     @Test
     void completeChangesOnlyCredentialsAndConsumesRequestOnce() {
-        UserEntity user = createUser("recover.user", "recover@example.com", "31415926590", "FixturePwd123", 456_789L);
+        UserEntity user = createUser("recover.user", "recover@example.com", "31415926590", "314159", 456_789L);
         String oldHash = user.getPassword();
         String clientSecret = "another-client-secret-with-thirty-two-characters";
 
@@ -101,7 +101,7 @@ class PasswordResetServiceIntegrationTest {
 
     @Test
     void wrongClientSecretNeverChangesPasswordOrBalance() {
-        UserEntity user = createUser("locked.user", "locked@example.com", "39053344705", "3905334470", 99_900L);
+        UserEntity user = createUser("locked.user", "locked@example.com", "39053344705", "390533", 99_900L);
         String oldHash = user.getPassword();
         PasswordResetRequestEntity request = verifiedRequest(
                 user, "correct-client-secret-with-thirty-two-characters");
@@ -121,7 +121,7 @@ class PasswordResetServiceIntegrationTest {
 
     @Test
     void facialSubmissionRequiresAdminReviewBeforePasswordCanChange() throws Exception {
-        UserEntity user = createUser("facial.user", "facial@example.com", "52998224725", "5299822472", 12_345L);
+        UserEntity user = createUser("facial.user", "facial@example.com", "52998224725", "529982", 12_345L);
         storeEnrolledFace(user, "enrolled-face-evidence".getBytes(StandardCharsets.UTF_8));
         String clientSecret = "facial-client-secret-with-at-least-thirty-two-characters";
 
@@ -156,7 +156,7 @@ class PasswordResetServiceIntegrationTest {
 
     @Test
     void expiredAdminReviewIsRejectedAndPurgesSubmittedBiometry() throws Exception {
-        UserEntity user = createUser("expired.user", "expired@example.com", "29537983800", "2953798380", 88_000L);
+        UserEntity user = createUser("expired.user", "expired@example.com", "29537983800", "295379", 88_000L);
         storeEnrolledFace(user, "expired-enrolled-face".getBytes(StandardCharsets.UTF_8));
         String clientSecret = "expired-client-secret-with-at-least-thirty-two-characters";
         PasswordResetService.StartResult started = service.start(new PasswordResetService.StartCommand(
