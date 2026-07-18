@@ -23,5 +23,6 @@ assert.match(contents.find(([file]) => file.endsWith('build.gradle'))[1], /versi
 assert.match(contents.find(([file]) => file.endsWith('build.gradle'))[1], /versionName\s+"1\.3\.0"/);
 assert.match(contents.find(([file]) => file === 'render.yaml')[1], /value:\s+"https:\/\/bravusbank\.com"/);
 assert.match(contents.find(([file]) => file.endsWith('build-sites-artifact.mjs'))[1], /banco-digital\/master\/bravus-bank-frontend/);
+assert.match(contents.find(([file]) => file.endsWith('build-sites-artifact.mjs'))[1], /hostname\.endsWith\("\.chatgpt\.site"\)/);
 
 console.log('Native production origin tests passed.');

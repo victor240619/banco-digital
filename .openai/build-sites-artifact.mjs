@@ -4928,7 +4928,12 @@ async function handleApi(request) {
 
 export default {
   async fetch(request, env) {
-    if (new URL(request.url).pathname.startsWith("/api/")) return handlePersistedApi(request, env);
+    const requestUrl = new URL(request.url);
+    if (requestUrl.pathname.startsWith("/api/")) return handlePersistedApi(request, env);
+    if ((request.method === "GET" || request.method === "HEAD") && requestUrl.hostname.endsWith(".chatgpt.site")) {
+      const canonicalUrl = new URL(requestUrl.pathname + requestUrl.search, "https://bravusbank.com");
+      return Response.redirect(canonicalUrl.toString(), 308);
+    }
     const requestedPath = routePath(request.url);
     const file = files[requestedPath];
     if (!file) return new Response("Not found", { status: 404 });
