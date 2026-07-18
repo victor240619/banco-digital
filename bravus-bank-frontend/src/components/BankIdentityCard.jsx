@@ -2,12 +2,12 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Building2, CreditCard, Copy, Check, ShieldCheck, Crown,
-  ChevronDown, ChevronUp, KeyRound, MapPin, User2, Phone, Mail, Network,
+  ChevronDown, ChevronUp, MapPin, User2, Phone, Mail, Network,
 } from 'lucide-react';
 
 /**
  * Card de identidade bancária — substitui o header simples por algo profissional.
- * Mostra: nível da conta, banco, agência, conta, chave PIX, status KYC.
+ * Mostra: nível da conta, banco, agência, conta, roteamento Cayman e status KYC.
  * Permite expandir pra ver dados pessoais completos.
  */
 export default function BankIdentityCard({ me }) {
@@ -35,7 +35,6 @@ export default function BankIdentityCard({ me }) {
       `CPF: ${me.cpf}`,
       `Agência: ${banco.agencia}`,
       `Conta: ${banco.contaFormatada || banco.conta} (${banco.tipoConta})`,
-      `Chave PIX (${banco.tipoChavePix}): ${banco.chavePix}`,
       `Roteamento Cayman: ${banco.internalRoutingCode || 'BRAV-KY-INTERNAL'}`,
       `SWIFT/BIC interno: ${banco.swiftBic || 'BRAVKYK0XXX'} (homologacao, nao registrado)`,
     ].join('\n');
@@ -116,11 +115,11 @@ export default function BankIdentityCard({ me }) {
             copied={copied === 'conta'}
           />
           <DataPill
-            label={`Chave PIX (${banco.tipoChavePix || 'CPF'})`}
-            value={banco.chavePix}
-            icon={KeyRound}
-            onCopy={() => copy('pix', banco.chavePix)}
-            copied={copied === 'pix'}
+            label="Roteamento Cayman"
+            value={banco.internalRoutingCode || 'BRAV-KY-INTERNAL'}
+            icon={Network}
+            onCopy={() => copy('routing', banco.internalRoutingCode || 'BRAV-KY-INTERNAL')}
+            copied={copied === 'routing'}
             highlight
           />
           <DataPill

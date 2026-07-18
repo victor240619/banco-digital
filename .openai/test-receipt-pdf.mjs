@@ -19,7 +19,7 @@ try {
     receiptKind: 'COMPROVANTE_LIQUIDACAO_CONFIRMADA',
     transactionId: 'TX-VALIDACAO-001',
     amountCentavos: 1000,
-    channel: 'PIX',
+    channel: 'ACH',
     status: 'COMPLETED',
     settlementStatus: 'SETTLED',
     createdAt: '2026-07-15T12:00:00-03:00',
@@ -42,7 +42,7 @@ try {
       accountDigit: '2',
     },
     provider: 'BRAVUS_INTERNAL',
-    destinationNetwork: 'PIX_BR',
+    destinationNetwork: 'CAYMAN_ACH',
     destinationConfirmationId: 'CONF-VALIDACAO-001',
     description: 'Transferencia Bravus',
   });

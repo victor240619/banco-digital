@@ -1236,7 +1236,7 @@ function appendInternalLedgerPair(order, payer, beneficiary, amount, reason) {
     accountNumber: payer.accountNumber,
     entryType: "debit",
     signedAmountCentavos: -amount,
-    currency: "BRL",
+    currency: "KYD",
     reason,
     createdAt,
   };
@@ -1248,7 +1248,7 @@ function appendInternalLedgerPair(order, payer, beneficiary, amount, reason) {
     accountNumber: beneficiary.accountNumber,
     entryType: "credit",
     signedAmountCentavos: amount,
-    currency: "BRL",
+    currency: "KYD",
     reason,
     createdAt,
   };
@@ -1273,8 +1273,8 @@ function internalOrderPayload({ order, payer, beneficiary, tx, amount, descripti
     beneficiaryUsername: beneficiary.username,
     transactionId: tx.id,
     amountCentavos: amount,
-    channel: channel || "PIX",
-    currency: "BRL",
+    channel: channel || "INTERNAL_BRAVUS",
+    currency: "KYD",
     beneficiaryName: beneficiary.fullName,
     beneficiaryDocument: beneficiary.cpf,
     bankCode: "999",
@@ -1313,7 +1313,7 @@ function commitInternalTransfer({ payer, beneficiary, amount, description, chann
   if (payer.username === beneficiary.username) throw new Error("SELF_TRANSFER");
   const transferKey = idempotencyKey || existingOrder?.idempotencyKey || ("sites-internal-" + Date.now());
   const previousOrder = state.externalTransfers.find((order) => order.idempotencyKey === transferKey && order.ledgerSettledAt);
-  const fingerprint = [payer.username, beneficiary.username, value, String(description || "").trim(), String(channel || "PIX")].join("|");
+  const fingerprint = [payer.username, beneficiary.username, value, String(description || "").trim(), String(channel || "INTERNAL_BRAVUS")].join("|");
   if (previousOrder) {
     if (previousOrder.idempotencyFingerprint && previousOrder.idempotencyFingerprint !== fingerprint) {
       throw new Error("IDEMPOTENCY_CONFLICT");
@@ -1709,10 +1709,41 @@ function validateSitesLedger() {
 
 function inferNetwork(body) {
   if (body.destinationNetwork) return String(body.destinationNetwork).toUpperCase();
-  const channel = String(body.channel || "GLOBAL").toUpperCase();
-  if (channel === "PIX") return "PIX_BR";
-  if (channel === "TED") return "TED_BR";
-  return channel;
+  const channel = String(body.channel || "ACH").toUpperCase();
+  if (channel === "ACH") return "CAYMAN_ACH";
+  if (channel === "EFT") return "CAYMAN_EFT";
+  if (channel === "WIRE") return "SWIFT";
+  if (["MSB_REMITTANCE", "MSB_FX"].includes(channel)) return "CAYMAN_MSB";
+  return channel === "SWIFT" ? "SWIFT" : "CAYMAN_RAIL";
+}
+
+const supportedCaymanTransferChannels = new Set([
+  "ACH", "EFT", "SWIFT", "WIRE", "MSB_REMITTANCE", "MSB_FX", "CAYMAN_RAIL",
+]);
+
+function validateCaymanTransferBody(body) {
+  const channel = String(body.channel || "").trim().toUpperCase();
+  if (!supportedCaymanTransferChannels.has(channel)) {
+    return {
+      code: "TRANSFER_RAIL_UNSUPPORTED",
+      message: "Canal de transferencia indisponivel. Use ACH/EFT para Cayman, Wire/SWIFT para transferencias internacionais ou o fluxo licenciado de remessa e cambio.",
+    };
+  }
+  if (["MSB_REMITTANCE", "MSB_FX"].includes(channel)) {
+    return {
+      code: "MSB_LICENSE_REQUIRED",
+      message: "Remessas e cambio estao indisponiveis ate a ativacao da licenca de Money Services Business pela CIMA. Nenhum valor foi debitado.",
+    };
+  }
+  if (!String(body.accountNumber || "").trim()) {
+    return {
+      code: "DESTINATION_ACCOUNT_REQUIRED",
+      message: "Informe a conta beneficiaria para o canal selecionado.",
+    };
+  }
+  body.channel = channel;
+  body.destinationNetwork = inferNetwork(body);
+  return null;
 }
 
 function normalizeExternalBic(value) {
@@ -3348,12 +3379,14 @@ async function handleApi(request) {
     const body = await request.json().catch(() => ({}));
     const amount = Number(body.amountCentavos || 0);
     if (!amount || amount <= 0) return json("Digite um valor valido.", { status: 400 });
+    const railError = validateCaymanTransferBody(body);
+    if (railError) return badRequest(railError.message, railError.code);
     const idempotencyKey = String(request.headers.get("idempotency-key") || body.idempotencyKey || "").trim();
     if (idempotencyKey.length < 16 || idempotencyKey.length > 150) {
       return badRequest("Informe uma chave de idempotencia valida para a transferencia.", "IDEMPOTENCY_KEY_REQUIRED");
     }
     const idempotencyFingerprint = [
-      user.username, amount, body.channel || "PIX", body.beneficiaryDocument || "", body.pixKey || "",
+      user.username, amount, body.channel, body.beneficiaryDocument || "", body.pixKey || "",
       body.bankCode || "", body.ispb || "", body.agency || "", body.accountNumber || "", body.accountDigit || "",
     ].join("|");
     const previousOrder = state.externalTransfers.find((order) => order.idempotencyKey === idempotencyKey);
@@ -3374,7 +3407,7 @@ async function handleApi(request) {
           beneficiary: bravusDestination,
           amount,
           description: body.description || "Transferencia interna Bravus",
-          channel: body.channel || "PIX",
+          channel: "INTERNAL_BRAVUS",
           idempotencyKey,
           source: "USER_EXTERNAL_TRANSFER",
         });
@@ -3416,8 +3449,8 @@ async function handleApi(request) {
       payerUsername: user.username,
       transactionId: tx.id,
       amountCentavos: amount,
-      channel: body.channel || "PIX",
-      currency: "BRL",
+      channel: body.channel,
+      currency: "KYD",
       beneficiaryName: body.beneficiaryName || "Beneficiario externo",
       beneficiaryDocument: String(body.beneficiaryDocument || "").replace(/\\D/g, ""),
       bankCode: body.bankCode || null,
@@ -3467,12 +3500,17 @@ async function handleApi(request) {
       const destinationRaw = body.destinationAccount || body.pixKey || body.accountNumber || "";
       destination = findTransferDestination(destinationRaw);
       if (!destination) {
+        return badRequest(
+          "Destino Bravus nao encontrado. Para outros bancos, use ACH/EFT Cayman ou Wire/SWIFT internacional.",
+          "BRAVUS_DESTINATION_NOT_FOUND"
+        );
+        /* Legacy external fallback intentionally remains unreachable so historical snapshots can still be parsed. */
         const raw = String(destinationRaw || "").trim();
         const rawDigits = digits(raw);
         const pixKeyType = body.pixKeyType || (raw.includes("@") ? "EMAIL" : rawDigits.length === 11 ? "CPF" : rawDigits.length === 14 ? "CNPJ" : "EVP");
         const externalBody = {
           ...body,
-          channel: body.channel || "PIX",
+          channel: "INTERNAL_BRAVUS",
           destinationNetwork: body.destinationNetwork || "PIX_BR",
           pixKey: body.pixKey || raw || null,
           pixKeyType,
@@ -3560,7 +3598,7 @@ async function handleApi(request) {
           beneficiary: destination,
           amount,
           description: body.description || "Transferencia interna Bravus",
-          channel: body.channel || "PIX",
+          channel: "INTERNAL_BRAVUS",
           idempotencyKey: request.headers.get("idempotency-key") || ("sites-legacy-internal-" + Date.now()),
           source: "LEGACY_USER_TRANSFER",
         });
@@ -3627,8 +3665,8 @@ async function handleApi(request) {
         beneficiaryUsername: destination.username,
         transactionId: tx.id,
         amountCentavos: amount,
-        channel: body.channel || "PIX",
-        currency: "BRL",
+        channel: "INTERNAL_BRAVUS",
+        currency: "KYD",
         beneficiaryName: destination.fullName,
         beneficiaryDocument: destination.cpf,
         bankCode: "999",
@@ -4498,12 +4536,14 @@ async function handleApi(request) {
     if (!canUseOutgoingBanking(origin)) return outgoingKycBlocked(origin);
     const amount = Number(body.amountCentavos || 0);
     if (!amount || amount <= 0) return json("Digite um valor valido.", { status: 400 });
+    const railError = validateCaymanTransferBody(body);
+    if (railError) return badRequest(railError.message, railError.code);
     const idempotencyKey = String(request.headers.get("idempotency-key") || body.idempotencyKey || "").trim();
     if (idempotencyKey.length < 16 || idempotencyKey.length > 150) {
       return badRequest("Informe uma chave de idempotencia valida para a transferencia.", "IDEMPOTENCY_KEY_REQUIRED");
     }
     const idempotencyFingerprint = [
-      origin.username, amount, body.channel || "PIX", body.beneficiaryDocument || "", body.pixKey || "",
+      origin.username, amount, body.channel, body.beneficiaryDocument || "", body.pixKey || "",
       body.bankCode || "", body.ispb || "", body.agency || "", body.accountNumber || "", body.accountDigit || "",
     ].join("|");
     const previousOrder = state.externalTransfers.find((order) => order.idempotencyKey === idempotencyKey);
@@ -4524,7 +4564,7 @@ async function handleApi(request) {
           beneficiary: bravusDestination,
           amount,
           description: body.description || "Transferencia interna admin Bravus",
-          channel: body.channel || "PIX",
+          channel: "INTERNAL_BRAVUS",
           idempotencyKey,
           source: "ADMIN",
         });
@@ -4566,8 +4606,8 @@ async function handleApi(request) {
       payerUsername: origin.username,
       transactionId: tx.id,
       amountCentavos: amount,
-      channel: body.channel || "PIX",
-      currency: "BRL",
+      channel: body.channel,
+      currency: "KYD",
       beneficiaryName: body.beneficiaryName || "Beneficiario externo",
       beneficiaryDocument: String(body.beneficiaryDocument || "").replace(/\\D/g, ""),
       bankCode: body.bankCode || null,

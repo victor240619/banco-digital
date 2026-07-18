@@ -130,7 +130,7 @@ export default function Home() {
                 <div className="mt-1 text-xs text-ink-400">Ag. 0001 · CC 0042-7</div>
 
                 <div className="mt-6 grid grid-cols-3 gap-2">
-                  {['PIX', 'Boleto', 'Transferir'].map((t) => (
+                  {['ACH / EFT', 'Wire', 'Transferir'].map((t) => (
                     <div key={t} className="rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-center text-xs font-medium hover:bg-white/10 transition-colors">
                       {t}
                     </div>
@@ -141,7 +141,7 @@ export default function Home() {
                   <div className="text-xs text-ink-400 mb-2">Últimas movimentações</div>
                   <ul className="space-y-2">
                     {[
-                      { t: 'PIX recebido', v: '+ KYD 1.200,00', c: 'text-emerald-300' },
+                      { t: 'ACH recebido', v: '+ KYD 1.200,00', c: 'text-emerald-300' },
                       { t: 'Assinatura Bravus', v: '- KYD 49,90', c: 'text-red-300' },
                       { t: 'Transferência', v: '- KYD 850,00', c: 'text-red-300' },
                     ].map((m, i) => (
@@ -161,7 +161,7 @@ export default function Home() {
       {/* ============ STATS ============ */}
       <section className="container-app">
         <div className="card-premium grid grid-cols-2 md:grid-cols-4 gap-6 p-8">
-          <Stat value="< 200ms" label="Latência PIX" />
+          <Stat value="24/7" label="Canais digitais" />
           <Stat value="99.99%" label="Uptime SLA" />
           <Stat value="256-bit" label="Criptografia" />
           <Stat value="24/7" label="Suporte" />
@@ -181,8 +181,8 @@ export default function Home() {
         <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           <FeatureCard
             icon={Zap}
-            title="Transferências instantâneas"
-            desc="PIX, TED e transferências internas processadas em tempo real, sem fricção."
+            title="Transferências Cayman e globais"
+            desc="ACH/EFT local, Wire/SWIFT internacional e liquidação interna Bravus com trilhos separados."
             accent="bg-gold-400/15 text-gold-300"
           />
           <FeatureCard

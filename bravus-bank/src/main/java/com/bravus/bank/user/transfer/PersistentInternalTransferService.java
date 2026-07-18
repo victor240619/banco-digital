@@ -72,7 +72,7 @@ public class PersistentInternalTransferService {
         UserEntity initialTo = findDestination(destination)
                 .orElseThrow(() -> new InternalTransferException(
                         "BRAVUS_DESTINATION_NOT_FOUND",
-                        "Destino Bravus nao encontrado. Para outros bancos, use Pagamentos/Pix ou Outros bancos."));
+                        "Destino Bravus nao encontrado. Para outros bancos, use ACH/EFT Cayman ou Wire/SWIFT internacional."));
 
         if (initialFrom.getId().equals(initialTo.getId())) {
             throw new InternalTransferException("SELF_TRANSFER", "Nao e permitido transferir para a propria conta Bravus.");
@@ -227,8 +227,8 @@ public class PersistentInternalTransferService {
         order.setRequestedBy(from);
         order.setTransactionId(out.getId());
         order.setAmountCentavos(amount);
-        order.setChannel("PIX");
-        order.setCurrency("BRL");
+        order.setChannel("INTERNAL_BRAVUS");
+        order.setCurrency("KYD");
         order.setBeneficiaryName(to.getFullName() != null ? to.getFullName() : to.getUsername());
         order.setBeneficiaryDocument(digits(to.getCpf()));
         order.setBankCode("999");
@@ -271,7 +271,7 @@ public class PersistentInternalTransferService {
         entry.setAccountNumber(user.getAccountNumber());
         entry.setEntryType(entryType);
         entry.setSignedAmountCentavos(signedAmount);
-        entry.setCurrency("BRL");
+        entry.setCurrency("KYD");
         entry.setReason("INTERNAL_TRANSFER");
         return entry;
     }

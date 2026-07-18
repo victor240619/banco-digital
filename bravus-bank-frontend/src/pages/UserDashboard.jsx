@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowDownToLine, ArrowUpFromLine, ArrowRightLeft, Wallet, Eye, EyeOff,
   TrendingUp, TrendingDown, Activity, Receipt, CheckCircle2, AlertCircle,
-  Send, Landmark, CreditCard, Percent,
+  Send, Landmark, CreditCard, Percent, Globe2,
   FileText, Barcode, CalendarDays, LineChart, UserCheck, UsersRound,
   ClipboardCheck, ShieldCheck, Smartphone, Building2, List, Grid3X3,
   Download, Share2, ArrowLeft, Menu, X, Home, User, KeyRound, LogOut,
@@ -58,7 +58,7 @@ const EMPTY_FORM = {
   description: '',
   destinationAccount: '',
   transferMode: 'internal',
-  channel: 'PIX',
+  channel: 'ACH',
   beneficiaryName: '',
   beneficiaryDocument: '',
   bankCode: '',
@@ -67,7 +67,7 @@ const EMPTY_FORM = {
   accountNumber: '',
   accountDigit: '',
   accountType: 'CORRENTE',
-  destinationNetwork: 'PIX_BR',
+  destinationNetwork: 'CAYMAN_ACH',
   pixKey: '',
   pixKeyType: 'CPF',
 };
@@ -85,7 +85,9 @@ const MODULE_ROUTES = {
   payments: '/dashboard/pagamentos',
   transfers: '/dashboard/transferencias',
   receipts: '/dashboard/comprovantes',
-  pix: '/dashboard/pix',
+  localCayman: '/dashboard/transferencia-cayman',
+  internationalWire: '/dashboard/wire-internacional',
+  remittance: '/dashboard/remessas-cambio',
   'deposit-check': '/dashboard/deposito-cheque',
   credit: '/dashboard/emprestimos-recebiveis',
   dda: '/dashboard/dda-boletos',
@@ -101,10 +103,13 @@ const MODULE_ROUTES = {
 
 const MODULE_ROUTE_STATE = {
   '/dashboard/extratos': { tab: 'statements', activeModule: 'balances' },
-  '/dashboard/pagamentos': { tab: 'transfer', activeModule: 'payments', transferMode: 'external', channel: 'PIX', destinationNetwork: 'PIX_BR' },
-  '/dashboard/transferencias': { tab: 'transfer', activeModule: 'transfers', transferMode: 'internal', channel: 'PIX', destinationNetwork: 'PIX_BR' },
+  '/dashboard/pagamentos': { tab: 'transfer', activeModule: 'localCayman', transferMode: 'external', channel: 'ACH', destinationNetwork: 'CAYMAN_ACH' },
+  '/dashboard/transferencia-cayman': { tab: 'transfer', activeModule: 'localCayman', transferMode: 'external', channel: 'ACH', destinationNetwork: 'CAYMAN_ACH' },
+  '/dashboard/transferencias': { tab: 'transfer', activeModule: 'transfers', transferMode: 'internal', channel: 'INTERNAL_BRAVUS', destinationNetwork: 'INTERNAL_BRAVUS' },
   '/dashboard/comprovantes': { tab: 'overview', activeModule: 'receipts' },
-  '/dashboard/pix': { tab: 'transfer', activeModule: 'pix', transferMode: 'external', channel: 'PIX', destinationNetwork: 'PIX_BR' },
+  '/dashboard/wire-internacional': { tab: 'transfer', activeModule: 'internationalWire', transferMode: 'external', channel: 'SWIFT', destinationNetwork: 'SWIFT' },
+  '/dashboard/remessas-cambio': { tab: 'transfer', activeModule: 'remittance', transferMode: 'external', channel: 'MSB_REMITTANCE', destinationNetwork: 'CAYMAN_MSB' },
+  '/dashboard/pix': { tab: 'transfer', activeModule: 'internationalWire', transferMode: 'external', channel: 'SWIFT', destinationNetwork: 'SWIFT' },
   '/dashboard/deposito-cheque': { tab: 'overview', activeModule: 'deposit-check' },
   '/dashboard/emprestimos-recebiveis': { tab: 'overview', activeModule: 'credit' },
   '/dashboard/dda-boletos': { tab: 'overview', activeModule: 'dda' },
@@ -132,7 +137,7 @@ const ACCOUNT_MENU_ITEMS = [
   { label: 'Perfil', route: '/dashboard/perfil', Icon: User },
   { label: 'Saldos e extratos', route: '/dashboard/extratos', Icon: FileText },
   { label: 'Transferências', route: '/dashboard/transferencias', Icon: ArrowRightLeft },
-  { label: 'Pix', route: '/dashboard/pix', Icon: Send },
+  { label: 'Wire internacional', route: '/dashboard/wire-internacional', Icon: Send },
   { label: 'Segurança', route: '/dashboard/seguranca', Icon: ShieldCheck },
   { label: 'Trocar senha', route: '/dashboard/trocar-senha', Icon: KeyRound },
 ];
@@ -144,7 +149,7 @@ const routeStateForPath = (pathname) => {
     '/dashboard/deposit': { tab: 'deposit', activeModule: 'deposit-check' },
     '/dashboard/withdraw': { tab: 'withdraw', activeModule: 'balances' },
     '/dashboard/saque': { tab: 'withdraw', activeModule: 'balances' },
-    '/dashboard/transfer': { tab: 'transfer', activeModule: 'transfers', transferMode: 'internal', channel: 'PIX' },
+    '/dashboard/transfer': { tab: 'transfer', activeModule: 'transfers', transferMode: 'internal', channel: 'INTERNAL_BRAVUS' },
     '/dashboard/transferencias': MODULE_ROUTE_STATE['/dashboard/transferencias'],
     '/dashboard/pagamentos': MODULE_ROUTE_STATE['/dashboard/pagamentos'],
     '/dashboard/pix': MODULE_ROUTE_STATE['/dashboard/pix'],
@@ -166,6 +171,30 @@ const routeStateForPath = (pathname) => {
   };
   return states[path] || states['/dashboard'];
 };
+
+const destinationNetworkForChannel = (channel) => ({
+  ACH: 'CAYMAN_ACH',
+  EFT: 'CAYMAN_EFT',
+  SWIFT: 'SWIFT',
+  WIRE: 'SWIFT',
+  MSB_REMITTANCE: 'CAYMAN_MSB',
+  MSB_FX: 'CAYMAN_MSB',
+  CAYMAN_RAIL: 'CAYMAN_RAIL',
+  INTERNAL_BRAVUS: 'INTERNAL_BRAVUS',
+}[channel] || 'CAYMAN_RAIL');
+
+const displayTransferChannel = (channel) => ({
+  ACH: 'ACH Cayman',
+  EFT: 'EFT Cayman',
+  SWIFT: 'Wire / SWIFT',
+  WIRE: 'Wire / SWIFT',
+  MSB_REMITTANCE: 'Remessa internacional',
+  MSB_FX: 'Câmbio',
+  CAYMAN_RAIL: 'Cayman Rail',
+  INTERNAL_BRAVUS: 'Transferência Bravus',
+  PIX: 'Canal legado descontinuado',
+  TED: 'Canal legado descontinuado',
+}[String(channel || '').toUpperCase()] || channel || 'Bravus');
 
 const operationErrorMessage = (err, fallback = 'Falha na operacao.') => {
   const data = err?.response?.data;
@@ -458,8 +487,6 @@ const partyRows = (party) => [
   ['Agencia', party?.agency],
   ['Conta', [party?.accountNumber, party?.accountDigit].filter(Boolean).join('-')],
   ['Tipo', party?.accountType],
-  ['Chave Pix', party?.pixKey],
-  ['Tipo chave', party?.pixKeyType],
 ];
 
 const buildReceiptPdfBlob = (receipt) => {
@@ -472,7 +499,7 @@ const buildReceiptPdfBlob = (receipt) => {
     pdfTextCommand({ text: 'Comprovante de transferencia', x: 48, y: 764, size: 22, bold: true }),
     pdfTextCommand({ text: `Valor: ${formatCurrency(receipt?.amountCentavos)}`, x: 48, y: 732, size: 16, bold: true }),
     pdfTextCommand({
-      text: `${receipt?.channel || 'BRAVUS'} | ${receipt?.settlementStatus || receipt?.status || 'PROCESSADO'}`,
+      text: `${displayTransferChannel(receipt?.channel)} | ${receipt?.settlementStatus || receipt?.status || 'PROCESSADO'}`,
       x: 48,
       y: 711,
       size: 10,
@@ -498,7 +525,7 @@ const buildReceiptPdfBlob = (receipt) => {
     ['Tipo', receipt?.receiptKind],
     ['Transacao', receipt?.transactionId],
     ['Valor', formatCurrency(receipt?.amountCentavos)],
-    ['Canal', receipt?.channel],
+    ['Canal', displayTransferChannel(receipt?.channel)],
     ['Status', receipt?.status],
     ['Liquidacao', receipt?.settlementStatus],
     ['Data', documentDate(receipt?.createdAt)],
@@ -537,7 +564,7 @@ export const buildReceiptDocument = (receipt) => {
         ['Tipo', receipt?.receiptKind],
         ['Transacao', receipt?.transactionId],
         ['Valor', formatCurrency(receipt?.amountCentavos)],
-        ['Canal', receipt?.channel],
+        ['Canal', displayTransferChannel(receipt?.channel)],
         ['Status', receipt?.status],
         ['Liquidacao', receipt?.settlementStatus],
         ['Data', documentDate(receipt?.createdAt)],
@@ -569,7 +596,7 @@ export const buildReceiptDocument = (receipt) => {
     filename: documentFilename('comprovante-bravus', receipt?.receiptId || receipt?.transactionId, 'pdf'),
     html: buildPrintableHtml({
       title,
-      subtitle: `${receipt?.channel || 'BRAVUS'} | ${receipt?.settlementStatus || receipt?.status || 'PROCESSADO'}`,
+      subtitle: `${displayTransferChannel(receipt?.channel)} | ${receipt?.settlementStatus || receipt?.status || 'PROCESSADO'}`,
       body,
       footer: `Comprovante emitido em ${formatDate(new Date().toISOString())}. Validacao interna: ${receipt?.receiptId || '-'}`,
     }),
@@ -676,8 +703,8 @@ export default function UserDashboard() {
       setForm({
         ...EMPTY_FORM,
         transferMode: route.transferMode,
-        channel: route.channel || 'PIX',
-        destinationNetwork: route.destinationNetwork || (route.channel === 'TED' ? 'TED_BR' : 'PIX_BR'),
+        channel: route.channel || 'ACH',
+        destinationNetwork: route.destinationNetwork || destinationNetworkForChannel(route.channel || 'ACH'),
       });
       setResolvedRecipient(null);
     }
@@ -718,12 +745,7 @@ export default function UserDashboard() {
   }, [profile?.outboundOperationsEnabled]);
 
   useEffect(() => {
-    const destination =
-      form.transferMode === 'internal'
-        ? form.destinationAccount.trim()
-        : form.channel === 'PIX'
-          ? form.pixKey.trim()
-          : '';
+    const destination = form.transferMode === 'internal' ? form.destinationAccount.trim() : '';
     if (tab !== 'transfer' || destination.length < 3) {
       setResolvedRecipient(null);
       setResolveLoading(false);
@@ -745,7 +767,7 @@ export default function UserDashboard() {
       active = false;
       clearTimeout(timer);
     };
-  }, [tab, form.transferMode, form.destinationAccount, form.channel, form.pixKey]);
+  }, [tab, form.transferMode, form.destinationAccount]);
 
   async function loadData(options = {}) {
     if (accountRefreshInFlight.current) {
@@ -828,24 +850,16 @@ export default function UserDashboard() {
       return setError('Saldo disponivel insuficiente para concluir a operacao.');
     }
     if (kind === 'transfer' && form.transferMode === 'internal' && !form.destinationAccount) {
-      return setError('Informe conta, CPF, e-mail ou chave Pix Bravus de destino.');
+      return setError('Informe a conta, o CPF, o e-mail ou o usuário Bravus de destino.');
     }
     if (kind === 'transfer' && form.transferMode === 'internal' && !resolvedRecipient) {
-      return setError('Confira o recebedor Bravus antes de enviar. Digite a conta, CPF ou chave Pix completa.');
+      return setError('Confira o recebedor Bravus antes de enviar. Digite a conta, o CPF, o e-mail ou o usuário completo.');
     }
     if (kind === 'transfer' && form.transferMode === 'external') {
       if ((!form.beneficiaryName || !form.beneficiaryDocument) && !resolvedRecipient) {
         return setError('Informe nome e documento do beneficiário.');
       }
-      if (form.channel === 'PIX' && !form.pixKey) {
-        return setError('Informe a chave PIX do beneficiário.');
-      }
-      if (form.channel === 'TED' && (!form.bankCode || !form.agency || !form.accountNumber)) {
-        return setError('Informe banco, agência e conta para TED.');
-      }
-    }
-    if (kind === 'transfer' && form.transferMode === 'external' && !['PIX', 'TED'].includes(form.channel) && !form.accountNumber) {
-      return setError('Informe a conta beneficiaria para o canal selecionado.');
+      if (!form.accountNumber) return setError('Informe a conta beneficiária para o canal selecionado.');
     }
     let transferIdempotencyKey = null;
     if (kind === 'transfer') {
@@ -1060,15 +1074,12 @@ export default function UserDashboard() {
     navigate(TAB_ROUTES[id] || '/dashboard');
   };
 
-  const openTransferMode = (transferMode = 'internal', channel = 'PIX', routeOverride = null) => {
+  const openTransferMode = (transferMode = 'internal', channel = 'INTERNAL_BRAVUS', routeOverride = null) => {
     setForm({
       ...EMPTY_FORM,
       transferMode,
       channel,
-      destinationNetwork:
-        channel === 'PIX' ? 'PIX_BR'
-        : channel === 'TED' ? 'TED_BR'
-        : channel,
+      destinationNetwork: destinationNetworkForChannel(channel),
     });
     setTab('transfer');
     navigate(routeOverride || (transferMode === 'internal' ? '/dashboard/transfer' : '/dashboard/pagamentos'));
@@ -1076,8 +1087,10 @@ export default function UserDashboard() {
 
   const bankingModules = [
     { id: 'balances', label: 'Saldos e Extratos', Icon: FileText, badge: `${transactions.length} movs` },
-    { id: 'payments', label: 'Pagamentos', Icon: Barcode, badge: 'PIX e contas', accent: true },
-    { id: 'transfers', label: 'Transferencias', Icon: ArrowRightLeft, badge: 'Bravus e bancos' },
+    { id: 'localCayman', label: 'Transferência Cayman', Icon: Landmark, badge: 'ACH e EFT', accent: true },
+    { id: 'transfers', label: 'Transferências Bravus', Icon: ArrowRightLeft, badge: 'Liquidação interna' },
+    { id: 'internationalWire', label: 'Wire internacional', Icon: Send, badge: 'SWIFT e correspondente' },
+    { id: 'remittance', label: 'Remessas e câmbio', Icon: Globe2, badge: 'Licença CIMA' },
     { id: 'dda', label: 'DDA Boletos Registrados', Icon: ClipboardCheck, badge: '0 pendentes' },
     { id: 'cards', label: 'Cartoes', Icon: CreditCard, badge: 'Conta ativa' },
     { id: 'credit', label: 'Emprestimos e Recebiveis', Icon: Landmark, badge: showBalance ? formatCurrency(creditAvailable) : 'KYD ******', accent: true },
@@ -1087,9 +1100,8 @@ export default function UserDashboard() {
     { id: 'investments', label: 'Investimentos', Icon: LineChart, badge: 'Carteira' },
     { id: 'pending', label: 'Pendencias', Icon: UserCheck, badge: me?.conta?.statusKyc || 'Conta' },
     { id: 'beneficiaries', label: 'Favorecidos', Icon: UsersRound, badge: `${externalOrders.length} recentes` },
-    { id: 'pix', label: 'Pix', Icon: Send, badge: me?.dadosBancarios?.tipoChavePix || 'Chave' },
     { id: 'receipts', label: 'Comprovantes', Icon: Receipt, badge: `${externalOrders.length} ordens` },
-    { id: 'limits', label: 'Limites', Icon: Smartphone, badge: showBalance ? formatCurrency(me?.saldos?.limitePixDiarioCentavos ?? 0) : 'KYD ******' },
+    { id: 'limits', label: 'Limites', Icon: Smartphone, badge: showBalance ? formatCurrency(me?.saldos?.limiteTransferenciaDiarioCentavos ?? me?.saldos?.limitePixDiarioCentavos ?? 0) : 'KYD ******' },
     { id: 'security', label: 'Seguranca', Icon: ShieldCheck, badge: 'Ativa' },
   ];
 
@@ -1097,8 +1109,13 @@ export default function UserDashboard() {
   const isDashboardHome = normalizedDashboardPath === '/dashboard';
   const activeModuleDefinition = bankingModules.find((module) => module.id === activeModule) || bankingModules[0];
   const dedicatedPageMeta = DIRECT_ROUTE_META[normalizedDashboardPath] || activeModuleDefinition;
-  const transferOperationLabel =
-    activeModule === 'payments' ? 'pagamento' : activeModule === 'pix' ? 'Pix' : 'transferência';
+  const transferOperationLabel = activeModule === 'localCayman'
+    ? 'transferência Cayman'
+    : activeModule === 'internationalWire'
+      ? 'Wire internacional'
+      : activeModule === 'remittance'
+        ? 'remessa ou câmbio'
+        : 'transferência';
 
   const handleModuleClick = (moduleId) => {
     const route = MODULE_ROUTES[moduleId] || '/dashboard';
@@ -1109,8 +1126,8 @@ export default function UserDashboard() {
       setForm({
         ...EMPTY_FORM,
         transferMode: routeState.transferMode,
-        channel: routeState.channel || 'PIX',
-        destinationNetwork: routeState.destinationNetwork || (routeState.channel === 'TED' ? 'TED_BR' : 'PIX_BR'),
+        channel: routeState.channel || 'ACH',
+        destinationNetwork: routeState.destinationNetwork || destinationNetworkForChannel(routeState.channel || 'ACH'),
       });
     }
     return navigate(route);
@@ -1482,11 +1499,13 @@ export default function UserDashboard() {
             </h3>
             <p className="text-sm text-ink-300 mb-5">
               {tab === 'transfer'
-                ? activeModule === 'payments'
-                  ? 'Pague por Pix, TED ou outro canal bancário disponível.'
-                  : activeModule === 'pix'
-                    ? 'Envie um Pix pela chave do beneficiário.'
-                    : 'Envie para conta Bravus ou registre PIX/TED pelo provedor Bravus.'
+                ? activeModule === 'localCayman'
+                  ? 'Transfira em KYD por ACH ou EFT entre bancos participantes nas Ilhas Cayman.'
+                  : activeModule === 'internationalWire'
+                    ? 'Envie uma ordem internacional por Wire/SWIFT e banco correspondente.'
+                    : activeModule === 'remittance'
+                      ? 'Solicite remessa ou câmbio pelo fluxo de Money Services Business sujeito à licença CIMA.'
+                      : 'Transfira entre contas Bravus com liquidação interna no mesmo ledger.'
                 : 'Operação em conta corrente.'}
             </p>
 
@@ -1494,10 +1513,10 @@ export default function UserDashboard() {
               {tab === 'transfer' && (
                 <div>
                   <label className="form-label">Destino</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                     <button
                       type="button"
-                      onClick={() => setForm({ ...form, transferMode: 'internal' })}
+                      onClick={() => setForm({ ...EMPTY_FORM, amount: form.amount, description: form.description, transferMode: 'internal', channel: 'INTERNAL_BRAVUS', destinationNetwork: 'INTERNAL_BRAVUS' })}
                       className={cn(
                         'btn-secondary justify-center',
                         form.transferMode === 'internal' && '!bg-white/15 !text-white'
@@ -1507,13 +1526,27 @@ export default function UserDashboard() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setForm({ ...form, transferMode: 'external' })}
+                      onClick={() => setForm({ ...EMPTY_FORM, amount: form.amount, description: form.description, transferMode: 'external', channel: 'ACH', destinationNetwork: 'CAYMAN_ACH' })}
                       className={cn(
                         'btn-secondary justify-center',
-                        form.transferMode === 'external' && '!bg-white/15 !text-white'
+                        form.transferMode === 'external' && ['ACH', 'EFT'].includes(form.channel) && '!bg-white/15 !text-white'
                       )}
                     >
-                      <Send className="h-4 w-4" /> PIX/TED Bravus
+                      <Landmark className="h-4 w-4" /> Cayman
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...EMPTY_FORM, amount: form.amount, description: form.description, transferMode: 'external', channel: 'SWIFT', destinationNetwork: 'SWIFT' })}
+                      className={cn('btn-secondary justify-center', form.transferMode === 'external' && ['SWIFT', 'WIRE'].includes(form.channel) && '!bg-white/15 !text-white')}
+                    >
+                      <Send className="h-4 w-4" /> Wire
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...EMPTY_FORM, amount: form.amount, description: form.description, transferMode: 'external', channel: 'MSB_REMITTANCE', destinationNetwork: 'CAYMAN_MSB' })}
+                      className={cn('btn-secondary justify-center', form.transferMode === 'external' && ['MSB_REMITTANCE', 'MSB_FX'].includes(form.channel) && '!bg-white/15 !text-white')}
+                    >
+                      <Globe2 className="h-4 w-4" /> Remessa
                     </button>
                   </div>
                 </div>
@@ -1536,7 +1569,7 @@ export default function UserDashboard() {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="Conta, CPF, e-mail, usuário ou chave Pix"
+                    placeholder="Conta, CPF, e-mail ou usuário Bravus"
                     value={form.destinationAccount}
                     onChange={(e) => setForm({ ...form, destinationAccount: e.target.value })}
                   />
@@ -1556,45 +1589,28 @@ export default function UserDashboard() {
                           setForm({
                             ...form,
                             channel,
-                            destinationNetwork:
-                              channel === 'PIX' ? 'PIX_BR'
-                              : channel === 'TED' ? 'TED_BR'
-                              : channel,
+                            destinationNetwork: destinationNetworkForChannel(channel),
                           });
                         }}
                       >
-                        <option value="PIX">PIX</option>
-                        <option value="TED">TED</option>
-                        <option value="SWIFT">SWIFT</option>
-                        <option value="ACH">ACH</option>
-                        <option value="SEPA">SEPA</option>
-                        <option value="CAYMAN_RAIL">Cayman Rail</option>
-                        <option value="GLOBAL">Global</option>
+                        <option value="ACH">ACH local Cayman</option>
+                        <option value="EFT">EFT local Cayman</option>
+                        <option value="SWIFT">Wire / SWIFT internacional</option>
+                        <option value="WIRE">Wire internacional</option>
+                        <option value="MSB_REMITTANCE">Remessa internacional (MSB)</option>
+                        <option value="MSB_FX">Câmbio (MSB)</option>
                       </select>
                     </div>
                     <div>
                       <label className="form-label">Rede destino</label>
-                      <select
-                        className="form-input"
-                        value={form.destinationNetwork}
-                        onChange={(e) => setForm({ ...form, destinationNetwork: e.target.value })}
-                      >
-                        <option value="PIX_BR">PIX_BR</option>
-                        <option value="TED_BR">TED_BR</option>
-                        <option value="SWIFT">SWIFT</option>
-                        <option value="ACH">ACH</option>
-                        <option value="SEPA">SEPA</option>
-                        <option value="CAYMAN_RAIL">CAYMAN_RAIL</option>
-                        <option value="GLOBAL">GLOBAL</option>
-                        <option value="INTERNAL_BRAVUS">INTERNAL_BRAVUS</option>
-                      </select>
+                      <input className="form-input" value={form.destinationNetwork} readOnly aria-readonly="true" />
                     </div>
                     <div>
                       <label className="form-label">Documento do beneficiário</label>
                       <input
                         type="text"
                         className="form-input"
-                        placeholder="CPF ou CNPJ"
+                        placeholder="Documento ou identificação internacional"
                         value={form.beneficiaryDocument}
                         onChange={(e) => setForm({ ...form, beneficiaryDocument: e.target.value })}
                       />
@@ -1612,35 +1628,7 @@ export default function UserDashboard() {
                     />
                   </div>
 
-                  {form.channel === 'PIX' ? (
-                    <div className="grid sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="form-label">Tipo de chave PIX</label>
-                        <select
-                          className="form-input"
-                          value={form.pixKeyType}
-                          onChange={(e) => setForm({ ...form, pixKeyType: e.target.value })}
-                        >
-                          <option value="CPF">CPF</option>
-                          <option value="CNPJ">CNPJ</option>
-                          <option value="EMAIL">E-mail</option>
-                          <option value="PHONE">Telefone</option>
-                          <option value="EVP">Chave aleatória</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="form-label">Chave PIX</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="Chave do beneficiário"
-                          value={form.pixKey}
-                          onChange={(e) => setForm({ ...form, pixKey: e.target.value })}
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="grid sm:grid-cols-3 gap-4">
+                  <div className="grid sm:grid-cols-3 gap-4">
                       <div>
                         <label className="form-label">Banco</label>
                         <input
@@ -1652,7 +1640,7 @@ export default function UserDashboard() {
                         />
                       </div>
                       <div>
-                        <label className="form-label">Agência</label>
+                        <label className="form-label">Agência / branch</label>
                         <input
                           type="text"
                           className="form-input"
@@ -1694,7 +1682,7 @@ export default function UserDashboard() {
                         </select>
                       </div>
                       <div>
-                        <label className="form-label">ISPB (opcional)</label>
+                        <label className="form-label">Código de roteamento / clearing</label>
                         <input
                           type="text"
                           className="form-input"
@@ -1704,8 +1692,7 @@ export default function UserDashboard() {
                         />
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
               )}
 
               <div>
@@ -1821,7 +1808,7 @@ export default function UserDashboard() {
                   </div>
                   <h3 className="font-display text-2xl font-semibold text-black">{formatCurrency(selectedReceipt.amountCentavos)}</h3>
                   <p className="mt-1 text-sm text-black">
-                    {selectedReceipt.channel} · {selectedReceipt.status} · {selectedReceipt.settlementStatus}
+                    {displayTransferChannel(selectedReceipt.channel)} · {selectedReceipt.status} · {selectedReceipt.settlementStatus}
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
@@ -2184,15 +2171,20 @@ function PortalModuleDetail({
   const latestTx = transactions.slice(0, 4);
   const latestOrders = externalOrders.slice(0, 4);
   const moduleMetrics = {
-    payments: [
-      { label: 'Canal', value: 'PIX/TED' },
+    localCayman: [
+      { label: 'Canal', value: 'ACH / EFT' },
       { label: 'Ordens', value: `${externalOrders.length}` },
-      { label: 'Pagina', value: 'Pagamentos' },
+      { label: 'Página', value: 'Transferência Cayman' },
     ],
-    pix: [
-      { label: 'Chave', value: me?.dadosBancarios?.chavePix || me?.cpf || '-' },
-      { label: 'Tipo', value: me?.dadosBancarios?.tipoChavePix || 'CPF' },
-      { label: 'Pagina', value: 'Pix' },
+    internationalWire: [
+      { label: 'Canal', value: 'Wire / SWIFT' },
+      { label: 'Liquidação', value: 'Banco correspondente' },
+      { label: 'Página', value: 'Wire internacional' },
+    ],
+    remittance: [
+      { label: 'Serviço', value: 'Remessa / câmbio' },
+      { label: 'Regulador', value: 'CIMA' },
+      { label: 'Página', value: 'Money Services Business' },
     ],
     transfers: [
       { label: 'Destino', value: 'Bravus' },
@@ -2240,7 +2232,7 @@ function PortalModuleDetail({
       { label: 'Pagina', value: 'Favorecidos' },
     ],
     limits: [
-      { label: 'Pix diario', value: showBalance ? formatCurrency(me?.saldos?.limitePixDiarioCentavos ?? 0) : 'KYD ******' },
+      { label: 'Transferência diária', value: showBalance ? formatCurrency(me?.saldos?.limiteTransferenciaDiarioCentavos ?? me?.saldos?.limitePixDiarioCentavos ?? 0) : 'KYD ******' },
       { label: 'Conta', value: me?.dadosBancarios?.contaFormatada || me?.accountNumber || '-' },
       { label: 'Pagina', value: 'Limites' },
     ],
@@ -2265,20 +2257,30 @@ function PortalModuleDetail({
               Extratos
             </button>
           )}
-          {(activeModule === 'payments' || activeModule === 'pix') && (
+          {activeModule === 'localCayman' && (
             <button
               type="button"
               className="btn-primary !py-2 !px-3"
-              onClick={() => openTransferMode('external', 'PIX', activeModule === 'pix' ? '/dashboard/pix' : '/dashboard/pagamentos')}
+              onClick={() => openTransferMode('external', 'ACH', '/dashboard/transferencia-cayman')}
             >
-              <Send className="h-4 w-4" />
-              Pagar
+              <Landmark className="h-4 w-4" />
+              Transferir
+            </button>
+          )}
+          {activeModule === 'internationalWire' && (
+            <button type="button" className="btn-primary !py-2 !px-3" onClick={() => openTransferMode('external', 'SWIFT', '/dashboard/wire-internacional')}>
+              <Send className="h-4 w-4" /> Wire
+            </button>
+          )}
+          {activeModule === 'remittance' && (
+            <button type="button" className="btn-primary !py-2 !px-3" onClick={() => openTransferMode('external', 'MSB_REMITTANCE', '/dashboard/remessas-cambio')}>
+              <Globe2 className="h-4 w-4" /> Solicitar
             </button>
           )}
           {activeModule === 'transfers' && (
             <>
-              <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => openTransferMode('internal', 'PIX', '/dashboard/transferencias')}>Bravus</button>
-              <button type="button" className="btn-primary !py-2 !px-3" onClick={() => openTransferMode('external', 'PIX')}>Outros bancos</button>
+              <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => openTransferMode('internal', 'INTERNAL_BRAVUS', '/dashboard/transferencias')}>Bravus</button>
+              <button type="button" className="btn-primary !py-2 !px-3" onClick={() => openTransferMode('external', 'ACH', '/dashboard/transferencia-cayman')}>Cayman</button>
             </>
           )}
           {activeModule === 'deposit-check' && (
@@ -2573,9 +2575,8 @@ function TransactionCompactLine({ tx, showBalance, openReceipt, receiptLoading }
 
 function TransferRecipientPreview({ form, resolvedRecipient, resolveLoading }) {
   const internalDestination = form.transferMode === 'internal';
-  const pixDestination = form.transferMode === 'external' && form.channel === 'PIX';
-  if (internalDestination || pixDestination) {
-    const destination = internalDestination ? form.destinationAccount.trim() : form.pixKey.trim();
+  if (internalDestination) {
+    const destination = form.destinationAccount.trim();
     if (!destination) return null;
     const name = resolvedRecipient?.name || resolvedRecipient?.fullName;
     const detail = resolvedRecipient
@@ -2584,7 +2585,7 @@ function TransferRecipientPreview({ form, resolvedRecipient, resolveLoading }) {
           resolvedRecipient.accountNumber && `Conta ${resolvedRecipient.accountNumber}`,
           resolvedRecipient.bankName || 'Bravus Premium Bank',
         ].filter(Boolean).join(' | ')
-      : `${internalDestination ? 'Chave/conta' : 'Chave Pix'} informada: ${destination}`;
+      : `Conta ou identificador informado: ${destination}`;
 
     return (
       <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.06] p-4 text-sm">
@@ -2608,9 +2609,7 @@ function TransferRecipientPreview({ form, resolvedRecipient, resolveLoading }) {
     form.beneficiaryName || form.beneficiaryDocument || form.pixKey || form.accountNumber || form.bankCode;
   if (!hasExternalData) return null;
 
-  const account = form.channel === 'PIX'
-    ? form.pixKey
-    : [form.bankCode, form.agency, form.accountNumber, form.accountDigit].filter(Boolean).join(' / ');
+  const account = [form.bankCode, form.agency, form.accountNumber, form.accountDigit].filter(Boolean).join(' / ');
 
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
@@ -2646,8 +2645,6 @@ function ReceiptBlock({ title, party }) {
       <ReceiptLine label="Agência" value={party?.agency} />
       <ReceiptLine label="Conta" value={[party?.accountNumber, party?.accountDigit].filter(Boolean).join('-')} />
       <ReceiptLine label="Tipo" value={party?.accountType} />
-      <ReceiptLine label="Chave Pix" value={party?.pixKey} />
-      <ReceiptLine label="Tipo chave" value={party?.pixKeyType} />
     </div>
   );
 }

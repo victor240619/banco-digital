@@ -29,6 +29,7 @@ public class ExternalTransferService {
     private final DocumentAnalysisService documentAnalysisService;
     private final GlobalRailService globalRailService;
     private final OutboundOperationPolicy outboundOperationPolicy;
+    private final CaymanTransferRailPolicy transferRailPolicy;
 
     public ExternalTransferService(ExternalTransferRepository transferRepo,
                                    UserRepository userRepo,
@@ -38,7 +39,8 @@ public class ExternalTransferService {
                                    BankingTransferProvider bankingProvider,
                                    DocumentAnalysisService documentAnalysisService,
                                    GlobalRailService globalRailService,
-                                   OutboundOperationPolicy outboundOperationPolicy) {
+                                   OutboundOperationPolicy outboundOperationPolicy,
+                                   CaymanTransferRailPolicy transferRailPolicy) {
         this.transferRepo = transferRepo;
         this.userRepo = userRepo;
         this.transactionRepo = transactionRepo;
@@ -48,6 +50,7 @@ public class ExternalTransferService {
         this.documentAnalysisService = documentAnalysisService;
         this.globalRailService = globalRailService;
         this.outboundOperationPolicy = outboundOperationPolicy;
+        this.transferRailPolicy = transferRailPolicy;
     }
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
@@ -56,18 +59,12 @@ public class ExternalTransferService {
             throw new IllegalArgumentException("Valor deve ser positivo.");
         }
 
-        String channel = upper(cmd.channel);
-        if (!allowedChannel(channel)) {
-            throw new IllegalArgumentException("Canal deve ser PIX, TED, SWIFT, ACH, SEPA, CAYMAN_RAIL ou GLOBAL.");
-        }
-        if ("PIX".equals(channel) && blank(cmd.pixKey)) {
-            throw new IllegalArgumentException("Informe a chave PIX para transferencia PIX.");
-        }
-        if ("TED".equals(channel) && (blank(cmd.bankCode) || blank(cmd.agency) || blank(cmd.accountNumber))) {
-            throw new IllegalArgumentException("Informe banco, agencia e conta para TED.");
-        }
-        if (!"PIX".equals(channel) && !"TED".equals(channel) && blank(cmd.accountNumber)) {
+        String channel = transferRailPolicy.requireSupported(cmd.channel);
+        if (blank(cmd.accountNumber)) {
             throw new IllegalArgumentException("Informe a conta beneficiaria para o canal selecionado.");
+        }
+        if (blank(cmd.destinationNetwork)) {
+            cmd.destinationNetwork = transferRailPolicy.destinationNetwork(channel);
         }
 
         UserEntity user = userRepo.findById(cmd.userId)
@@ -126,7 +123,7 @@ public class ExternalTransferService {
             CreditService.UseCommand use = new CreditService.UseCommand();
             use.userId = user.getId();
             use.valor = cmd.amountCentavos;
-            use.tipo = "PIX".equals(channel) ? "PIX" : "PAGAMENTO";
+            use.tipo = "PAGAMENTO";
             use.transactionId = tx.getId();
             use.criadoPor = requestedByUsername;
             use.observacao = "Transferencia externa " + channel + " - " + destinationLabel(cmd);
@@ -139,7 +136,7 @@ public class ExternalTransferService {
         order.setTransactionId(tx.getId());
         order.setAmountCentavos(cmd.amountCentavos);
         order.setChannel(channel);
-        order.setCurrency("BRL");
+        order.setCurrency("KYD");
         order.setBeneficiaryName(cmd.beneficiaryName);
         order.setBeneficiaryDocument(DocumentUtilsBridge.digits(cmd.beneficiaryDocument));
         order.setBankCode(cmd.bankCode);
@@ -266,7 +263,7 @@ public class ExternalTransferService {
         order.setTransactionId(outTx.getId());
         order.setAmountCentavos(cmd.amountCentavos);
         order.setChannel(channel);
-        order.setCurrency("BRL");
+        order.setCurrency("KYD");
         order.setBeneficiaryName(toUser.getFullName() != null ? toUser.getFullName() : cmd.beneficiaryName);
         order.setBeneficiaryDocument(DocumentUtilsBridge.digits(
                 toUser.getCpf() != null ? toUser.getCpf() : cmd.beneficiaryDocument));
@@ -357,7 +354,7 @@ public class ExternalTransferService {
         pc.idempotencyKey = idempotencyKey;
         pc.channel = channel;
         pc.amountCentavos = cmd.amountCentavos;
-        pc.currency = "BRL";
+        pc.currency = "KYD";
         pc.beneficiaryName = cmd.beneficiaryName;
         pc.beneficiaryDocument = DocumentUtilsBridge.digits(cmd.beneficiaryDocument);
         pc.bankCode = cmd.bankCode;
@@ -373,8 +370,7 @@ public class ExternalTransferService {
     }
 
     private String destinationLabel(ExternalTransferCommand cmd) {
-        if (!blank(cmd.pixKey)) return "PIX " + cmd.pixKey;
-        return (cmd.bankCode == null ? "" : cmd.bankCode) + " ag " + cmd.agency + " cc " + cmd.accountNumber;
+        return (cmd.bankCode == null ? "" : cmd.bankCode) + " branch " + cmd.agency + " account " + cmd.accountNumber;
     }
 
     private String upper(String value) {
@@ -383,10 +379,6 @@ public class ExternalTransferService {
 
     private boolean blank(String value) {
         return value == null || value.isBlank();
-    }
-
-    private boolean allowedChannel(String channel) {
-        return List.of("PIX", "TED", "SWIFT", "ACH", "SEPA", "CAYMAN_RAIL", "GLOBAL").contains(channel);
     }
 
     public static class ExternalTransferCommand {

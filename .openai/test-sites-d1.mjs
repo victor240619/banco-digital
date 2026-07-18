@@ -546,13 +546,43 @@ assert.equal(transferLedger.reduce((sum, entry) => sum + entry.signedAmountCenta
 const externalKey = "d1-idempotency-external-0001";
 const externalBefore = joaoAfter.data;
 const externalLedgerBefore = database.ledgerEntries.size;
+const discontinuedRail = await call(worker, "POST", "/user/external-transfers", {
+  token: joaoToken,
+  headers: { "idempotency-key": "d1-discontinued-rail-test-0001" },
+  body: {
+    amountCentavos: 100,
+    channel: "PIX",
+    beneficiaryName: "Canal Descontinuado",
+    beneficiaryDocument: "11144477735",
+    accountNumber: "LEGACY-001",
+  },
+});
+assert.equal(discontinuedRail.response.status, 400);
+assert.equal(discontinuedRail.data.code, "TRANSFER_RAIL_UNSUPPORTED");
+assert.equal((await call(worker, "GET", "/user/balance", { token: joaoToken })).data, externalBefore);
+const unlicensedRemittance = await call(worker, "POST", "/user/external-transfers", {
+  token: joaoToken,
+  headers: { "idempotency-key": "d1-msb-license-gate-test-0001" },
+  body: {
+    amountCentavos: 100,
+    channel: "MSB_REMITTANCE",
+    beneficiaryName: "Remessa Bloqueada",
+    beneficiaryDocument: "MSB-TEST",
+    accountNumber: "MSB-001",
+  },
+});
+assert.equal(unlicensedRemittance.response.status, 400);
+assert.equal(unlicensedRemittance.data.code, "MSB_LICENSE_REQUIRED");
+assert.equal((await call(worker, "GET", "/user/balance", { token: joaoToken })).data, externalBefore);
 const externalBody = {
   amountCentavos: 500,
-  channel: "PIX",
+  channel: "ACH",
   beneficiaryName: "Beneficiario Externo",
   beneficiaryDocument: "11144477735",
-  pixKey: "externo@example.test",
-  pixKeyType: "EMAIL",
+  bankCode: "KY-TEST",
+  agency: "0001",
+  accountNumber: "ACH-001",
+  destinationNetwork: "CAYMAN_ACH",
   description: "Teste de repeticao externa",
 };
 const external = await call(worker, "POST", "/user/external-transfers", {
@@ -1043,9 +1073,11 @@ const externalBlockedByHold = await call(worker, "POST", "/user/external-transfe
   headers: { "idempotency-key": "account-held-external-test-0001" },
   body: {
     amountCentavos: 500,
-    channel: "PIX",
-    pixKey: "external.receiver@bravus.test",
-    pixKeyType: "EMAIL",
+    channel: "ACH",
+    bankCode: "KY-TEST",
+    agency: "0001",
+    accountNumber: "ACH-HOLD-001",
+    destinationNetwork: "CAYMAN_ACH",
     beneficiaryName: "Recebedor Externo",
     beneficiaryDocument: "11144477735",
     description: "Teste externo com saldo retido",
@@ -1058,17 +1090,19 @@ const legacyExternalBlockedByHold = await call(worker, "POST", "/user/transfer",
   headers: { "idempotency-key": "account-held-legacy-external-0001" },
   body: { amount: 500, destinationAccount: "unknown.receiver@external.test", description: "Teste legado externo com saldo retido" },
 });
-assert.equal(legacyExternalBlockedByHold.response.status, 400, "holds must block legacy external transfers");
-assert.equal(legacyExternalBlockedByHold.data.code, "INSUFFICIENT_AVAILABLE_BALANCE");
+assert.equal(legacyExternalBlockedByHold.response.status, 400, "legacy transfer endpoint must not create external transfers");
+assert.equal(legacyExternalBlockedByHold.data.code, "BRAVUS_DESTINATION_NOT_FOUND");
 const adminExternalBlockedByHold = await call(worker, "POST", "/admin/ledger/external-transfers", {
   token: adminLogin.data.token,
   headers: { "idempotency-key": "account-held-admin-external-0001" },
   body: {
     userId: provisioned.data.account.id,
     amountCentavos: 500,
-    channel: "PIX",
-    pixKey: "admin.external.receiver@bravus.test",
-    pixKeyType: "EMAIL",
+    channel: "ACH",
+    bankCode: "KY-TEST",
+    agency: "0001",
+    accountNumber: "ACH-ADMIN-HOLD-001",
+    destinationNetwork: "CAYMAN_ACH",
     beneficiaryName: "Recebedor Admin Externo",
     beneficiaryDocument: "11144477735",
   },
@@ -1459,6 +1493,9 @@ console.log(JSON.stringify({
   registrationPreflightVerified: true,
   registrationFaceTokenVerified: true,
   pendingKycOutgoingBlocked: true,
+  discontinuedBrazilianRailsBlocked: true,
+  cimaMsbLicenseGateVerified: true,
+  caymanAchTransferVerified: true,
   auditedKycApprovalVerified: true,
   rejectedIdentityLoginBlocked: true,
   immutableKycAuditVerified: true,

@@ -167,8 +167,10 @@ public class GlobalRailService {
     private String inferNetwork(String explicitNetwork, String channel) {
         if (!blank(explicitNetwork)) return upper(explicitNetwork);
         String c = upperOrDefault(channel, "GLOBAL");
-        if ("PIX".equals(c)) return "PIX_BR";
-        if ("TED".equals(c)) return "TED_BR";
+        if ("ACH".equals(c)) return "CAYMAN_ACH";
+        if ("EFT".equals(c)) return "CAYMAN_EFT";
+        if ("WIRE".equals(c)) return "SWIFT";
+        if ("MSB_REMITTANCE".equals(c) || "MSB_FX".equals(c)) return "CAYMAN_MSB";
         if ("CAYMAN_RAIL".equals(c)) return "CAYMAN_RAIL";
         return c;
     }

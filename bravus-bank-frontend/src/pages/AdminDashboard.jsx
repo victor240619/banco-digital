@@ -24,6 +24,15 @@ const pct = (n) => `${(n ?? 0).toFixed(1)}%`;
 const chainIsValid = (chain) => chain?.valid ?? chain?.valida ?? false;
 const chainCount = (chain) => chain?.checkedTransfers ?? chain?.quantidade ?? 0;
 const chainMessage = (chain) => chain?.message ?? chain?.mensagem ?? '';
+const destinationNetworkForChannel = (channel) => ({
+  ACH: 'CAYMAN_ACH', EFT: 'CAYMAN_EFT', SWIFT: 'SWIFT', WIRE: 'SWIFT',
+  MSB_REMITTANCE: 'CAYMAN_MSB', MSB_FX: 'CAYMAN_MSB', CAYMAN_RAIL: 'CAYMAN_RAIL',
+}[channel] || 'CAYMAN_RAIL');
+const displayTransferChannel = (channel) => ({
+  ACH: 'ACH Cayman', EFT: 'EFT Cayman', SWIFT: 'Wire / SWIFT', WIRE: 'Wire / SWIFT',
+  MSB_REMITTANCE: 'Remessa internacional', MSB_FX: 'Câmbio', CAYMAN_RAIL: 'Cayman Rail',
+  INTERNAL_BRAVUS: 'Transferência Bravus', PIX: 'Canal legado', TED: 'Canal legado',
+}[String(channel || '').toUpperCase()] || channel || '-');
 const apiError = (err, fallback) => {
   if (err?.code === 'ERR_NETWORK' || err?.message === 'Network Error') {
     return 'API local nao esta respondendo em http://localhost:9000. Inicie o backend e tente novamente.';
@@ -1773,11 +1782,11 @@ function CreditView({ users, bs, onSuccess, onError }) {
 
 function ExternalTransferView({ users, transfers, participants = [], onSuccess, onError }) {
   const [form, setForm] = useState({
-    userId: '', amountReais: '', channel: 'PIX',
+    userId: '', amountReais: '', channel: 'ACH',
     beneficiaryName: '', beneficiaryDocument: '',
     pixKey: '', pixKeyType: 'CPF',
     bankCode: '', ispb: '', agency: '', accountNumber: '', accountDigit: '', accountType: 'CORRENTE',
-    destinationNetwork: 'PIX_BR', participantCode: '',
+    destinationNetwork: 'CAYMAN_ACH', participantCode: '',
     description: '',
   });
   const [submitting, setSubmitting] = useState(false);
@@ -1788,6 +1797,8 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
     e.preventDefault();
     if (!form.userId) return onError('Selecione o cliente de origem.');
     if (!form.amountReais || parseFloat(form.amountReais) <= 0) return onError('Informe um valor valido.');
+    if (!form.beneficiaryName || !form.beneficiaryDocument) return onError('Informe nome e documento do beneficiário.');
+    if (!form.accountNumber) return onError('Informe a conta beneficiária.');
     const fingerprint = JSON.stringify(form);
     if (transferAttempt.current?.fingerprint !== fingerprint) {
       transferAttempt.current = { fingerprint, key: `admin-transfer-${crypto.randomUUID()}` };
@@ -1856,32 +1867,27 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
                       setForm({
                         ...form,
                         channel,
-                        destinationNetwork:
-                          channel === 'PIX' ? 'PIX_BR'
-                          : channel === 'TED' ? 'TED_BR'
-                          : channel,
+                        destinationNetwork: destinationNetworkForChannel(channel),
                       });
                     }}>
-              <option value="PIX">PIX</option>
-              <option value="TED">TED</option>
-              <option value="SWIFT">SWIFT</option>
-              <option value="ACH">ACH</option>
-              <option value="SEPA">SEPA</option>
+              <option value="ACH">ACH local Cayman</option>
+              <option value="EFT">EFT local Cayman</option>
+              <option value="SWIFT">Wire / SWIFT internacional</option>
+              <option value="WIRE">Wire internacional</option>
+              <option value="MSB_REMITTANCE">Remessa internacional (MSB)</option>
+              <option value="MSB_FX">Câmbio (MSB)</option>
               <option value="CAYMAN_RAIL">Cayman Rail</option>
-              <option value="GLOBAL">Global</option>
             </select>
           </Field>
 
           <Field label="Rede destino">
             <select className="input-premium w-full" value={form.destinationNetwork}
                     onChange={(e) => setForm({ ...form, destinationNetwork: e.target.value })}>
-              <option value="PIX_BR">PIX_BR</option>
-              <option value="TED_BR">TED_BR</option>
+              <option value="CAYMAN_ACH">CAYMAN_ACH</option>
+              <option value="CAYMAN_EFT">CAYMAN_EFT</option>
               <option value="SWIFT">SWIFT</option>
-              <option value="ACH">ACH</option>
-              <option value="SEPA">SEPA</option>
+              <option value="CAYMAN_MSB">CAYMAN_MSB</option>
               <option value="CAYMAN_RAIL">CAYMAN_RAIL</option>
-              <option value="GLOBAL">GLOBAL</option>
               <option value="INTERNAL_BRAVUS">INTERNAL_BRAVUS</option>
             </select>
           </Field>
@@ -1901,7 +1907,7 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
           <Field label="Documento favorecido">
             <input className="input-premium w-full" value={form.beneficiaryDocument}
                    onChange={(e) => setForm({ ...form, beneficiaryDocument: e.target.value })}
-                   placeholder="CPF ou CNPJ" />
+                   placeholder="Documento ou identificação internacional" />
           </Field>
 
           <Field label="Nome favorecido" full>
@@ -1909,30 +1915,12 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
                    onChange={(e) => setForm({ ...form, beneficiaryName: e.target.value })} />
           </Field>
 
-          {form.channel === 'PIX' ? (
-            <>
-              <Field label="Tipo chave PIX">
-                <select className="input-premium w-full" value={form.pixKeyType}
-                        onChange={(e) => setForm({ ...form, pixKeyType: e.target.value })}>
-                  <option value="CPF">CPF</option>
-                  <option value="CNPJ">CNPJ</option>
-                  <option value="EMAIL">Email</option>
-                  <option value="PHONE">Telefone</option>
-                  <option value="EVP">Aleatoria</option>
-                </select>
-              </Field>
-              <Field label="Chave PIX">
-                <input className="input-premium w-full" value={form.pixKey}
-                       onChange={(e) => setForm({ ...form, pixKey: e.target.value })} />
-              </Field>
-            </>
-          ) : (
-            <>
+          <>
               <Field label="Banco">
                 <input className="input-premium w-full" value={form.bankCode}
                        onChange={(e) => setForm({ ...form, bankCode: e.target.value })} placeholder="001" />
               </Field>
-              <Field label="ISPB">
+              <Field label="Código de roteamento / clearing">
                 <input className="input-premium w-full" value={form.ispb}
                        onChange={(e) => setForm({ ...form, ispb: e.target.value })} />
               </Field>
@@ -1957,7 +1945,6 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
                 </select>
               </Field>
             </>
-          )}
 
           <Field label="Descricao" full>
             <input className="input-premium w-full" value={form.description}
@@ -1977,7 +1964,7 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
           {transfers.slice(0, 8).map((t) => (
             <div key={t.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-3 text-sm">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-medium">#{t.id} {t.channel}</span>
+                <span className="font-medium">#{t.id} {displayTransferChannel(t.channel)}</span>
                 <span className="text-xs text-ink-300">{t.status}</span>
               </div>
               <div className="text-xs text-ink-400 mt-1">{brl(t.amountCentavos)} - {t.beneficiaryName}</div>
@@ -2080,20 +2067,18 @@ function GlobalRailView({ participants, transfers, onSuccess, onError }) {
             <select className="input-premium w-full" value={form.network}
                     onChange={(e) => setForm({ ...form, network: e.target.value })}>
               <option value="INTERNAL_BRAVUS">INTERNAL_BRAVUS</option>
-              <option value="PIX_BR">PIX_BR</option>
-              <option value="TED_BR">TED_BR</option>
+              <option value="CAYMAN_ACH">CAYMAN_ACH</option>
+              <option value="CAYMAN_EFT">CAYMAN_EFT</option>
+              <option value="CAYMAN_MSB">CAYMAN_MSB</option>
               <option value="SWIFT">SWIFT</option>
-              <option value="ACH">ACH</option>
-              <option value="SEPA">SEPA</option>
               <option value="CAYMAN_RAIL">CAYMAN_RAIL</option>
-              <option value="GLOBAL">GLOBAL</option>
             </select>
           </Field>
           <Field label="Banco">
             <input className="input-premium w-full" value={form.bankCode}
                    onChange={(e) => setForm({ ...form, bankCode: e.target.value })} />
           </Field>
-          <Field label="ISPB">
+          <Field label="Referência de clearing">
             <input className="input-premium w-full" value={form.ispb}
                    onChange={(e) => setForm({ ...form, ispb: e.target.value })} />
           </Field>
