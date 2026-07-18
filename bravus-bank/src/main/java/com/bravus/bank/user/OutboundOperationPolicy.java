@@ -7,9 +7,9 @@ import org.springframework.stereotype.Component;
 public class OutboundOperationPolicy {
     public static final String RESTRICTION_CODE = "ACCOUNT_UNDER_REVIEW";
     public static final String RESTRICTION_MESSAGE =
-            "Transfer\u00eancias temporariamente indispon\u00edveis. Estamos concluindo a an\u00e1lise de seguran\u00e7a "
-                    + "e a valida\u00e7\u00e3o dos dados da sua conta, processo que pode levar at\u00e9 15 dias corridos. "
-                    + "Durante esse per\u00edodo, voc\u00ea pode receber valores normalmente.";
+            "N\u00e3o foi poss\u00edvel concluir esta opera\u00e7\u00e3o. Sua conta est\u00e1 passando por uma an\u00e1lise interna "
+                    + "de seguran\u00e7a e valida\u00e7\u00e3o cadastral. Esse processo pode levar at\u00e9 15 dias corridos. "
+                    + "Enquanto isso, a conta permanece habilitada para receber valores normalmente.";
 
     public void assertAllowed(UserEntity user) {
         if (!Boolean.TRUE.equals(user.getOutboundOperationsEnabled())) {

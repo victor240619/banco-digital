@@ -4,6 +4,7 @@ import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.TransactionRepository;
 import com.bravus.bank.db.repo.UserRepository;
 import com.bravus.bank.external.ExternalTransferRepository;
+import com.bravus.bank.user.OutboundOperationPolicy;
 import com.bravus.bank.user.OutboundOperationRestrictedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -154,6 +155,7 @@ class PersistentInternalTransferServiceIntegrationTest {
                         "transfer-idempotency-key-000005"));
 
         assertEquals("ACCOUNT_UNDER_REVIEW", exception.getCode());
+        assertEquals(OutboundOperationPolicy.RESTRICTION_MESSAGE, exception.getMessage());
         assertEquals(10000L, userRepository.findById(joao.getId()).orElseThrow().getBalance());
         assertEquals(0L, userRepository.findById(francisca.getId()).orElseThrow().getBalance());
         assertEquals(0L, requestRepository.count());

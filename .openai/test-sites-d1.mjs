@@ -534,6 +534,10 @@ const pendingOutgoing = await call(worker, "POST", "/user/transfer", {
 });
 assert.equal(pendingOutgoing.response.status, 403, "pending identity must fail closed for outgoing transfers");
 assert.equal(pendingOutgoing.data.code, "KYC_IDENTITY_PENDING");
+assert.equal(
+  pendingOutgoing.data.message,
+  "Não foi possível concluir esta operação. Sua conta está passando por uma análise interna de segurança e validação cadastral. Esse processo pode levar até 15 dias corridos. Enquanto isso, a conta permanece habilitada para receber valores normalmente.",
+);
 assert.equal((await call(worker, "GET", "/user/balance", { token: customerToken })).data, 1000);
 const transferLedger = [...database.ledgerEntries.values()].filter((entry) => entry.transferId === transferKey);
 assert.equal(transferLedger.length, 2, "transfer must have one debit and one credit");

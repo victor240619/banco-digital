@@ -1924,7 +1924,7 @@ function hasExplicitApprovedKyc(user) {
 
 function outgoingKycBlocked(user) {
   return json({
-    message: "Sua conta pode consultar e receber valores, mas operacoes de saida aguardam a validacao de identidade.",
+    message: "N\u00e3o foi poss\u00edvel concluir esta opera\u00e7\u00e3o. Sua conta est\u00e1 passando por uma an\u00e1lise interna de seguran\u00e7a e valida\u00e7\u00e3o cadastral. Esse processo pode levar at\u00e9 15 dias corridos. Enquanto isso, a conta permanece habilitada para receber valores normalmente.",
     code: "KYC_IDENTITY_PENDING",
     statusKyc: user.statusKyc || "PENDENTE_VALIDACAO_IDENTIDADE",
   }, { status: 403 });

@@ -281,7 +281,9 @@ const downloadPdfDocument = async ({ filename, pdf }) => {
 };
 
 const ACCOUNT_REVIEW_MESSAGE =
-  'Transferências temporariamente indisponíveis. Estamos concluindo a análise de segurança e a validação dos dados da sua conta, processo que pode levar até 15 dias corridos. Durante esse período, você pode receber valores normalmente.';
+  'Não foi possível concluir a transferência. Sua conta está passando por uma análise interna de segurança e validação cadastral. Esse processo pode levar até 15 dias corridos. Enquanto isso, a conta permanece habilitada para receber valores normalmente.';
+const OUTBOUND_REVIEW_MESSAGE =
+  'Não foi possível concluir esta operação. Sua conta está passando por uma análise interna de segurança e validação cadastral. Esse processo pode levar até 15 dias corridos. Enquanto isso, a conta permanece habilitada para receber valores normalmente.';
 
 const shareHtmlDocument = async ({ filename, html, title, text }) => {
   const file = new File([html], filename, { type: 'text/html' });
@@ -641,6 +643,7 @@ export default function UserDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [accountReviewNotice, setAccountReviewNotice] = useState('');
   const [showBalance, setShowBalance] = useState(true);
   const [portalView, setPortalView] = useState('icons');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -652,6 +655,7 @@ export default function UserDashboard() {
   const [resolveLoading, setResolveLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const internalTransferAttempt = useRef(null);
+  const accountReviewNoticeRef = useRef(null);
   const accountRefreshInFlight = useRef(null);
   const accountDataSignature = useRef('');
   const lastAccountRefreshAt = useRef(0);
@@ -667,6 +671,7 @@ export default function UserDashboard() {
     setTab(route.tab);
     setActiveModule(route.activeModule);
     setAccountMenuOpen(false);
+    if (route.tab !== 'transfer') setAccountReviewNotice('');
     if (route.transferMode) {
       setForm({
         ...EMPTY_FORM,
@@ -699,6 +704,18 @@ export default function UserDashboard() {
       return () => clearTimeout(t);
     }
   }, [success, error]);
+
+  useEffect(() => {
+    if (!accountReviewNotice) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      accountReviewNoticeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [accountReviewNotice]);
+
+  useEffect(() => {
+    if (profile?.outboundOperationsEnabled !== false) setAccountReviewNotice('');
+  }, [profile?.outboundOperationsEnabled]);
 
   useEffect(() => {
     const destination =
@@ -798,7 +815,12 @@ export default function UserDashboard() {
 
   const submit = async (kind) => {
     if ((kind === 'transfer' || kind === 'withdraw') && profile?.outboundOperationsEnabled === false) {
-      return setError(ACCOUNT_REVIEW_MESSAGE);
+      if (kind === 'transfer') {
+        setError('');
+        setAccountReviewNotice(ACCOUNT_REVIEW_MESSAGE);
+        return;
+      }
+      return setError(OUTBOUND_REVIEW_MESSAGE);
     }
     const amountCentavos = cents(form.amount);
     if (!form.amount || !Number.isFinite(amountCentavos) || amountCentavos <= 0) return setError('Digite um valor válido.');
@@ -912,6 +934,12 @@ export default function UserDashboard() {
       await loadData({ force: true });
       navigateToTab('overview');
     } catch (err) {
+      const restrictionCode = err?.response?.data?.code;
+      if (kind === 'transfer' && ['ACCOUNT_UNDER_REVIEW', 'KYC_IDENTITY_PENDING'].includes(restrictionCode)) {
+        setError('');
+        setAccountReviewNotice(ACCOUNT_REVIEW_MESSAGE);
+        return;
+      }
       setError(operationErrorMessage(err));
     } finally {
       setSubmitting(false);
@@ -1698,6 +1726,28 @@ export default function UserDashboard() {
                   resolveLoading={resolveLoading}
                 />
               )}
+
+              <AnimatePresence>
+                {tab === 'transfer' && accountReviewNotice && (
+                  <motion.div
+                    ref={accountReviewNoticeRef}
+                    role="alert"
+                    aria-live="assertive"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="rounded-xl border border-amber-300/35 bg-amber-300/[0.08] p-4"
+                  >
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+                      <div>
+                        <h4 className="font-semibold text-white">Transferência temporariamente indisponível</h4>
+                        <p className="mt-1 text-sm leading-6 text-ink-200">{accountReviewNotice}</p>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               <button
                 disabled={submitting || (tab === 'transfer' && resolveLoading)}
