@@ -138,7 +138,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<RootRoute />} />
               <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
-              <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
+              <Route path="/register/*" element={<PublicRoute><Register /></PublicRoute>} />
               <Route path="/redefinir-senha" element={<PublicRoute><PasswordReset /></PublicRoute>} />
               <Route path="/completar-identidade" element={<ProtectedRoute userOnly><IdentityVerification /></ProtectedRoute>} />
               <Route path="/dashboard/*" element={<ProtectedRoute userOnly><UserDashboard /></ProtectedRoute>} />

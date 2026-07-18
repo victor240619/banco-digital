@@ -1,21 +1,25 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
+import { CheckCircle2, Loader2 } from 'lucide-react';
 import { FaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
 
 const REQUIRED_STABLE_FRAMES = 8;
 
-export default function LiveFaceCapture({ onCapture }) {
+export default function LiveFaceCapture({ onCapture, autoStart = false, onSuccessComplete }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const detectorRef = useRef(null);
   const animationRef = useRef(0);
   const stableFramesRef = useRef(0);
   const completedRef = useRef(false);
+  const startingRef = useRef(false);
   const onCaptureRef = useRef(onCapture);
+  const onSuccessCompleteRef = useRef(onSuccessComplete);
+  const successTimerRef = useRef(0);
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('Posicione o rosto dentro do oval.');
 
   useEffect(() => { onCaptureRef.current = onCapture; }, [onCapture]);
+  useEffect(() => { onSuccessCompleteRef.current = onSuccessComplete; }, [onSuccessComplete]);
 
   const stopCamera = useCallback(() => {
     cancelAnimationFrame(animationRef.current);
@@ -24,6 +28,7 @@ export default function LiveFaceCapture({ onCapture }) {
   }, []);
 
   useEffect(() => () => {
+    clearTimeout(successTimerRef.current);
     stopCamera();
     detectorRef.current?.close?.();
   }, [stopCamera]);
@@ -43,6 +48,7 @@ export default function LiveFaceCapture({ onCapture }) {
     setStatus('success');
     setMessage('Rosto centralizado e selfie capturada com sucesso.');
     stopCamera();
+    successTimerRef.current = window.setTimeout(() => onSuccessCompleteRef.current?.(), 1400);
   }, [stopCamera]);
 
   const detect = useCallback(() => {
@@ -94,6 +100,8 @@ export default function LiveFaceCapture({ onCapture }) {
   };
 
   const startCamera = async () => {
+    if (startingRef.current || streamRef.current) return;
+    startingRef.current = true;
     setStatus('loading');
     setMessage('Preparando verificacao facial...');
     completedRef.current = false;
@@ -117,15 +125,21 @@ export default function LiveFaceCapture({ onCapture }) {
       setMessage(error?.name === 'NotAllowedError'
         ? 'Permita o acesso a camera para concluir a verificacao facial.'
         : 'Nao foi possivel iniciar a camera. Verifique a permissao e tente novamente.');
+    } finally {
+      startingRef.current = false;
     }
   };
+
+  useEffect(() => {
+    if (autoStart) void startCamera();
+  }, [autoStart]);
 
   const ovalClass = status === 'success' || status === 'aligned'
     ? 'border-emerald-400 shadow-[0_0_0_999px_rgba(255,255,255,0.38),0_0_22px_rgba(52,211,153,0.7)]'
     : 'border-gold-400 shadow-[0_0_0_999px_rgba(255,255,255,0.48)]';
 
   return (
-    <section className="rounded-lg border border-white/10 bg-white p-4 text-slate-900 sm:p-6">
+    <section className="w-full bg-white p-4 text-slate-900 sm:p-6">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold">Verificacao facial em tempo real</h3>
@@ -135,15 +149,11 @@ export default function LiveFaceCapture({ onCapture }) {
       </div>
 
       <div className="relative mx-auto aspect-square w-full max-w-md overflow-hidden rounded-lg bg-white ring-1 ring-slate-200">
-        <video ref={videoRef} muted playsInline className="h-full w-full scale-x-[-1] object-cover" />
+        <video ref={videoRef} muted playsInline autoPlay controls={false} disablePictureInPicture className="h-full w-full scale-x-[-1] bg-white object-cover" />
         {status !== 'idle' && status !== 'error' && (
           <div className={`pointer-events-none absolute left-1/2 top-1/2 h-[72%] w-[54%] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border-4 transition-colors duration-200 ${ovalClass}`} />
         )}
-        {(status === 'idle' || status === 'error') && (
-          <div className="absolute inset-0 grid place-items-center bg-white">
-            <Camera className="h-14 w-14 text-slate-400" />
-          </div>
-        )}
+        {(status === 'idle' || status === 'error') && <div className="absolute inset-0 bg-white" />}
         {status === 'loading' && (
           <div className="absolute inset-0 grid place-items-center bg-white/80">
             <Loader2 className="h-10 w-10 animate-spin text-slate-700" />
@@ -157,17 +167,8 @@ export default function LiveFaceCapture({ onCapture }) {
         {message}
       </div>
 
-      {(status === 'idle' || status === 'error') && (
-        <button type="button" onClick={startCamera} className="btn-primary mt-4 w-full">
-          <Camera className="h-4 w-4" />
-          Abrir camera e verificar
-        </button>
-      )}
-      {status === 'success' && (
-        <button type="button" onClick={startCamera} className="btn-secondary mt-4 w-full">
-          <RotateCcw className="h-4 w-4" />
-          Refazer verificacao
-        </button>
+      {status === 'error' && (
+        <button type="button" onClick={startCamera} className="btn-primary mt-4 w-full">Tentar novamente</button>
       )}
     </section>
   );

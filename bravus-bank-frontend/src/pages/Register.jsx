@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ArrowRight, CheckCircle2, FileText, Loader2, ShieldCheck, UserPlus,
@@ -59,6 +59,8 @@ function Field({ label, name, value, onChange, type = 'text', required, placehol
 }
 
 export default function Register() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const availabilityRequestRef = useRef(0);
   const requestKeyRef = useRef('');
   const [formData, setFormData] = useState(() => loadRegistrationDraft());
@@ -139,6 +141,28 @@ export default function Register() {
     }
   };
 
+  const beginBiometrics = async () => {
+    setError('');
+    if (onlyDigits(String(formData.cpf || '')).length !== 11) {
+      setError('Informe CPF com 11 digitos.');
+      return;
+    }
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{8,64}$/.test(String(formData.password || ''))) {
+      setError('A senha alfanumerica deve ter pelo menos 8 caracteres, com letra maiuscula, minuscula e numero.');
+      return;
+    }
+    if (onlyDigits(String(formData.numericPassword || '')).length !== 8) {
+      setError('Crie uma senha numerica com exatamente 8 digitos.');
+      return;
+    }
+    if (!documents.documentFrontImage || !documents.documentBackImage) {
+      setError('Envie a frente e o verso do documento antes da biometria.');
+      return;
+    }
+    if (!await checkAvailability({ requireComplete: true })) return;
+    navigate('/register/biometria');
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError('');
@@ -191,6 +215,27 @@ export default function Register() {
       setLoading(false);
     }
   };
+
+  const biometricPage = location.pathname.endsWith('/biometria');
+  if (biometricPage && (!documents.documentFrontImage || !documents.documentBackImage)) {
+    return <Navigate to="/register" replace />;
+  }
+  if (biometricPage) {
+    return (
+      <main className="fixed inset-0 z-[100] overflow-y-auto bg-white">
+        <div className="mx-auto flex min-h-full w-full max-w-xl items-center justify-center px-4 py-8">
+          <LiveFaceCapture
+            autoStart
+            onCapture={(faceImage) => {
+              setDocuments((current) => ({ ...current, faceImage }));
+              requestKeyRef.current = '';
+            }}
+            onSuccessComplete={() => navigate('/register', { replace: true })}
+          />
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="container-app py-12 sm:py-16">
@@ -299,17 +344,17 @@ export default function Register() {
                 </div>
               </section>
 
-              <LiveFaceCapture onCapture={(faceImage) => {
-                setDocuments((current) => ({ ...current, faceImage }));
-                requestKeyRef.current = '';
-              }} />
-
-              {documents.faceImage && (
+              {!documents.faceImage ? (
+                <button type="button" onClick={beginBiometrics} className="btn-primary w-full !py-3">
+                  Continuar para verificacao facial
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              ) : (
                 <div className="space-y-4">
-                  <div className="rounded-xl border border-gold-400/25 bg-gold-400/10 px-4 py-3 text-sm text-gold-100">
+                  <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">
                     <span className="inline-flex items-start gap-2">
-                      <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-                      Verificacao concluida. A conta sera aberta em analise e podera receber valores, mas nao realizar transferencias ou saques ate a aprovacao.
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                      Captura facial concluida com sucesso. Continue para criar a conta.
                     </span>
                   </div>
 
