@@ -195,8 +195,11 @@ const files = {};
 for (const file of await walk(distDir)) {
   const route = `/${relative(distDir, file).replaceAll("\\", "/")}`;
   const type = contentTypes[extname(file).toLowerCase()] || "application/octet-stream";
-  if (extname(file).toLowerCase() === ".apk" && basename(file) === "bravus-bank.apk") {
-    files[route] = { type, alias: "/downloads/bravus-bank-mobile.apk" };
+  if (extname(file).toLowerCase() === ".apk") {
+    files[route] = {
+      type,
+      externalUrl: "https://raw.githubusercontent.com/victor240619/banco-digital/codex/master-live-apk/bravus-bank-frontend/public/downloads/" + basename(file),
+    };
     continue;
   }
   files[route] = { type, body: (await readFile(file)).toString("base64") };
@@ -4601,6 +4604,9 @@ export default {
     const requestedPath = routePath(request.url);
     const file = files[requestedPath];
     if (!file) return new Response("Not found", { status: 404 });
+    if (file.externalUrl) {
+      return Response.redirect(file.externalUrl, 302);
+    }
     const servedFile = file.alias ? files[file.alias] : file;
     if (!servedFile?.body) return new Response("Not found", { status: 404 });
     const headers = { "content-type": file.type };
