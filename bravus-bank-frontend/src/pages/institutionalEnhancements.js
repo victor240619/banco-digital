@@ -70,7 +70,7 @@ export const institutionalEnhancements = {
       ],
     },
     transferencias: {
-      gallery: gallery('transferencias', [
+      gallery: gallery('transferencias-gallery', [
         ['Confirmação do destinatário', 'Duas pessoas conferindo uma transferência em um celular'],
         ['ACH e EFT local', 'Empresário acompanhando uma operação local em um notebook'],
         ['Wire internacional', 'Profissional acompanhando conexões financeiras internacionais'],
