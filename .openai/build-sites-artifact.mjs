@@ -4940,6 +4940,7 @@ export default {
     const headers = { "content-type": file.type };
     if (servedFile.type === "text/html; charset=utf-8") {
       headers["cache-control"] = "no-store, no-cache, must-revalidate";
+      headers["permissions-policy"] = "camera=(self)";
       headers.pragma = "no-cache";
       headers.expires = "0";
     } else if (requestedPath.startsWith("/assets/")) {

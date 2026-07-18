@@ -8,7 +8,7 @@ export const DOCUMENT_CAMERA_CONSTRAINTS = Object.freeze({
 });
 
 export function documentCameraErrorMessage(error) {
-  if (!globalThis.navigator?.mediaDevices?.getUserMedia) {
+  if (error?.name === 'NotSupportedError') {
     return 'Este dispositivo nao oferece camera ao navegador. Use a camera do aparelho abaixo.';
   }
   if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') {

@@ -16,5 +16,6 @@ assert.deepEqual(documentCaptureDimensions(4000, 3000), { width: 1600, height: 1
 assert.deepEqual(documentCaptureDimensions(800, 600), { width: 800, height: 600 });
 assert.match(documentCameraErrorMessage({ name: 'NotAllowedError' }), /Permita o acesso/);
 assert.match(documentCameraErrorMessage({ name: 'NotFoundError' }), /Nenhuma camera/);
+assert.match(documentCameraErrorMessage({ name: 'NotSupportedError' }), /nao oferece camera/);
 
 console.log('Document camera tests passed.');
