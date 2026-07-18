@@ -3,7 +3,7 @@
   "appName": "Bravus Bank",
   "webDir": "dist",
   "server": {
-    "url": "https://bravus-bank-240619.victor2406.chatgpt.site",
+    "url": "https://bravusbank.com",
     "cleartext": false
   }
 }

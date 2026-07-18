@@ -65,7 +65,7 @@ function command(file, args) {
   });
 }
 
-const snapshotUrl = process.env.BRAVUS_SITES_SNAPSHOT_URL || "https://bravus-bank-240619.victor2406.chatgpt.site";
+const snapshotUrl = process.env.BRAVUS_SITES_SNAPSHOT_URL || "https://bravusbank.com";
 
 async function fetchLiveJson(path, token = "sites-admin-token") {
   const url = new URL(path, snapshotUrl).toString();
@@ -200,7 +200,7 @@ for (const file of await walk(distDir)) {
   if (extname(file).toLowerCase() === ".apk") {
     files[route] = {
       type,
-      externalUrl: "https://raw.githubusercontent.com/victor240619/banco-digital/codex/master-live-apk/bravus-bank-frontend/public/downloads/" + basename(file),
+      externalUrl: "https://raw.githubusercontent.com/victor240619/banco-digital/master/bravus-bank-frontend/public/downloads/" + basename(file),
     };
     continue;
   }

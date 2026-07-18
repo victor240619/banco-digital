@@ -50,6 +50,6 @@ services:
       - key: BRAVUS_PASSWORD_RESET_GLOBAL_LIMIT
         value: "300"
       - key: CORS_ORIGIN
-        value: "https://bravus-bank-240619.victor2406.chatgpt.site"
+        value: "https://bravusbank.com"
       - key: JAVA_TOOL_OPTIONS
         value: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=70.0"
