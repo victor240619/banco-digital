@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "╔═══════════════════════════════════════════════════════════════════╗"
-echo "║         🔧 CRIANDO USUÁRIOS NO BANCO - BRAVUS BANK              ║"
+echo "║         🔧 CRIANDO USUÁRIOS NO BANCO - VANTYX BANK              ║"
 echo "╚═══════════════════════════════════════════════════════════════════╝"
 echo ""
 

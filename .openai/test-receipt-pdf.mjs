@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../bravus-bank-frontend');
 const outputDirectory = path.resolve(root, '../tmp/pdfs');
-const outputPath = path.join(outputDirectory, 'comprovante-bravus-validacao.pdf');
+const outputPath = path.join(outputDirectory, 'comprovante-vantyx-validacao.pdf');
 const require = createRequire(path.join(root, 'package.json'));
 const viteModule = await import(pathToFileURL(require.resolve('vite')).href);
 const createServer = viteModule.createServer || viteModule.default?.createServer;
@@ -15,7 +15,7 @@ const server = await createServer({ root, server: { middlewareMode: true }, appT
 try {
   const { buildReceiptDocument } = await server.ssrLoadModule('/src/pages/UserDashboard.jsx');
   const document = buildReceiptDocument({
-    receiptId: 'BRAVUS-VALIDACAO-001',
+    receiptId: 'VANTYX-VALIDACAO-001',
     receiptKind: 'COMPROVANTE_LIQUIDACAO_CONFIRMADA',
     transactionId: 'TX-VALIDACAO-001',
     amountCentavos: 1000,
@@ -26,7 +26,7 @@ try {
     payer: {
       name: 'Joao Victor Mendonca Guimaraes',
       document: '***.***.***-**',
-      bankName: 'Bravus Premium Bank',
+      bankName: 'Vantyx Bank',
       bankCode: '999',
       agency: '0001',
       accountNumber: '000000001',
@@ -35,7 +35,7 @@ try {
     beneficiary: {
       name: 'Jonathan Pereira Torres Roriz',
       document: '***.***.***-**',
-      bankName: 'Bravus Premium Bank',
+      bankName: 'Vantyx Bank',
       bankCode: '999',
       agency: '0001',
       accountNumber: '000000002',
@@ -44,7 +44,7 @@ try {
     provider: 'BRAVUS_INTERNAL',
     destinationNetwork: 'CAYMAN_ACH',
     destinationConfirmationId: 'CONF-VALIDACAO-001',
-    description: 'Transferencia Bravus',
+    description: 'Transferencia Vantyx',
   });
 
   const bytes = Buffer.from(await document.pdf.arrayBuffer());

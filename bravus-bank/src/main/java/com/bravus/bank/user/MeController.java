@@ -3,6 +3,8 @@ package com.bravus.bank.user;
 import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.UserRepository;
 import com.bravus.bank.identity.InstitutionRoutingProfile;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -44,7 +46,7 @@ public class MeController {
 
         // Dados bancários
         Map<String, Object> banco = new LinkedHashMap<>();
-        banco.put("nomeBanco", u.getNomeBanco());
+        banco.put("nomeBanco", InstitutionRoutingProfile.INSTITUTION_NAME);
         banco.put("codigoBanco", u.getCodigoBanco());
         banco.put("agencia", u.getAgencia());
         banco.put("conta", u.getAccountNumber());
@@ -101,7 +103,10 @@ public class MeController {
                 .map(r -> r.getName())
                 .collect(Collectors.toList()));
 
-        return ResponseEntity.ok(out);
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore().cachePrivate())
+                .header(HttpHeaders.VARY, HttpHeaders.AUTHORIZATION)
+                .body(out);
     }
 
     private String formatPhone(String phone) {

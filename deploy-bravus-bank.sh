@@ -2,7 +2,7 @@
 set -e
 
 echo "🚀 =========================================="
-echo "🚀   BRAVUS BANK - DEPLOY COMPLETO"
+echo "🚀   VANTYX BANK - DEPLOY COMPLETO"
 echo "🚀 =========================================="
 echo ""
 

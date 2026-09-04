@@ -23,7 +23,7 @@ project_args=(
   -scheme App
   -configuration Release
   -destination generic/platform=iOS
-  -archivePath build/BravusBank.xcarchive
+  -archivePath build/VantyxBank.xcarchive
 )
 
 if [[ -d App.xcworkspace ]]; then
@@ -56,7 +56,7 @@ xcodebuild \
   archive \
   "${build_settings[@]}"
 
-echo "Archive gerado em ios/App/build/BravusBank.xcarchive"
+echo "Archive gerado em ios/App/build/VantyxBank.xcarchive"
 
 if [[ "${IOS_EXPORT_IPA:-0}" == "1" ]]; then
   mkdir -p build/export
@@ -89,7 +89,7 @@ PLIST
 
   xcodebuild \
     -exportArchive \
-    -archivePath build/BravusBank.xcarchive \
+    -archivePath build/VantyxBank.xcarchive \
     -exportPath build/export \
     -exportOptionsPlist "$export_options" \
     "${auth_args[@]}"

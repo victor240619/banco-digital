@@ -2,8 +2,8 @@ import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 
-const RECEIPT_DIRECTORY = 'Bravus';
-const SHARE_DIRECTORY = 'bravus-receipts';
+const RECEIPT_DIRECTORY = 'Vantyx';
+const SHARE_DIRECTORY = 'vantyx-receipts';
 
 const requireNativePlugins = () => {
   const available = Capacitor.isNativePlatform()

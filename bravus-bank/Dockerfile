@@ -1,5 +1,5 @@
 # ============================================================
-# Bravus Bank — Dockerfile otimizado pro Render Free (512MB)
+# Vantyx Bank — Dockerfile otimizado pro Render Free (512MB)
 # Build multi-stage, JVM tunada pra container pequeno
 # ============================================================
 

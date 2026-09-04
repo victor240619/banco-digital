@@ -211,3 +211,98 @@ html.native-app #root {
 ::-webkit-scrollbar-track { background: #0b0f1c; }
 ::-webkit-scrollbar-thumb { background: #2b3247; border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: #3f475c; }
+
+/* Authenticated accounts use a white canvas while retaining the blue action language. */
+body.account-light-page {
+  color: #0b1739;
+  background: #f7faff;
+  background-image: none;
+}
+
+body.account-light-page main {
+  min-height: calc(100dvh - 4rem);
+}
+
+body.account-light-page header {
+  background-color: #07152f !important;
+}
+
+body.account-light-page main .bank-identity-card {
+  color: #0b1739;
+  background-color: #ffffff !important;
+  background-image: none !important;
+  border-color: #dbe7f7 !important;
+  box-shadow: 0 18px 44px rgba(15, 49, 105, 0.1);
+}
+
+body.account-light-page main .glass,
+body.account-light-page main .card-premium,
+body.account-light-page main [class*="bg-surface-"],
+body.account-light-page main [class*="bg-white/"] {
+  color: #0b1739;
+  background-color: #ffffff !important;
+  border-color: #dbe7f7 !important;
+  box-shadow: 0 12px 32px rgba(15, 49, 105, 0.08);
+}
+
+body.account-light-page main [class*="text-white"],
+body.account-light-page main [class*="text-ink-100"],
+body.account-light-page main [class*="text-ink-200"] {
+  color: #0b1739 !important;
+}
+
+body.account-light-page main [class*="text-ink-300"],
+body.account-light-page main [class*="text-ink-400"] {
+  color: #52627a !important;
+}
+
+body.account-light-page main [class*="border-white/"] {
+  border-color: #dbe7f7 !important;
+}
+
+body.account-light-page main input,
+body.account-light-page main select,
+body.account-light-page main textarea,
+body.account-light-page main .form-input,
+body.account-light-page main .input-premium {
+  color: #0b1739 !important;
+  background-color: #ffffff !important;
+  border-color: #b9cce7 !important;
+}
+
+body.account-light-page main input::placeholder,
+body.account-light-page main textarea::placeholder {
+  color: #7a899d !important;
+}
+
+body.account-light-page main select option {
+  color: #0b1739;
+  background: #ffffff;
+}
+
+body.account-light-page main button:not([class*="bg-red"]):not([class*="text-red"]),
+body.account-light-page main .btn-primary,
+body.account-light-page main .btn-secondary,
+body.account-light-page main .btn-ghost {
+  color: #ffffff !important;
+  background-color: #0b4fc4 !important;
+  background-image: none !important;
+  border-color: #0b4fc4 !important;
+  box-shadow: 0 8px 20px rgba(11, 79, 196, 0.18);
+}
+
+body.account-light-page main button:not([class*="bg-red"]):not([class*="text-red"]):hover,
+body.account-light-page main .btn-primary:hover,
+body.account-light-page main .btn-secondary:hover,
+body.account-light-page main .btn-ghost:hover {
+  background-color: #083b94 !important;
+}
+
+body.account-light-page main .bank-identity-card button [class*="text-white"] {
+  color: #ffffff !important;
+}
+
+body.account-light-page main [class*="text-gold-"],
+body.account-light-page main [class*="text-amber-"] {
+  color: #0b4fc4 !important;
+}

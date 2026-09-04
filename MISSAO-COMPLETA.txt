@@ -2,7 +2,7 @@
 ║                                                                           ║
 ║                    🎯 MISSÃO COMPLETA COM SUCESSO! 🎯                    ║
 ║                                                                           ║
-║                      BRAVUS BANK - SISTEMA BANCÁRIO                       ║
+║                      VANTYX BANK - SISTEMA BANCÁRIO                       ║
 ║                   Sistema 100% Funcional e Profissional                   ║
 ║                                                                           ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
@@ -121,7 +121,7 @@ Comece por aqui:
   📄 START-AQUI.md              → Guia rápido (3 minutos)
 
 Documentação técnica:
-  📄 README-BRAVUS-BANK.md      → Arquitetura e API completa
+  📄 README-VANTYX-BANK.md      → Arquitetura e API completa
   📄 INSTRUCOES-DEPLOY.md       → Deploy passo a passo
   📄 RESUMO-EXECUTIVO.md        → Visão executiva do projeto
   📄 INDICE-DOCUMENTACAO.md     → Índice de toda documentação

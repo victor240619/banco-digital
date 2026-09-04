@@ -62,7 +62,7 @@ public class ConfiguredHttpBankingTransferProvider implements BankingTransferPro
     @Value("${CELCOIN_DEBIT_ACCOUNT_TYPE:CACC}")
     private String celcoinDebitAccountType;
 
-    @Value("${CELCOIN_DEBIT_NAME:Bravus Bank}")
+    @Value("${CELCOIN_DEBIT_NAME:Vantyx Bank}")
     private String celcoinDebitName;
 
     @Value("${CELCOIN_PAYER_ID:}")
@@ -89,7 +89,7 @@ public class ConfiguredHttpBankingTransferProvider implements BankingTransferPro
     @Override
     public ProviderTransferResult submit(ProviderTransferCommand command) {
         if (selfProviderMode()) {
-            return acceptOnBravusRail(command);
+            return acceptOnVantyxRail(command);
         }
         if (celcoinProviderMode()) {
             return submitCelcoinPix(command);
@@ -269,7 +269,7 @@ public class ConfiguredHttpBankingTransferProvider implements BankingTransferPro
         return creditParty;
     }
 
-    private ProviderTransferResult acceptOnBravusRail(ProviderTransferCommand command) {
+    private ProviderTransferResult acceptOnVantyxRail(ProviderTransferCommand command) {
         ProviderTransferResult result = new ProviderTransferResult();
         result.providerTransferId = "bravus-self-" + command.idempotencyKey;
         result.status = "COMPLETED";

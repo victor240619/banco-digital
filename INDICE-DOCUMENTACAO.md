@@ -1,4 +1,4 @@
-# 📚 ÍNDICE DA DOCUMENTAÇÃO - BRAVUS BANK
+# 📚 ÍNDICE DA DOCUMENTAÇÃO - VANTYX BANK
 
 ## 🎯 Por Onde Começar?
 
@@ -23,7 +23,7 @@
 - Status de implementação
 
 ### Se você quer DOCUMENTAÇÃO TÉCNICA COMPLETA:
-👉 **[README-BRAVUS-BANK.md](README-BRAVUS-BANK.md)**
+👉 **[README-VANTYX-BANK.md](README-VANTYX-BANK.md)**
 - Arquitetura detalhada
 - Todos os endpoints da API
 - Estrutura do banco de dados
@@ -49,7 +49,7 @@
 ### 📖 Documentação
 - `START-AQUI.md` - Guia de início rápido (COMECE AQUI!)
 - `INSTRUCOES-DEPLOY.md` - Guia de deploy completo
-- `README-BRAVUS-BANK.md` - Documentação técnica
+- `README-VANTYX-BANK.md` - Documentação técnica
 - `RESUMO-EXECUTIVO.md` - Visão executiva
 - `PROJETO-COMPLETO.txt` - Resumo visual
 - `INDICE-DOCUMENTACAO.md` - Este arquivo
@@ -114,7 +114,7 @@ src/
 ## 🎓 Guias por Perfil
 
 ### 👨‍💻 Desenvolvedor
-1. Ler **README-BRAVUS-BANK.md** (arquitetura e tecnologias)
+1. Ler **README-VANTYX-BANK.md** (arquitetura e tecnologias)
 2. Ler **INSTRUCOES-DEPLOY.md** (setup do ambiente)
 3. Explorar código fonte
 4. Testar endpoints com curl/Postman
@@ -243,10 +243,10 @@ GET    /api/admin/transactions           # Todas transações
 👉 Ver seção "Troubleshooting" em **INSTRUCOES-DEPLOY.md**
 
 ### Dúvidas sobre Endpoints?
-👉 Ver **README-BRAVUS-BANK.md** seção "Endpoints da API"
+👉 Ver **README-VANTYX-BANK.md** seção "Endpoints da API"
 
 ### Quer entender a arquitetura?
-👉 Ver **README-BRAVUS-BANK.md** seção "Arquitetura"
+👉 Ver **README-VANTYX-BANK.md** seção "Arquitetura"
 
 ---
 

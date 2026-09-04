@@ -10,5 +10,6 @@ import java.util.List;
 @Repository
 public interface TransactionRepository extends JpaRepository<TransactionEntity, Long> {
     List<TransactionEntity> findByUserOrderByCreatedAtDesc(UserEntity user);
+    List<TransactionEntity> findByUserIdOrderByCreatedAtDesc(Long userId);
     List<TransactionEntity> findTop10ByUserOrderByCreatedAtDesc(UserEntity user);
 }

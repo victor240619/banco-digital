@@ -81,7 +81,7 @@ public class MercadoPagoService {
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("transaction_amount", amount);
-        body.put("description", description == null ? "Depósito Bravus Bank" : description);
+        body.put("description", description == null ? "Depósito Vantyx Bank" : description);
         body.put("payment_method_id", "pix");
         body.put("payer", payerMap);
         body.put("external_reference", externalReference == null ? UUID.randomUUID().toString() : externalReference);

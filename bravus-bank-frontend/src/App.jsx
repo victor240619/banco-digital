@@ -48,6 +48,14 @@ function PublicRoute({ children }) {
   return children;
 }
 
+function AccountTheme({ children }) {
+  useEffect(() => {
+    document.body.classList.add('account-light-page');
+    return () => document.body.classList.remove('account-light-page');
+  }, []);
+  return children;
+}
+
 
 function NotFoundRedirect() {
   const isAuthenticated = authService.isAuthenticated();
@@ -140,9 +148,9 @@ export default function App() {
               <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
               <Route path="/register/*" element={<PublicRoute><Register /></PublicRoute>} />
               <Route path="/redefinir-senha" element={<PublicRoute><PasswordReset /></PublicRoute>} />
-              <Route path="/completar-identidade" element={<ProtectedRoute userOnly><IdentityVerification /></ProtectedRoute>} />
-              <Route path="/dashboard/*" element={<ProtectedRoute userOnly><UserDashboard /></ProtectedRoute>} />
-              <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminDashboard /></ProtectedRoute>} />
+              <Route path="/completar-identidade" element={<ProtectedRoute userOnly><AccountTheme><IdentityVerification /></AccountTheme></ProtectedRoute>} />
+              <Route path="/dashboard/*" element={<ProtectedRoute userOnly><AccountTheme><UserDashboard /></AccountTheme></ProtectedRoute>} />
+              <Route path="/admin" element={<ProtectedRoute requireAdmin><AccountTheme><AdminDashboard /></AccountTheme></ProtectedRoute>} />
               <Route path="*" element={<NotFoundRedirect />} />
             </Routes>
           </Suspense>

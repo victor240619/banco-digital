@@ -290,7 +290,7 @@ export default function Register() {
               <UserPlus className="h-3.5 w-3.5" />
               Abertura de conta
             </div>
-            <h1 className="title-md">Criar conta Bravus</h1>
+            <h1 className="title-md">Criar conta Vantyx</h1>
             <p className="mt-1.5 text-sm text-ink-300">
               Crie suas duas senhas de acesso. O numero da conta sera gerado automaticamente.
             </p>
@@ -325,7 +325,7 @@ export default function Register() {
                 <Field label="Nome completo" name="fullName" value={formData.fullName || ''} onChange={handleChange} required placeholder="Seu nome completo" autoComplete="name" />
                 <Field label="CPF" name="cpf" value={formData.cpf || ''} onChange={handleChange} onBlur={handleIdentityBlur} required placeholder="000.000.000-00" autoComplete="off" />
                 <Field label="Telefone" name="phone" type="tel" value={formData.phone || ''} onChange={handleChange} placeholder="(00) 00000-0000" autoComplete="tel" />
-                <Field label="Senha alfanumerica" name="password" type="password" value={formData.password || ''} onChange={handleChange} required placeholder="Ex.: Bravus123" minLength={8} maxLength={64} pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9]{8,64}" autoComplete="new-password" />
+                <Field label="Senha alfanumerica" name="password" type="password" value={formData.password || ''} onChange={handleChange} required placeholder="Ex.: Vantyx123" minLength={8} maxLength={64} pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9]{8,64}" autoComplete="new-password" />
                 <Field label="Senha numerica de 8 digitos" name="numericPassword" type="password" value={formData.numericPassword || ''} onChange={handleChange} required placeholder="00000000" minLength={8} maxLength={8} inputMode="numeric" pattern="[0-9]{8}" autoComplete="off" />
               </div>
 

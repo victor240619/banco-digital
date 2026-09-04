@@ -1,4 +1,4 @@
-# Bravus Bank
+# Vantyx Bank
 
 Serviço Spring Boot com integração Stripe para planos e pagamentos.
 

@@ -154,7 +154,7 @@ public class CaymanRailService {
         instruction.setUser(user);
         instruction.setParticipant(participant);
         instruction.setAmountMinor(cmd.amountMinor);
-        instruction.setCurrency(upperOrDefault(cmd.currency, "KYD"));
+        instruction.setCurrency(upperOrDefault(cmd.currency, "BRL"));
         instruction.setChannel(upperOrDefault(cmd.channel, "CAYMAN_RAIL"));
         instruction.setBeneficiaryName(cmd.beneficiaryName.trim());
         instruction.setBeneficiaryDocument(cleanDigitsOrText(cmd.beneficiaryDocument));

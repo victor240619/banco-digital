@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "CORRIGINDO BACKEND BRAVUS BANK"
+echo "CORRIGINDO BACKEND VANTYX BANK"
 echo ""
 
 cd ~/banco-digital/bravus-bank

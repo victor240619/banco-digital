@@ -1,5 +1,5 @@
 #!/bin/bash
-# Bravus Bank Database Backup Script
+# Vantyx Bank Database Backup Script
 # This script creates a backup of the PostgreSQL database
 
 set -e

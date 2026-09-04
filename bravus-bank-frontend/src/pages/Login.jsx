@@ -95,7 +95,7 @@ export default function Login() {
           </div>
           <h1 className="title-xl">
             Entre com segurança no seu
-            <span className="gradient-text"> Bravus Bank.</span>
+            <span className="gradient-text"> Vantyx Bank.</span>
           </h1>
           <p className="mt-5 max-w-xl text-base leading-relaxed text-ink-300">
             Acesse saldo, transferências, extrato e operações bancárias em um ambiente digital com proteção por JWT e auditoria de sessões.

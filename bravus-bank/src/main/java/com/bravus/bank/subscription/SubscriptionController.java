@@ -49,7 +49,7 @@ public class SubscriptionController {
                         .setCurrency(properties.getDefaultCurrency())
                         .setUnitAmount(plan.getAmountInCents())
                         .setProductData(SessionCreateParams.LineItem.PriceData.ProductData.builder()
-                                .setName("Bravus Bank - " + plan.getDescription())
+                                .setName("Vantyx Bank - " + plan.getDescription())
                                 .build())
                         .setRecurring(recurring)
                         .build();

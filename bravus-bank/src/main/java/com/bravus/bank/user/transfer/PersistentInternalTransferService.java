@@ -72,10 +72,10 @@ public class PersistentInternalTransferService {
         UserEntity initialTo = findDestination(destination)
                 .orElseThrow(() -> new InternalTransferException(
                         "BRAVUS_DESTINATION_NOT_FOUND",
-                        "Destino Bravus nao encontrado. Para outros bancos, use ACH/EFT Cayman ou Wire/SWIFT internacional."));
+                        "Destino Vantyx nao encontrado. Para outros bancos, use ACH/EFT Cayman ou Wire/SWIFT internacional."));
 
         if (initialFrom.getId().equals(initialTo.getId())) {
-            throw new InternalTransferException("SELF_TRANSFER", "Nao e permitido transferir para a propria conta Bravus.");
+            throw new InternalTransferException("SELF_TRANSFER", "Nao e permitido transferir para a propria conta Vantyx.");
         }
 
         Optional<InternalTransferRequestEntity> previous = requestRepository
@@ -228,7 +228,7 @@ public class PersistentInternalTransferService {
         order.setTransactionId(out.getId());
         order.setAmountCentavos(amount);
         order.setChannel("INTERNAL_BRAVUS");
-        order.setCurrency("KYD");
+        order.setCurrency("BRL");
         order.setBeneficiaryName(to.getFullName() != null ? to.getFullName() : to.getUsername());
         order.setBeneficiaryDocument(digits(to.getCpf()));
         order.setBankCode("999");
@@ -249,7 +249,7 @@ public class PersistentInternalTransferService {
         order.setDestinationParticipantCode("BRAVUS-INTERNAL");
         order.setDestinationConfirmationId(idempotencyKey);
         order.setDestinationConfirmedAt(OffsetDateTime.now());
-        order.setSettlementMessage("Liquidacao interna confirmada no ledger Bravus.");
+        order.setSettlementMessage("Liquidacao interna confirmada no ledger Vantyx.");
         order.setRawResponse("{\"provider\":\"BRAVUS_INTERNAL_LEDGER\",\"status\":\"COMPLETED\",\"settlement\":\"INTERNAL_LEDGER\"}");
         return externalTransferRepository.save(order);
     }
@@ -271,7 +271,7 @@ public class PersistentInternalTransferService {
         entry.setAccountNumber(user.getAccountNumber());
         entry.setEntryType(entryType);
         entry.setSignedAmountCentavos(signedAmount);
-        entry.setCurrency("KYD");
+        entry.setCurrency("BRL");
         entry.setReason("INTERNAL_TRANSFER");
         return entry;
     }
@@ -291,7 +291,7 @@ public class PersistentInternalTransferService {
         command.tipo = "TRANSFERENCIA_INTERNA";
         command.transactionId = transactionId;
         command.criadoPor = createdBy;
-        command.observacao = "Transferencia interna Bravus para " + destinationAccount;
+        command.observacao = "Transferencia interna Vantyx para " + destinationAccount;
         creditService.useCredit(command);
     }
 
@@ -344,7 +344,7 @@ public class PersistentInternalTransferService {
     }
 
     private String normalizeDescription(String description) {
-        if (description == null || description.isBlank()) return "Transferencia interna Bravus";
+        if (description == null || description.isBlank()) return "Transferencia interna Vantyx";
         String normalized = description.trim();
         return normalized.length() <= 500 ? normalized : normalized.substring(0, 500);
     }

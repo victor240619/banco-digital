@@ -15,7 +15,7 @@ const channels = [
   {
     title: 'Online',
     icon: MonitorSmartphone,
-    text: 'Acesse sua conta Bravus pelo navegador ou aplicativo para consultar saldos, movimentações, comprovantes e serviços disponíveis para o seu perfil.',
+    text: 'Acesse sua conta Vantyx pelo navegador ou aplicativo para consultar saldos, movimentações, comprovantes e serviços disponíveis para o seu perfil.',
     action: 'Acessar banco online',
     to: '/login',
   },
@@ -47,7 +47,7 @@ const channelGalleryItems = [
 const channelFaqs = [
   ['Qual canal devo usar para assuntos da conta?', 'Prefira o ambiente autenticado. Ele ajuda a relacionar a solicitação ao titular sem expor informações desnecessárias.'],
   ['O acesso online funciona a qualquer hora?', 'O ambiente digital pode ser acessado continuamente, mas funções específicas podem passar por manutenção ou controles temporários de segurança.'],
-  ['A Bravus possui caixas eletrônicos próprios?', 'Esta página não afirma a existência de rede própria. O uso de terminais depende de cartão elegível e rede compatível.'],
+  ['A Vantyx possui caixas eletrônicos próprios?', 'Esta página não afirma a existência de rede própria. O uso de terminais depende de cartão elegível e rede compatível.'],
   ['O atendimento solicita senha ou código?', 'Não. Nunca informe senha completa, código temporário ou credencial de autenticação a um atendente.'],
   ['Como agir em caso de perda ou roubo de cartão?', 'Use os controles disponíveis, informe o emissor e acione os canais globais da bandeira apresentados na página inicial quando aplicável.'],
   ['Onde verifico o andamento de uma solicitação?', 'Consulte a área autenticada ou o canal pelo qual a solicitação foi aberta, preservando o número de protocolo quando fornecido.'],
@@ -81,7 +81,7 @@ export default function ServiceChannels() {
         </Link>
 
         <div className="mt-10 max-w-3xl">
-          <p className="text-xs font-semibold uppercase text-gold-300">Atendimento Bravus</p>
+          <p className="text-xs font-semibold uppercase text-gold-300">Atendimento Vantyx</p>
           <h1 className="mt-3 font-display text-4xl font-bold text-white sm:text-5xl">Escolha o canal certo para você.</h1>
           <p className="mt-5 text-lg leading-relaxed text-ink-200">
             Acesso digital, suporte protegido e informações transparentes sobre o uso de terminais compatíveis.
@@ -113,7 +113,7 @@ export default function ServiceChannels() {
       </section>
 
       <EditorialGallery
-        description="Seis formas de visualizar o atendimento Bravus, do autosserviço digital à orientação protegida para situações que exigem acompanhamento."
+        description="Seis formas de visualizar o atendimento Vantyx, do autosserviço digital à orientação protegida para situações que exigem acompanhamento."
         items={channelGalleryItems}
         sheet="/images/galleries/canais-atendimento.jpg"
         title="Atendimento em diferentes momentos"
@@ -135,7 +135,7 @@ export default function ServiceChannels() {
             <div>
               <h2 className="font-display text-lg font-semibold text-white">Atendimento com proteção</h2>
               <p className="mt-2 text-sm leading-relaxed text-ink-300">
-                A Bravus nunca solicita senha completa, código temporário ou pagamento antecipado para liberar acesso ou valores.
+                A Vantyx nunca solicita senha completa, código temporário ou pagamento antecipado para liberar acesso ou valores.
               </p>
             </div>
           </div>

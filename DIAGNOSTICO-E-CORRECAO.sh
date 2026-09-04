@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "╔═══════════════════════════════════════════════════════════════════╗"
-echo "║           🔍 DIAGNÓSTICO E CORREÇÃO - BRAVUS BANK                ║"
+echo "║           🔍 DIAGNÓSTICO E CORREÇÃO - VANTYX BANK                ║"
 echo "╚═══════════════════════════════════════════════════════════════════╝"
 echo ""
 

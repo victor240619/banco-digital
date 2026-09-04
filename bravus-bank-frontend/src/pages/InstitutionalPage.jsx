@@ -22,7 +22,7 @@ const pages = {
       icon: CircleDollarSign,
       eyebrow: 'Produto',
       title: 'Conta Digital',
-      lead: 'Uma experiência digital em KYD para acompanhar saldo, movimentações e serviços da conta Bravus em um só lugar.',
+      lead: 'Uma experiência digital em reais para acompanhar saldo, movimentações e serviços da conta Vantyx em um só lugar.',
       sections: [
         {
           title: 'Visão centralizada',
@@ -64,10 +64,10 @@ const pages = {
       icon: Landmark,
       eyebrow: 'Produto',
       title: 'Transferências',
-      lead: 'Fluxos separados para movimentações internas Bravus, transferências locais nas Ilhas Cayman e instruções internacionais.',
+      lead: 'Fluxos separados para movimentações internas Vantyx, transferências locais nas Ilhas Cayman e instruções internacionais.',
       sections: [
         {
-          title: 'Rede interna Bravus',
+          title: 'Rede interna Vantyx',
           text: 'Transferências entre contas elegíveis usam identificação do destinatário, confirmação dos dados e comprovante da operação.',
         },
         {
@@ -107,7 +107,7 @@ const pages = {
     sobre: {
       icon: Building2,
       eyebrow: 'Empresa',
-      title: 'Sobre a Bravus',
+      title: 'Sobre a Vantyx',
       lead: 'Tecnologia financeira com foco em segurança, transparência operacional e uma experiência digital orientada às Ilhas Cayman.',
       sections: [
         {
@@ -116,7 +116,7 @@ const pages = {
         },
         {
           title: 'Padrão operacional',
-          text: 'A Bravus prioriza integridade de dados, histórico preservado, autenticação segura e rastreabilidade das operações.',
+          text: 'A Vantyx prioriza integridade de dados, histórico preservado, autenticação segura e rastreabilidade das operações.',
         },
         {
           title: 'Transparência regulatória',
@@ -141,7 +141,7 @@ const pages = {
         },
         {
           title: 'Oportunidades',
-          text: 'As vagas serão divulgadas nesta página quando houver processos seletivos abertos. A Bravus não solicita pagamentos de candidatos.',
+          text: 'As vagas serão divulgadas nesta página quando houver processos seletivos abertos. A Vantyx não solicita pagamentos de candidatos.',
         },
       ],
       action: ['Voltar ao início', '/'],
@@ -150,11 +150,11 @@ const pages = {
       icon: Newspaper,
       eyebrow: 'Empresa',
       title: 'Imprensa',
-      lead: 'Informações institucionais, comunicados e atualizações oficiais sobre a Bravus Bank.',
+      lead: 'Informações institucionais, comunicados e atualizações oficiais sobre a Vantyx Bank.',
       sections: [
         {
           title: 'Fonte oficial',
-          text: 'Comunicados válidos serão publicados nos canais oficiais vinculados ao domínio bravusbank.com.',
+          text: 'Comunicados válidos serão publicados somente nos canais oficiais da Vantyx Bank.',
         },
         {
           title: 'Marca e informações',
@@ -165,7 +165,7 @@ const pages = {
           text: 'Não há comunicados de imprensa publicados neste momento. Novas informações aparecerão aqui com data e origem identificadas.',
         },
       ],
-      action: ['Conhecer a Bravus', '/empresa/sobre'],
+      action: ['Conhecer a Vantyx', '/empresa/sobre'],
     },
     contato: {
       icon: ContactRound,
@@ -179,7 +179,7 @@ const pages = {
         },
         {
           title: 'Segurança',
-          text: 'Nunca informe senha, código de acesso ou documentos fora dos fluxos oficiais do aplicativo e do domínio bravusbank.com.',
+          text: 'Nunca informe senha, código de acesso ou documentos fora dos fluxos oficiais do aplicativo e dos canais da Vantyx Bank.',
         },
         {
           title: 'Solicitações institucionais',

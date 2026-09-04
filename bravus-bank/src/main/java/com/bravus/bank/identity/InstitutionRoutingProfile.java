@@ -5,12 +5,12 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * Public routing identity for Bravus. The internal code is not a SWIFT-issued BIC.
+ * Public routing identity for Vantyx. The internal code is not a SWIFT-issued BIC.
  */
 public final class InstitutionRoutingProfile {
-    public static final String INSTITUTION_NAME = "Bravus Premium Bank";
+    public static final String INSTITUTION_NAME = "Vantyx Bank";
     public static final String COUNTRY_CODE = "KY";
-    public static final String CURRENCY = "KYD";
+    public static final String CURRENCY = "BRL";
     public static final String INTERNAL_ROUTING_CODE = "BRAV-KY-INTERNAL";
     public static final String INTERNAL_SWIFT_BIC = "BRAVKYK0XXX";
     public static final String SWIFT_BIC_STATUS = "INTERNAL_TEST_ONLY_UNREGISTERED";

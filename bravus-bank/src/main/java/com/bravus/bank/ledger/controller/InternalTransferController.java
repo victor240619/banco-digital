@@ -12,7 +12,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * Transferência escritural entre clientes Bravus.
+ * Transferência escritural entre clientes Vantyx Bank.
  *
  *   POST /api/internal-transfers
  *     { destinationAccountNumber, amountCentavos, description }

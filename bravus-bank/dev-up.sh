@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================
-# Bravus Bank — dev-up.sh
+# Vantyx Bank — dev-up.sh
 # Sobe DB + API com Docker Compose de forma idempotente.
 # =============================================================
 set -euo pipefail
@@ -46,7 +46,7 @@ else
   exit 1
 fi
 
-echo -e "${GREEN}🚀 Subindo Bravus Bank...${NC}"
+echo -e "${GREEN}🚀 Subindo Vantyx Bank...${NC}"
 $COMPOSE up -d --build
 
 echo ""
@@ -64,7 +64,7 @@ done
 
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
-echo -e "${GREEN}🏦  Bravus Bank rodando!${NC}"
+echo -e "${GREEN}🏦  Vantyx Bank rodando!${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
 echo "  🔌 API ............ http://localhost:9000"
 echo "  💚 Health ......... http://localhost:9000/actuator/health"

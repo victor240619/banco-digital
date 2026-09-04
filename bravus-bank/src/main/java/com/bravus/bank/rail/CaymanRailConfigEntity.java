@@ -10,7 +10,7 @@ public class CaymanRailConfigEntity {
     private Long id = 1L;
 
     @Column(name = "legal_entity_name", nullable = false)
-    private String legalEntityName = "Bravus Bank Cayman Ltd.";
+    private String legalEntityName = "Vantyx Bank Cayman Ltd.";
 
     @Column(nullable = false)
     private String jurisdiction = "Cayman Islands";

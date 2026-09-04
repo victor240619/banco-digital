@@ -3,11 +3,11 @@ import { formatCurrencyExact, reaisToCentavosExact } from "../bravus-bank-fronte
 
 assert.equal(
   formatCurrencyExact("100000000000000000"),
-  "KYD 1.000.000.000.000.000,00",
-  "one quadrillion KYD must render without floating-point precision loss",
+  "R$ 1.000.000.000.000.000,00",
+  "one quadrillion BRL must render without floating-point precision loss",
 );
-assert.equal(formatCurrencyExact("1000"), "KYD 10,00");
-assert.equal(formatCurrencyExact("-105"), "-KYD 1,05");
+assert.equal(formatCurrencyExact("1000"), "R$ 10,00");
+assert.equal(formatCurrencyExact("-105"), "-R$ 1,05");
 assert.equal(reaisToCentavosExact("123.45"), "12345");
 assert.equal(reaisToCentavosExact("123,4"), "12340");
 assert.equal(reaisToCentavosExact("1.234"), null);

@@ -51,7 +51,7 @@ export default function BankIdentityCard({ me }) {
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      className="relative overflow-hidden rounded-3xl border border-amber-500/20 bg-gradient-to-br from-[#040f2e] via-[#071a4d] to-[#040f2e] p-6 md:p-8 shadow-2xl"
+      className="bank-identity-card relative overflow-hidden rounded-3xl border border-amber-500/20 bg-gradient-to-br from-[#040f2e] via-[#071a4d] to-[#040f2e] p-6 md:p-8 shadow-2xl"
     >
       {/* shimmer dourado de fundo */}
       <div className="pointer-events-none absolute -top-32 -right-32 h-72 w-72 rounded-full bg-amber-500/10 blur-3xl" />
@@ -66,7 +66,7 @@ export default function BankIdentityCard({ me }) {
             </div>
             <div>
               <p className="text-[11px] uppercase tracking-[0.2em] text-amber-300/80">
-                {banco.nomeBanco || 'Bravus Premium Bank'}
+                {banco.nomeBanco || 'Vantyx Bank'}
               </p>
               <p className="text-xs text-white/50 mt-0.5">
                 KY · Roteamento {banco.internalRoutingCode || 'BRAV-KY-INTERNAL'}

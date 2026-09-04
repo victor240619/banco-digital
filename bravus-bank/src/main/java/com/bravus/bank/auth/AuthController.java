@@ -138,8 +138,8 @@ public class AuthController {
     @PostMapping("/register")
     @Transactional
     public ResponseEntity<?> register(@RequestBody @Valid RegisterRequest request,
-                                      @RequestHeader(value = "X-Bravus-Client", required = false) String bravusClient) {
-        if (!isAllowedRegistrationClient(request, bravusClient)) {
+                                      @RequestHeader(value = "X-Bravus-Client", required = false) String legacyClient) {
+        if (!isAllowedRegistrationClient(request, legacyClient)) {
             return ResponseEntity.status(403)
                     .body("Canal de abertura de conta nao autorizado.");
         }
@@ -273,20 +273,20 @@ public class AuthController {
         return "BLOQUEADO_ANALISE";
     }
 
-    private boolean isAllowedRegistrationClient(RegisterRequest request, String bravusClient) {
-        if ((bravusClient == null || bravusClient.isBlank())
+    private boolean isAllowedRegistrationClient(RegisterRequest request, String legacyClient) {
+        if ((legacyClient == null || legacyClient.isBlank())
                 && "WEB".equalsIgnoreCase(request.clientChannel())) {
             return true;
         }
-        if ("android-apk".equalsIgnoreCase(bravusClient)
+        if ("android-apk".equalsIgnoreCase(legacyClient)
                 && "ANDROID_APK".equalsIgnoreCase(request.clientChannel())) {
             return true;
         }
-        if ("ios-app".equalsIgnoreCase(bravusClient)
+        if ("ios-app".equalsIgnoreCase(legacyClient)
                 && "IOS_APP".equalsIgnoreCase(request.clientChannel())) {
             return true;
         }
-        return "mobile-app".equalsIgnoreCase(bravusClient)
+        return "mobile-app".equalsIgnoreCase(legacyClient)
                 && "MOBILE_APP".equalsIgnoreCase(request.clientChannel());
     }
 }

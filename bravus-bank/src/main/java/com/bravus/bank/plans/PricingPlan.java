@@ -1,9 +1,9 @@
 package com.bravus.bank.plans;
 
 public enum PricingPlan {
-    BASIC_9990("basic", 9990L, "Plano Básico BRL 99,90"),
-    STANDARD_13400("standard", 13400L, "Plano Padrão BRL 134,00"),
-    PREMIUM_48900("premium", 48900L, "Plano Premium BRL 489,00");
+    BASIC_9990("basic", 9990L, "Plano Básico R$ 99,90"),
+    STANDARD_13400("standard", 13400L, "Plano Padrão R$ 134,00"),
+    PREMIUM_48900("premium", 48900L, "Plano Premium R$ 489,00");
 
     private final String code;
     private final long amountInCents;

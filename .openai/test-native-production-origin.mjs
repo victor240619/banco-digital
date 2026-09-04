@@ -18,9 +18,11 @@ for (const [file, content] of contents) {
 
 const capacitorConfig = JSON.parse(contents.find(([file]) => file.endsWith('capacitor.config.json'))[1]);
 assert.equal(capacitorConfig.server.url, expectedOrigin);
+assert.equal(capacitorConfig.appName, 'Vantyx Bank');
+assert.equal(capacitorConfig.appId, 'com.bravus.bank');
 assert.match(contents.find(([file]) => file.endsWith('appChannel.js'))[1], /https:\/\/bravusbank\.com\/api/);
-assert.match(contents.find(([file]) => file.endsWith('build.gradle'))[1], /versionCode\s+4/);
-assert.match(contents.find(([file]) => file.endsWith('build.gradle'))[1], /versionName\s+"1\.3\.0"/);
+assert.match(contents.find(([file]) => file.endsWith('build.gradle'))[1], /versionCode\s+5/);
+assert.match(contents.find(([file]) => file.endsWith('build.gradle'))[1], /versionName\s+"2\.0\.0"/);
 assert.match(contents.find(([file]) => file === 'render.yaml')[1], /value:\s+"https:\/\/bravusbank\.com"/);
 assert.match(contents.find(([file]) => file.endsWith('build-sites-artifact.mjs'))[1], /banco-digital\/master\/bravus-bank-frontend/);
 assert.match(contents.find(([file]) => file.endsWith('build-sites-artifact.mjs'))[1], /hostname\.endsWith\("\.chatgpt\.site"\)/);

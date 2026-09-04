@@ -13,6 +13,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
@@ -68,6 +70,7 @@ public class UserController {
     
     public record TransactionResponse(
             Long id,
+            String username,
             String type,
             Long amount,
             String description,
@@ -125,7 +128,7 @@ public class UserController {
         UserEntity user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("User not found"));
         
-        return ResponseEntity.ok(new UserProfileResponse(
+        return privateResponse(new UserProfileResponse(
                 user.getId(),
                 user.getUsername(),
                 user.getEmail(),
@@ -145,7 +148,7 @@ public class UserController {
         UserEntity user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("User not found"));
         
-        return ResponseEntity.ok(user.getBalance());
+        return privateResponse(user.getBalance());
     }
     
     @GetMapping("/transactions")
@@ -155,12 +158,12 @@ public class UserController {
                 .orElseThrow(() -> new RuntimeException("User not found"));
         
         List<TransactionResponse> transactions = transactionRepository
-                .findByUserOrderByCreatedAtDesc(user)
+                .findByUserIdOrderByCreatedAtDesc(user.getId())
                 .stream()
                 .map(t -> toTransactionResponse(t, user))
                 .collect(Collectors.toList());
         
-        return ResponseEntity.ok(transactions);
+        return privateResponse(transactions);
     }
 
     @GetMapping("/transfer/resolve")
@@ -170,20 +173,20 @@ public class UserController {
                 .orElseThrow(() -> new RuntimeException("User not found"));
         Optional<UserEntity> found = findTransferDestination(destination);
         if (found.isEmpty()) {
-            return ResponseEntity.ok(Map.of(
+            return privateResponse(Map.of(
                     "found", false,
-                    "message", "Destinatario Bravus nao localizado."
+                    "message", "Destinatario Vantyx nao localizado."
             ));
         }
         UserEntity destinationUser = found.get();
         if (destinationUser.getId().equals(currentUser.getId())) {
-            return ResponseEntity.ok(Map.of(
+            return privateResponse(Map.of(
                     "found", false,
                     "code", "SELF_TRANSFER",
                     "message", "Nao e permitido transferir para a propria conta."
             ));
         }
-        return ResponseEntity.ok(toDestinationResponse(destinationUser));
+        return privateResponse(toDestinationResponse(destinationUser));
     }
     
     @PostMapping("/deposit")
@@ -280,7 +283,7 @@ public class UserController {
 
     private ResponseEntity<?> transferResponse(PersistentInternalTransferService.TransferResult result) {
         return ResponseEntity.ok(Map.of(
-                "message", "Transferencia interna Bravus liquidada.",
+                "message", "Transferencia interna Vantyx liquidada.",
                 "status", "COMPLETED",
                 "provider", "BRAVUS_INTERNAL_LEDGER",
                 "settlementStatus", "LIQUIDADA_CONFIRMADA",
@@ -323,6 +326,7 @@ public class UserController {
 
         return new TransactionResponse(
                 tx.getId(),
+                viewer.getUsername(),
                 tx.getType(),
                 tx.getAmount(),
                 tx.getDescription(),
@@ -379,7 +383,7 @@ public class UserController {
                 user.getUsername(),
                 user.getFullName(),
                 user.getCpf(),
-                user.getNomeBanco(),
+                "Vantyx Bank",
                 user.getCodigoBanco(),
                 null,
                 user.getAgencia(),
@@ -396,7 +400,7 @@ public class UserController {
         return new Party(
                 user.getFullName(),
                 user.getCpf(),
-                user.getNomeBanco(),
+                "Vantyx Bank",
                 user.getCodigoBanco(),
                 null,
                 user.getAgencia(),
@@ -422,9 +426,9 @@ public class UserController {
 
     private Party bankParty() {
         return new Party(
-                "Bravus Premium Bank",
+                "Vantyx Bank",
                 "BRAVUS-LEDGER",
-                "Bravus Premium Bank",
+                "Vantyx Bank",
                 "999",
                 null,
                 "0001",
@@ -471,6 +475,13 @@ public class UserController {
                 "message", message,
                 "code", code
         ));
+    }
+
+    private <T> ResponseEntity<T> privateResponse(T body) {
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore().cachePrivate())
+                .header(HttpHeaders.VARY, HttpHeaders.AUTHORIZATION)
+                .body(body);
     }
 
     private Optional<UserEntity> findTransferDestination(String destination) {

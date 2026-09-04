@@ -71,7 +71,7 @@ public class LocalDevDataConfig {
             admin.setUsername(ADMIN_LOGIN);
             admin.setEmail(ADMIN_LOGIN);
             admin.setPassword(passwordEncoder.encode(ADMIN_PASSWORD));
-            admin.setFullName("Administrador Bravus Local");
+            admin.setFullName("Administrador Vantyx Local");
             setAccountNumberIfAvailable(admin, userRepo, "000003");
             if (admin.getBalance() == null) {
                 admin.setBalance(0L);
@@ -134,7 +134,7 @@ public class LocalDevDataConfig {
                         fator_multiplicador, capacidade_total_emissao, moeda, status, version
                     ) VALUES (?, ?, 0, 0, 0, 0, ?, 10, ?, 'BRL', 'ATIVA', 0)
                     """,
-                    "Reserva Mestre Bravus Bank",
+                    "Reserva Mestre Vantyx Bank",
                     70_000_000_000L,
                     700_000_000_000L,
                     700_000_000_000L);

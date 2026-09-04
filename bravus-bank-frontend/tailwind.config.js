@@ -4,7 +4,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Bravus Premium palette — midnight navy + gold accents
+        // Vantyx Bank palette — midnight navy + blue accents
         bravus: {
           50:  '#f3f5fb',
           100: '#e6eaf6',

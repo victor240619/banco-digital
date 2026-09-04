@@ -15,7 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * Transferência escritural ENTRE CLIENTES Bravus.
+ * Transferência escritural ENTRE CLIENTES Vantyx Bank.
  *
  * Fluxo atômico:
  *   1. Locks pessimistas em remetente e destinatário (ordenados por id para evitar deadlock)

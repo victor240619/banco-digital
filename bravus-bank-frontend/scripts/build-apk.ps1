@@ -53,7 +53,9 @@ if (-not (Test-Path $apk)) {
 
 $downloadDir = Join-Path $root "public\downloads"
 New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
+Copy-Item -LiteralPath $apk -Destination (Join-Path $downloadDir "vantyx-bank.apk") -Force
+Copy-Item -LiteralPath $apk -Destination (Join-Path $downloadDir "vantyx-bank-mobile.apk") -Force
 Copy-Item -LiteralPath $apk -Destination (Join-Path $downloadDir "bravus-bank.apk") -Force
 Copy-Item -LiteralPath $apk -Destination (Join-Path $downloadDir "bravus-bank-mobile.apk") -Force
 
-Write-Host "APK copiado para public\downloads\bravus-bank.apk e public\downloads\bravus-bank-mobile.apk"
+Write-Host "APK Vantyx copiado para os novos nomes e para os aliases legados de download."

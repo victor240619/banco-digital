@@ -218,7 +218,7 @@ public class UnifiedAdminSearchService {
         put(r.fields, "requiredProvider", "Senatran/Serpro ou fonte oficial autorizada");
         put(r.fields, "reason", "Consulta real de dados veiculares exige acesso autorizado e base legal.");
         response.results.add(r);
-        response.warnings.add("Placa reconhecida. O Bravus registrou a consulta, mas nao acessa RENAVAM/Senatran sem conector oficial autorizado.");
+        response.warnings.add("Placa reconhecida. O Vantyx registrou a consulta, mas nao acessa RENAVAM/Senatran sem conector oficial autorizado.");
     }
 
     private void audit(String query, String type, String normalized, int resultCount, String adminUsername) {

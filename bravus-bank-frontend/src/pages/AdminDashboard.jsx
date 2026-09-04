@@ -31,7 +31,7 @@ const destinationNetworkForChannel = (channel) => ({
 const displayTransferChannel = (channel) => ({
   ACH: 'ACH Cayman', EFT: 'EFT Cayman', SWIFT: 'Wire / SWIFT', WIRE: 'Wire / SWIFT',
   MSB_REMITTANCE: 'Remessa internacional', MSB_FX: 'Câmbio', CAYMAN_RAIL: 'Cayman Rail',
-  INTERNAL_BRAVUS: 'Transferência Bravus', PIX: 'Canal legado', TED: 'Canal legado',
+  INTERNAL_BRAVUS: 'Transferência Vantyx', PIX: 'Canal legado', TED: 'Canal legado',
 }[String(channel || '').toUpperCase()] || channel || '-');
 const apiError = (err, fallback) => {
   if (err?.code === 'ERR_NETWORK' || err?.message === 'Network Error') {
@@ -170,7 +170,7 @@ export default function AdminDashboard() {
             <Shield className="h-5 w-5 text-amber-300" />
             <span className="text-xs uppercase tracking-[0.25em] text-amber-300/80">Painel Administrativo</span>
           </div>
-          <h1 className="font-display text-3xl md:text-4xl font-bold mt-1">Bravus Bank · Comando</h1>
+          <h1 className="font-display text-3xl md:text-4xl font-bold mt-1">Vantyx Bank · Comando</h1>
           <p className="text-sm text-ink-300 mt-1">
             Controle total do banco — emissão escritural, ledger, reservas e usuários.
           </p>
@@ -634,7 +634,7 @@ function AccountProvisionForm({ initialData, onCreated, onError }) {
           <div>
             <h2 id="manual-account-title" className="font-display text-lg font-semibold">Criar conta manualmente</h2>
             <div className="mt-1 flex flex-wrap gap-2 text-xs text-ink-400">
-              <span>Saldo inicial KYD 0,00</span>
+              <span>Saldo inicial R$ 0,00</span>
               <span>·</span>
               <span>KYC pendente</span>
               <span>·</span>
@@ -1101,7 +1101,7 @@ function UserAccountDetail({ username, onBack, onChanged, onError }) {
         <div className="grid gap-6 xl:grid-cols-2">
           <form onSubmit={placeHold} className="card-premium p-5 sm:p-6 space-y-4">
             <SectionTitle icon={Banknote} title="Nova retencao" subtitle="Reduz o saldo disponivel sem apagar ou alterar o saldo contabil." />
-            <Field label="Valor em KYD"><input className="input-premium w-full" inputMode="decimal" placeholder="0,00" value={holdForm.amountReais} disabled={!manageable || busy} onChange={(event) => setHoldForm({ ...holdForm, amountReais: event.target.value })} /></Field>
+            <Field label="Valor em R$"><input className="input-premium w-full" inputMode="decimal" placeholder="0,00" value={holdForm.amountReais} disabled={!manageable || busy} onChange={(event) => setHoldForm({ ...holdForm, amountReais: event.target.value })} /></Field>
             <Field label="Motivo da retencao"><textarea className="input-premium min-h-24 w-full resize-y" maxLength={500} value={holdForm.reason} disabled={!manageable || busy} onChange={(event) => setHoldForm({ ...holdForm, reason: event.target.value })} /></Field>
             <button type="submit" className="btn-primary" disabled={!manageable || busy || holdForm.reason.trim().length < 10}><Lock className="h-4 w-4" /> Reter saldo</button>
           </form>
@@ -1633,8 +1633,8 @@ function CreditView({ users, bs, onSuccess, onError }) {
     try {
       await ledgerAdminService.issueCredit(payload, issueAttempt.current.key);
       onSuccess(form.liberarAgora
-        ? `Crédito de KYD ${form.valorReais} emitido e liberado.`
-        : `Crédito de KYD ${form.valorReais} emitido como pendente.`);
+        ? `Crédito de R$ ${form.valorReais} emitido e liberado.`
+        : `Crédito de R$ ${form.valorReais} emitido como pendente.`);
       setForm({ ...form, valorReais: '', motivo: '', observacoes: '' });
       issueAttempt.current = null;
       const { data } = await ledgerAdminService.grantsByUser(form.userId);
@@ -1697,7 +1697,7 @@ function CreditView({ users, bs, onSuccess, onError }) {
             </select>
           </Field>
 
-          <Field label="Valor (KYD)">
+          <Field label="Valor (R$)">
             <input type="number" step="0.01" min="0.01" className="input-premium w-full"
                    value={form.valorReais}
                    onChange={(e) => setForm({ ...form, valorReais: e.target.value })} />
@@ -1826,7 +1826,7 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
         participantCode: form.participantCode || null,
       }, transferAttempt.current.key);
       transferAttempt.current = null;
-      onSuccess(`Ordem de KYD ${form.amountReais} registrada no trilho Bravus.`);
+      onSuccess(`Ordem de R$ ${form.amountReais} registrada no trilho Vantyx.`);
       setForm({ ...form, amountReais: '', description: '' });
     } catch (err) {
       onError(err?.response?.data?.message || err?.response?.data || 'Falha no envio bancario externo.');
@@ -1856,7 +1856,7 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
             </select>
           </Field>
 
-          <Field label="Valor (KYD)">
+          <Field label="Valor (R$)">
             <input className="input-premium w-full" type="number" min="0.01" step="0.01"
                    value={form.amountReais}
                    onChange={(e) => setForm({ ...form, amountReais: e.target.value })} />
@@ -1985,7 +1985,7 @@ function ExternalTransferView({ users, transfers, participants = [], onSuccess, 
 function GlobalRailView({ participants, transfers, onSuccess, onError }) {
   const [form, setForm] = useState({
     participantCode: 'BRAVUS-INTERNAL',
-    legalName: 'Bravus Premium Bank',
+    legalName: 'Vantyx Bank',
     country: 'KY',
     network: 'INTERNAL_BRAVUS',
     bankCode: '999',
@@ -2206,7 +2206,7 @@ function CaymanRailView({ rail, users, onSuccess, onError }) {
   const userOptions = users.filter((u) => !u.roles?.some?.((r) => r.includes?.('ADMIN')));
 
   const [configForm, setConfigForm] = useState({
-    legalEntityName: 'Bravus Bank Cayman Ltd.',
+    legalEntityName: 'Vantyx Bank Cayman Ltd.',
     jurisdiction: 'Cayman Islands',
     registryNumber: '',
     cimaLicenseNumber: '',
@@ -2221,7 +2221,7 @@ function CaymanRailView({ rail, users, onSuccess, onError }) {
     swiftBic: '', localRoutingCode: '', settlementAccount: '', directParticipant: false, status: 'PENDING',
   });
   const [instructionForm, setInstructionForm] = useState({
-    userId: '', participantId: '', amount: '', currency: 'KYD',
+    userId: '', participantId: '', amount: '', currency: 'BRL',
     beneficiaryName: '', beneficiaryDocument: '', beneficiaryAccount: '', description: '',
   });
   const [submitting, setSubmitting] = useState(false);
@@ -2229,7 +2229,7 @@ function CaymanRailView({ rail, users, onSuccess, onError }) {
   useEffect(() => {
     if (!cfg?.id) return;
     setConfigForm({
-      legalEntityName: cfg.legalEntityName || 'Bravus Bank Cayman Ltd.',
+      legalEntityName: cfg.legalEntityName || 'Vantyx Bank Cayman Ltd.',
       jurisdiction: cfg.jurisdiction || 'Cayman Islands',
       registryNumber: cfg.registryNumber || '',
       cimaLicenseNumber: cfg.cimaLicenseNumber || '',
@@ -2301,11 +2301,11 @@ function CaymanRailView({ rail, users, onSuccess, onError }) {
   }
 
   const moneyMinor = (amount) => {
-    const value = ((amount || 0) / 100).toLocaleString('en-KY', {
+    const value = ((amount || 0) / 100).toLocaleString('pt-BR', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
-    return `KYD ${value}`;
+    return `R$ ${value}`;
   };
 
   return (
@@ -2427,7 +2427,7 @@ function CaymanRailView({ rail, users, onSuccess, onError }) {
                    onChange={(e) => setParticipantForm({ ...participantForm, swiftBic: e.target.value.toUpperCase() })}
                    placeholder="Somente BIC emitido pela SWIFT" />
           </Field>
-          <p className="text-xs text-ink-400">Para o Bravus, use BRAVKYK0XXX apenas dentro deste sistema.</p>
+          <p className="text-xs text-ink-400">Para o Vantyx, use BRAVKYK0XXX apenas dentro deste sistema.</p>
           <Field label="Conta settlement">
             <input className="input-premium w-full" value={participantForm.settlementAccount}
                    onChange={(e) => setParticipantForm({ ...participantForm, settlementAccount: e.target.value })} />
@@ -2480,7 +2480,7 @@ function CaymanRailView({ rail, users, onSuccess, onError }) {
             <Field label="Moeda">
               <select className="input-premium w-full" value={instructionForm.currency}
                       onChange={(e) => setInstructionForm({ ...instructionForm, currency: e.target.value })}>
-                <option value="KYD">KYD</option>
+                <option value="BRL">BRL</option>
               </select>
             </Field>
             <Field label="Beneficiario">

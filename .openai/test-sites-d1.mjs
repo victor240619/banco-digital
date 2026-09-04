@@ -384,7 +384,7 @@ const rejectedSelfDeclaredBic = await call(worker, "POST", "/admin/global-rail/p
   token: adminLogin.data.token,
   body: {
     participantCode: "BRAVUS-CAYMAN",
-    legalName: "Bravus Premium Bank",
+    legalName: "Vantyx Bank",
     country: "KY",
     network: "CAYMAN_RAIL",
     bankCode: "999",
@@ -561,6 +561,22 @@ const joaoAfter = await call(worker, "GET", "/user/balance", { token: joaoToken 
 assert.equal(joaoAfter.data, joaoBefore.data - 1000, "duplicate request must debit only once");
 const customerBalance = await call(worker, "GET", "/user/balance", { token: customerToken });
 assert.equal(customerBalance.data, 1000, "beneficiary must receive the internal transfer");
+const joaoDashboard = await call(worker, "GET", "/user/dashboard", { token: joaoToken });
+const customerDashboard = await call(worker, "GET", "/user/dashboard", { token: customerToken });
+const joaoTransactions = await call(worker, "GET", "/user/transactions", { token: joaoToken });
+const customerTransactions = await call(worker, "GET", "/user/transactions", { token: customerToken });
+for (const result of [joaoDashboard, customerDashboard, joaoTransactions, customerTransactions]) {
+  assert.match(result.response.headers.get("cache-control") || "", /private/i, "account responses must be private");
+  assert.match(result.response.headers.get("cache-control") || "", /no-store/i, "account responses must never be cached");
+  assert.match(result.response.headers.get("vary") || "", /authorization/i, "account responses must vary by bearer token");
+}
+assert.equal(joaoDashboard.data.profile.username, "joao.victor");
+assert.equal(customerDashboard.data.profile.username, registrationIdentity.username);
+assert.equal(joaoDashboard.data.transactions.every((item) => item.username === "joao.victor"), true, "Joao dashboard must contain only Joao transactions");
+assert.equal(customerDashboard.data.transactions.every((item) => item.username === registrationIdentity.username), true, "customer dashboard must contain only customer transactions");
+assert.equal(joaoTransactions.data.every((item) => item.username === "joao.victor"), true, "Joao statement must contain only Joao transactions");
+assert.equal(customerTransactions.data.every((item) => item.username === registrationIdentity.username), true, "customer statement must contain only customer transactions");
+assert.equal(joaoTransactions.data.some((item) => customerTransactions.data.some((other) => other.id === item.id)), false, "two account statements must not share transaction rows");
 const pendingOutgoing = await call(worker, "POST", "/user/transfer", {
   token: customerToken,
   headers: { "idempotency-key": "pending-kyc-transfer-0001" },
@@ -1537,6 +1553,7 @@ console.log(JSON.stringify({
   immutableKycAuditVerified: true,
   accountControlLifecycleVerified: true,
   accountControlAuditReconciled: true,
+  crossAccountStatementIsolationVerified: true,
   balanceHoldEnforcedAcrossOutgoingFlows: true,
   adminPasswordResetVerified: true,
 }, null, 2));

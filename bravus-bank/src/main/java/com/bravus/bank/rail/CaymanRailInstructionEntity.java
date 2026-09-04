@@ -28,7 +28,7 @@ public class CaymanRailInstructionEntity {
     private Long amountMinor;
 
     @Column(nullable = false)
-    private String currency = "KYD";
+    private String currency = "BRL";
 
     @Column(nullable = false)
     private String channel = "CAYMAN_RAIL";

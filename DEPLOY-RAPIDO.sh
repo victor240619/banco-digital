@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# BRAVUS BANK - DEPLOY RÁPIDO
+# VANTYX BANK - DEPLOY RÁPIDO
 # Execute este arquivo para iniciar tudo automaticamente
 
 set -e
 
 echo "╔═══════════════════════════════════════════════════════════════════╗"
-echo "║           🚀 BRAVUS BANK - DEPLOY AUTOMÁTICO                      ║"
+echo "║           🚀 VANTYX BANK - DEPLOY AUTOMÁTICO                      ║"
 echo "╚═══════════════════════════════════════════════════════════════════╝"
 echo ""
 
@@ -73,7 +73,7 @@ echo "════════════════════════�
 echo ""
 echo "📚 DOCUMENTAÇÃO:"
 echo "   • START-AQUI.md          → Guia rápido"
-echo "   • README-BRAVUS-BANK.md  → Documentação completa"
+echo "   • README-VANTYX-BANK.md  → Documentação completa"
 echo "   • INSTRUCOES-DEPLOY.md   → Deploy detalhado"
 echo ""
 echo "🧪 TESTAR BACKEND:"

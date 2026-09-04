@@ -78,7 +78,7 @@ public class MercadoPagoController {
 
             JsonNode payment = mp.createPixPayment(
                     req.amountCentavos,
-                    req.description != null ? req.description : "Depósito Bravus Bank",
+                    req.description != null ? req.description : "Depósito Vantyx Bank",
                     payer,
                     externalRef
             );

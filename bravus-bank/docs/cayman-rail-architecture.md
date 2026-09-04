@@ -1,9 +1,9 @@
-# Bravus Cayman Rail
+# Vantyx Bank Cayman Rail
 
 ## Arquitetura
 
-O Bravus Cayman Rail e um trilho bancario proprio, operado como camada interna
-do Bravus Bank para preparo regulatorio, roteamento, auditoria e liquidacao
+O Vantyx Bank Cayman Rail e um trilho bancario proprio, operado como camada interna
+do Vantyx Bank para preparo regulatorio, roteamento, auditoria e liquidacao
 controlada. Ele nao simula autorizacao bancaria: a operacao publica fica
 bloqueada ate que a entidade tenha registro corporativo, licenca aplicavel da
 CIMA, politica AML ativa e participantes habilitados.
@@ -63,7 +63,7 @@ Sem isso, ordens ficam bloqueadas para dinheiro real.
 
 ## Identidade de roteamento
 
-- `BRAV-KY-INTERNAL` e o identificador interno do Bravus no Cayman Rail.
+- `BRAV-KY-INTERNAL` e o identificador técnico legado da Vantyx Bank no Cayman Rail.
 - Ele nao e um BIC e nao deve ser informado a terceiros como codigo SWIFT.
 - `BRAVKYK0XXX` e o BIC interno de teste do sistema. A posicao 8 igual a `0`
   identifica o uso exclusivo de teste e treinamento.
@@ -72,4 +72,4 @@ Sem isso, ordens ficam bloqueadas para dinheiro real.
   `swiftExternalRoutingEnabled = false` ate a emissao oficial pela SWIFT.
 - BICs de participantes externos aceitam somente 8 ou 11 caracteres no formato
   ISO 9362 e precisam conter o mesmo codigo de pais do participante.
-- Um BIC nao pode ser autodeclarado para um participante controlado pelo Bravus.
+- Um BIC nao pode ser autodeclarado para um participante controlado pela Vantyx Bank.

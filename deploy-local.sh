@@ -2,7 +2,7 @@
 set -e
 
 echo "🚀 =========================================="
-echo "🚀   BRAVUS BANK - DEPLOY LOCAL"
+echo "🚀   VANTYX BANK - DEPLOY LOCAL"
 echo "🚀 =========================================="
 echo ""
 

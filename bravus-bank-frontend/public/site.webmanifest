@@ -1,7 +1,7 @@
 {
-  "name": "Bravus Premium Bank",
-  "short_name": "Bravus",
-  "description": "Bravus Bank - banco digital premium.",
+  "name": "Vantyx Bank",
+  "short_name": "Vantyx",
+  "description": "Vantyx Bank - banco digital premium.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

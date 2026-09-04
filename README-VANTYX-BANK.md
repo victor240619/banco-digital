@@ -1,4 +1,4 @@
-# 🚀 BRAVUS BANK - Sistema Bancário Digital Completo
+# 🚀 VANTYX BANK - Sistema Bancário Digital Completo
 
 ## 📋 Descrição
 
@@ -293,7 +293,7 @@ Este projeto é de código aberto para fins educacionais.
 
 ## 👨‍💻 Desenvolvido por
 
-**Bravus Bank Development Team**
+**Vantyx Bank Development Team**
 - Backend: Spring Boot + PostgreSQL + JWT
 - Frontend: React + Vite + Modern CSS
 - Security: BCrypt + JWT + Spring Security

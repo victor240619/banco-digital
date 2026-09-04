@@ -19,6 +19,7 @@ import {
 } from '../utils/helpers';
 import { cn } from '../lib/cn';
 import { isMobileApp } from '../lib/appChannel';
+import { sanitizeAccountSnapshot } from '../lib/accountDataIsolation';
 import {
   saveNativeReceiptPdf,
   shareNativeReceiptPdf,
@@ -191,10 +192,18 @@ const displayTransferChannel = (channel) => ({
   MSB_REMITTANCE: 'Remessa internacional',
   MSB_FX: 'Câmbio',
   CAYMAN_RAIL: 'Cayman Rail',
-  INTERNAL_BRAVUS: 'Transferência Bravus',
+  INTERNAL_BRAVUS: 'Transferência Vantyx',
   PIX: 'Canal legado descontinuado',
   TED: 'Canal legado descontinuado',
-}[String(channel || '').toUpperCase()] || channel || 'Bravus');
+}[String(channel || '').toUpperCase()] || channel || 'Vantyx');
+
+const displayVantyxBrand = (value) => {
+  if (typeof value !== 'string') return value;
+  return value
+    .replace(/Bravus Premium Bank/gi, 'Vantyx Bank')
+    .replace(/Bravus Bank/gi, 'Vantyx Bank')
+    .replace(/Bravus/gi, 'Vantyx');
+};
 
 const operationErrorMessage = (err, fallback = 'Falha na operacao.') => {
   const data = err?.response?.data;
@@ -228,11 +237,12 @@ const transactionCounterparty = (tx) => {
     || tx?.counterpartyAccount
     || tx?.destinationAccount
     || '';
-  const bank =
+  const bank = displayVantyxBrand(
     (credit ? tx?.senderBankName : tx?.receiverBankName)
     || tx?.counterpartyBankName
     || tx?.bankName
-    || '';
+    || '',
+  );
   const detail = [
     document && `Doc ${document}`,
     account && `Conta ${account}`,
@@ -241,7 +251,7 @@ const transactionCounterparty = (tx) => {
   return { label, name, document, account, bank, detail };
 };
 
-const BRAVUS_FULL_LOGO_SRC = '/brand/bravus-logo-transparent.png';
+const VANTYX_FULL_LOGO_SRC = '/brand/vantyx-bank-logo.png';
 
 const escapeHtml = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -253,8 +263,8 @@ const escapeHtml = (value) =>
   }[char]));
 
 const documentLogoUrl = () => {
-  if (typeof window === 'undefined') return BRAVUS_FULL_LOGO_SRC;
-  return new URL(BRAVUS_FULL_LOGO_SRC, window.location.origin).href;
+  if (typeof window === 'undefined') return VANTYX_FULL_LOGO_SRC;
+  return new URL(VANTYX_FULL_LOGO_SRC, window.location.origin).href;
 };
 
 const documentDate = (dateString) => formatDate(dateString) || '-';
@@ -448,9 +458,9 @@ const buildPrintableHtml = ({ title, subtitle, body, footer }) => `
 <body>
   <main class="document">
     <header class="header">
-      <img class="logo" src="${escapeHtml(documentLogoUrl())}" alt="Bravus Bank" />
+      <img class="logo" src="${escapeHtml(documentLogoUrl())}" alt="Vantyx Bank" />
       <div>
-        <div class="eyebrow">Bravus Premium Bank</div>
+        <div class="eyebrow">Vantyx Bank</div>
         <h1>${escapeHtml(title)}</h1>
         <div class="subtitle">${escapeHtml(subtitle)}</div>
       </div>
@@ -466,22 +476,22 @@ const accountRowsHtml = ({ me, profile, user }) => {
   const rows = [
     ['Titular', me?.fullName || profile?.fullName || user?.fullName || user?.username],
     ['CPF/CNPJ', me?.cpf || profile?.cpf || user?.cpf],
-    ['Banco', account.nomeBanco || 'Bravus Premium Bank'],
+    ['Banco', account.nomeBanco || 'Vantyx Bank'],
     ['Codigo banco', account.codigoBanco || '999'],
     ['Agencia', account.agencia || profile?.agencia || '0001'],
     ['Conta', account.contaFormatada || account.conta || profile?.accountNumber || '-'],
     ['Tipo', account.tipoConta || me?.accountType || 'CORRENTE'],
   ];
-  return rows.map(([label, value]) => `<div class="line"><span>${escapeHtml(label)}</span><span>${escapeHtml(value || '-')}</span></div>`).join('');
+  return rows.map(([label, value]) => `<div class="line"><span>${escapeHtml(label)}</span><span>${escapeHtml(displayVantyxBrand(value) || '-')}</span></div>`).join('');
 };
 
 const receiptRowsHtml = (rows) =>
-  rows.map(([label, value]) => `<div class="line"><span>${escapeHtml(label)}</span><span>${escapeHtml(value || '-')}</span></div>`).join('');
+  rows.map(([label, value]) => `<div class="line"><span>${escapeHtml(label)}</span><span>${escapeHtml(displayVantyxBrand(value) || '-')}</span></div>`).join('');
 
 const partyRows = (party) => [
   ['Nome', party?.name],
   ['Documento', party?.document],
-  ['Banco', party?.bankName || party?.bankCode],
+  ['Banco', displayVantyxBrand(party?.bankName) || party?.bankCode],
   ['Codigo', party?.bankCode],
   ['Roteamento', party?.routingCode || party?.internalRoutingCode],
   ['SWIFT/BIC', party?.swiftBic],
@@ -495,7 +505,7 @@ const buildReceiptPdfBlob = (receipt) => {
     '0.035 0.063 0.141 rg 0 800 595 42 re f',
     '0.918 0.686 0.157 rg 0 796 595 4 re f',
     '1 1 1 rg',
-    pdfTextCommand({ text: 'BRAVUS PREMIUM BANK', x: 48, y: 816, size: 13, bold: true }),
+    pdfTextCommand({ text: 'VANTYX BANK', x: 48, y: 816, size: 13, bold: true }),
     '0 0 0 rg',
     pdfTextCommand({ text: 'Comprovante de transferencia', x: 48, y: 764, size: 22, bold: true }),
     pdfTextCommand({ text: `Valor: ${formatCurrency(receipt?.amountCentavos)}`, x: 48, y: 732, size: 16, bold: true }),
@@ -515,7 +525,7 @@ const buildReceiptPdfBlob = (receipt) => {
     rows.forEach(([label, value]) => {
       if (y < 58) return;
       commands.push(pdfTextCommand({ text: `${label}:`, x: 58, y, size: 8.5, bold: true }));
-      commands.push(pdfTextCommand({ text: truncatePdfText(value), x: 190, y, size: 8.5 }));
+      commands.push(pdfTextCommand({ text: truncatePdfText(displayVantyxBrand(value)), x: 190, y, size: 8.5 }));
       y -= 13;
     });
     y -= 8;
@@ -542,7 +552,7 @@ const buildReceiptPdfBlob = (receipt) => {
     ['Confirmado em', documentDate(receipt?.destinationConfirmedAt)],
     ['Mensagem', receipt?.settlementMessage],
     ['Idempotencia', receipt?.idempotencyKey],
-    ['Descricao', receipt?.description || 'Transferencia Bravus'],
+    ['Descricao', receipt?.description || 'Transferencia Vantyx'],
   ]);
 
   commands.push('0.25 0.25 0.25 rg');
@@ -556,7 +566,7 @@ const buildReceiptPdfBlob = (receipt) => {
 };
 
 export const buildReceiptDocument = (receipt) => {
-  const title = `Comprovante Bravus ${formatCurrency(receipt?.amountCentavos)}`;
+  const title = `Comprovante Vantyx ${formatCurrency(receipt?.amountCentavos)}`;
   const body = `
     <section class="section">
       <h2>Dados da transferencia</h2>
@@ -590,11 +600,11 @@ export const buildReceiptDocument = (receipt) => {
         ['Confirmado em', documentDate(receipt?.destinationConfirmedAt)],
         ['Mensagem', receipt?.settlementMessage],
         ['Idempotencia', receipt?.idempotencyKey],
-        ['Descricao', receipt?.description || 'Transferencia Bravus'],
+        ['Descricao', receipt?.description || 'Transferencia Vantyx'],
       ])}
     </section>`;
   return {
-    filename: documentFilename('comprovante-bravus', receipt?.receiptId || receipt?.transactionId, 'pdf'),
+    filename: documentFilename('comprovante-vantyx', receipt?.receiptId || receipt?.transactionId, 'pdf'),
     html: buildPrintableHtml({
       title,
       subtitle: `${displayTransferChannel(receipt?.channel)} | ${receipt?.settlementStatus || receipt?.status || 'PROCESSADO'}`,
@@ -619,7 +629,7 @@ const buildStatementDocument = ({ months, transactions, me, profile, user }) => 
     const signed = `${txSign(tx.type)} ${formatCurrency(tx.amount)}`;
     return `<tr>
       <td>${escapeHtml(documentDate(tx.createdAt || tx.date))}</td>
-      <td>${escapeHtml(getTransactionTypeLabel(tx.type))}<br/><small>${escapeHtml(tx.description || '')}</small></td>
+      <td>${escapeHtml(getTransactionTypeLabel(tx.type))}<br/><small>${escapeHtml(displayVantyxBrand(tx.description) || '')}</small></td>
       <td>${escapeHtml(counterparty.name || '-')}<br/><small>${escapeHtml(counterparty.detail || '')}</small></td>
       <td class="amount">${escapeHtml(signed)}</td>
     </tr>`;
@@ -646,14 +656,14 @@ const buildStatementDocument = ({ months, transactions, me, profile, user }) => 
       </table>
     </section>`;
   return {
-    filename: documentFilename('extrato-bravus', months.join('-')),
+    filename: documentFilename('extrato-vantyx', months.join('-')),
     html: buildPrintableHtml({
-      title: 'Extrato Bravus Bank',
+      title: 'Extrato Vantyx Bank',
       subtitle: `Periodo: ${period}`,
       body,
-      footer: `Extrato emitido em ${formatDate(new Date().toISOString())}. Documento gerado pelo Bravus Premium Bank.`,
+      footer: `Extrato emitido em ${formatDate(new Date().toISOString())}. Documento gerado pelo Vantyx Bank.`,
     }),
-    text: `Extrato Bravus Bank\nPeriodo: ${period}\nEntradas: ${formatCurrency(inflow)}\nSaidas: ${formatCurrency(outflow)}\nMovimentos: ${filtered.length}`,
+    text: `Extrato Vantyx Bank\nPeriodo: ${period}\nEntradas: ${formatCurrency(inflow)}\nSaidas: ${formatCurrency(outflow)}\nMovimentos: ${filtered.length}`,
   };
 };
 
@@ -831,6 +841,7 @@ export default function UserDashboard() {
             externalOrders: Array.isArray(externalRes?.data) ? externalRes.data : [],
           };
         }
+        snapshot = sanitizeAccountSnapshot(snapshot, user);
         const signature = JSON.stringify(snapshot);
         if (accountDataSignature.current !== signature) {
           accountDataSignature.current = signature;
@@ -841,6 +852,14 @@ export default function UserDashboard() {
           setExternalOrders(snapshot.externalOrders);
         }
       } catch (err) {
+        if (String(err?.message || '').startsWith('ACCOUNT_DATA_')) {
+          accountDataSignature.current = '';
+          setProfile(null);
+          setMe(null);
+          setTransactions([]);
+          setCreditSummary(null);
+          setExternalOrders([]);
+        }
         if (!silent) setError('Erro ao carregar dados da conta.');
       } finally {
         if (!silent) setLoading(false);
@@ -888,10 +907,10 @@ export default function UserDashboard() {
       return setError('Saldo disponivel insuficiente para concluir a operacao.');
     }
     if (kind === 'transfer' && form.transferMode === 'internal' && !form.destinationAccount) {
-      return setError('Informe a conta, o CPF, o e-mail ou o usuário Bravus de destino.');
+      return setError('Informe a conta, o CPF, o e-mail ou o usuário Vantyx de destino.');
     }
     if (kind === 'transfer' && form.transferMode === 'internal' && !resolvedRecipient) {
-      return setError('Confira o recebedor Bravus antes de enviar. Digite a conta, o CPF, o e-mail ou o usuário completo.');
+      return setError('Confira o recebedor Vantyx antes de enviar. Digite a conta, o CPF, o e-mail ou o usuário completo.');
     }
     if (kind === 'transfer' && form.transferMode === 'external') {
       if ((!form.beneficiaryName || !form.beneficiaryDocument) && !resolvedRecipient) {
@@ -934,12 +953,12 @@ export default function UserDashboard() {
         );
         internalTransferAttempt.current = null;
         if (data?.provider === 'BRAVUS_INTERNAL_LEDGER') {
-          message = 'Transferencia Bravus liquidada na hora.';
+          message = 'Transferencia Vantyx liquidada na hora.';
         }
         if (data?.provider === 'BRAVUS_SELF_PROVIDER') {
           message = data?.settlementStatus === 'LIQUIDADA_CONFIRMADA'
-            ? 'Pagamento liquidado pelo provedor Bravus.'
-            : 'Pagamento debitado no Bravus. Aguardando confirmacao do destino.';
+            ? 'Pagamento liquidado pelo provedor Vantyx.'
+            : 'Pagamento debitado no Vantyx. Aguardando confirmacao do destino.';
         }
         const receiptOrderId = data?.receiptOrderId || data?.externalOrderId || data?.orderId || data?.id;
         if (receiptOrderId) {
@@ -966,12 +985,12 @@ export default function UserDashboard() {
         }, transferIdempotencyKey);
         internalTransferAttempt.current = null;
         message = data?.status === 'PENDING_PROVIDER'
-          ? 'Ordem registrada. Aguardando configuração do provedor Bravus.'
-          : 'Transferência aceita pelo provedor Bravus e valor debitado.';
+          ? 'Ordem registrada. Aguardando configuração do provedor Vantyx.'
+          : 'Transferência aceita pelo provedor Vantyx e valor debitado.';
         if (data?.status !== 'PENDING_PROVIDER') {
           message = data?.settlementStatus === 'LIQUIDADA_CONFIRMADA'
             ? 'Transferencia liquidada no destino confirmado.'
-            : 'Transferencia debitada no Bravus. Aguardando confirmacao do destino.';
+            : 'Transferencia debitada no Vantyx. Aguardando confirmacao do destino.';
         }
         const receiptOrderId = data?.receiptOrderId || data?.externalOrderId || data?.orderId || data?.id;
         if (receiptOrderId) {
@@ -1022,7 +1041,7 @@ export default function UserDashboard() {
     } catch (err) {
       const needsUpdate = err?.code === 'NATIVE_RECEIPT_PLUGINS_UNAVAILABLE';
       setError(needsUpdate
-        ? 'Atualize o aplicativo Bravus para baixar comprovantes em PDF.'
+        ? 'Atualize o aplicativo Vantyx para baixar comprovantes em PDF.'
         : 'Nao foi possivel salvar o PDF do comprovante.');
     } finally {
       setReceiptAction(null);
@@ -1037,14 +1056,14 @@ export default function UserDashboard() {
       const document = buildReceiptDocument(selectedReceipt);
       const message = await sharePdfDocument({
         ...document,
-        title: 'Comprovante Bravus Bank',
+        title: 'Comprovante Vantyx Bank',
       });
       setSuccess(message);
     } catch (err) {
       if (err?.name !== 'AbortError') {
         const needsUpdate = err?.code === 'NATIVE_RECEIPT_PLUGINS_UNAVAILABLE';
         setError(needsUpdate
-          ? 'Atualize o aplicativo Bravus para compartilhar o PDF.'
+          ? 'Atualize o aplicativo Vantyx para compartilhar o PDF.'
           : 'Nao foi possivel compartilhar o comprovante.');
       }
     } finally {
@@ -1142,12 +1161,12 @@ export default function UserDashboard() {
   const bankingModules = [
     { id: 'balances', label: 'Saldos e Extratos', Icon: FileText, badge: `${transactions.length} movs` },
     { id: 'localCayman', label: 'Transferência Cayman', Icon: Landmark, badge: 'ACH e EFT', accent: true },
-    { id: 'transfers', label: 'Transferências Bravus', Icon: ArrowRightLeft, badge: 'Liquidação interna' },
+    { id: 'transfers', label: 'Transferências Vantyx', Icon: ArrowRightLeft, badge: 'Liquidação interna' },
     { id: 'internationalWire', label: 'Wire internacional', Icon: Send, badge: 'SWIFT e correspondente' },
     { id: 'remittance', label: 'Remessas e câmbio', Icon: Globe2, badge: 'Licença CIMA' },
     { id: 'dda', label: 'DDA Boletos Registrados', Icon: ClipboardCheck, badge: '0 pendentes' },
     { id: 'cards', label: 'Cartoes', Icon: CreditCard, badge: 'Conta ativa' },
-    { id: 'credit', label: 'Emprestimos e Recebiveis', Icon: Landmark, badge: showBalance ? formatCurrency(creditAvailable) : 'KYD ******', accent: true },
+    { id: 'credit', label: 'Emprestimos e Recebiveis', Icon: Landmark, badge: showBalance ? formatCurrency(creditAvailable) : 'R$ ******', accent: true },
     { id: 'deposit-check', label: 'Deposito de Cheque', Icon: ArrowDownToLine, badge: 'Digital' },
     { id: 'checks', label: 'Cheques', Icon: FileText, badge: '0 folhas' },
     { id: 'schedules', label: 'Agendamentos', Icon: CalendarDays, badge: '0 hoje' },
@@ -1155,7 +1174,7 @@ export default function UserDashboard() {
     { id: 'pending', label: 'Pendencias', Icon: UserCheck, badge: me?.conta?.statusKyc || 'Conta' },
     { id: 'beneficiaries', label: 'Favorecidos', Icon: UsersRound, badge: `${externalOrders.length} recentes` },
     { id: 'receipts', label: 'Comprovantes', Icon: Receipt, badge: `${externalOrders.length} ordens` },
-    { id: 'limits', label: 'Limites', Icon: Smartphone, badge: showBalance ? formatCurrency(me?.saldos?.limiteTransferenciaDiarioCentavos ?? me?.saldos?.limitePixDiarioCentavos ?? 0) : 'KYD ******' },
+    { id: 'limits', label: 'Limites', Icon: Smartphone, badge: showBalance ? formatCurrency(me?.saldos?.limiteTransferenciaDiarioCentavos ?? me?.saldos?.limitePixDiarioCentavos ?? 0) : 'R$ ******' },
     { id: 'security', label: 'Seguranca', Icon: ShieldCheck, badge: 'Ativa' },
   ];
 
@@ -1317,9 +1336,9 @@ export default function UserDashboard() {
           </div>
           <div className="mt-1 break-words font-display text-4xl font-bold tabular-nums sm:text-5xl">
             {showBalance ? (
-              <>KYD <span className="gradient-text">{formatCurrency(balance).replace('KYD', '').trim()}</span></>
+              <span className="gradient-text">{formatCurrency(balance)}</span>
             ) : (
-              <span className="text-ink-400">KYD ••••••</span>
+              <span className="text-ink-400">R$ ••••••</span>
             )}
           </div>
           <div className="mt-2 text-xs text-ink-400 font-mono">Conta {accountNumber}</div>
@@ -1330,7 +1349,7 @@ export default function UserDashboard() {
                 <CreditCard className="h-4 w-4 text-bravus-200" /> Crédito disponível
               </div>
               <div className="mt-1 font-display text-lg font-semibold tabular-nums">
-                {showBalance ? formatCurrency(creditAvailable) : 'KYD ••••••'}
+                {showBalance ? formatCurrency(creditAvailable) : 'R$ ••••••'}
               </div>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
@@ -1338,10 +1357,10 @@ export default function UserDashboard() {
                 <Landmark className="h-4 w-4 text-red-200" /> Dívida total
               </div>
               <div className="mt-1 font-display text-lg font-semibold tabular-nums text-red-100">
-                {showBalance ? formatCurrency(creditDebt) : 'KYD ••••••'}
+                {showBalance ? formatCurrency(creditDebt) : 'R$ ••••••'}
               </div>
               <div className="mt-1 text-[11px] text-ink-400">
-                Principal {showBalance ? formatCurrency(creditDebtPrincipal) : 'KYD •••'} + juros
+                Principal {showBalance ? formatCurrency(creditDebtPrincipal) : 'R$ •••'} + juros
               </div>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
@@ -1349,10 +1368,10 @@ export default function UserDashboard() {
                 <Activity className="h-4 w-4 text-emerald-200" /> Juros acumulados
               </div>
               <div className="mt-1 font-display text-lg font-semibold tabular-nums">
-                {showBalance ? formatCurrency(interestAccrued) : 'KYD ••••••'}
+                {showBalance ? formatCurrency(interestAccrued) : 'R$ ••••••'}
               </div>
               <div className="mt-1 text-[11px] text-ink-400">
-                Usado {showBalance ? formatCurrency(creditUsed) : 'KYD •••'}
+                Usado {showBalance ? formatCurrency(creditUsed) : 'R$ •••'}
               </div>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
@@ -1479,7 +1498,7 @@ export default function UserDashboard() {
                     <Tooltip
                       contentStyle={{ background: '#0b0f1c', border: '1px solid #ffffff20', borderRadius: 12 }}
                       labelStyle={{ color: '#fff' }}
-                      formatter={(v) => [`KYD ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'Saldo']}
+                      formatter={(v) => [`R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'Saldo']}
                     />
                     <Area type="monotone" dataKey="saldo" stroke="#eecb54" strokeWidth={2} fill="url(#g1)" />
                   </AreaChart>
@@ -1554,12 +1573,12 @@ export default function UserDashboard() {
             <p className="text-sm text-ink-300 mb-5">
               {tab === 'transfer'
                 ? activeModule === 'localCayman'
-                  ? 'Transfira em KYD por ACH ou EFT entre bancos participantes nas Ilhas Cayman.'
+                  ? 'Transfira em BRL por ACH ou EFT entre bancos participantes nas Ilhas Cayman.'
                   : activeModule === 'internationalWire'
                     ? 'Envie uma ordem internacional por Wire/SWIFT e banco correspondente.'
                     : activeModule === 'remittance'
                       ? 'Solicite remessa ou câmbio pelo fluxo de Money Services Business sujeito à licença CIMA.'
-                      : 'Transfira entre contas Bravus com liquidação interna no mesmo ledger.'
+                      : 'Transfira entre contas Vantyx com liquidação interna no mesmo ledger.'
                 : 'Operação em conta corrente.'}
             </p>
 
@@ -1576,7 +1595,7 @@ export default function UserDashboard() {
                         form.transferMode === 'internal' && '!bg-white/15 !text-white'
                       )}
                     >
-                      <ArrowRightLeft className="h-4 w-4" /> Conta Bravus
+                      <ArrowRightLeft className="h-4 w-4" /> Conta Vantyx
                     </button>
                     <button
                       type="button"
@@ -1607,7 +1626,7 @@ export default function UserDashboard() {
               )}
 
               <div>
-                <label className="form-label">Valor (KYD)</label>
+                <label className="form-label">Valor (R$)</label>
                 <input
                   type="number" step="0.01" min="0"
                   className="form-input"
@@ -1619,11 +1638,11 @@ export default function UserDashboard() {
 
               {tab === 'transfer' && form.transferMode === 'internal' && (
                 <div>
-                  <label className="form-label">Destino Bravus</label>
+                  <label className="form-label">Destino Vantyx</label>
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="Conta, CPF, e-mail ou usuário Bravus"
+                    placeholder="Conta, CPF, e-mail ou usuário Vantyx"
                     value={form.destinationAccount}
                     onChange={(e) => setForm({ ...form, destinationAccount: e.target.value })}
                   />
@@ -1803,7 +1822,7 @@ export default function UserDashboard() {
 
               {tab === 'transfer' && externalOrders.length > 0 && (
                 <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-                  <div className="text-sm font-semibold text-white mb-3">Ordens Bravus recentes</div>
+                  <div className="text-sm font-semibold text-white mb-3">Ordens Vantyx recentes</div>
                   <ul className="space-y-2">
                     {externalOrders.slice(0, 4).map((order) => (
                       <li key={order.id} className="flex flex-col items-stretch gap-2 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3">
@@ -1852,13 +1871,13 @@ export default function UserDashboard() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <img
-                    src={BRAVUS_FULL_LOGO_SRC}
-                    alt="Bravus Bank"
+                    src={VANTYX_FULL_LOGO_SRC}
+                    alt="Vantyx Bank"
                     className="mb-4 h-16 w-auto object-contain"
                   />
                   <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-slate-300 bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-black">
                     <Receipt className="h-3.5 w-3.5" />
-                    Comprovante Bravus
+                    Comprovante Vantyx
                   </div>
                   <h3 className="font-display text-2xl font-semibold text-black">{formatCurrency(selectedReceipt.amountCentavos)}</h3>
                   <p className="mt-1 text-sm text-black">
@@ -1912,7 +1931,7 @@ export default function UserDashboard() {
                 <ReceiptLine label="Liquidacao" value={selectedReceipt.settlementMessage} />
                 <ReceiptLine label="Idempotência" value={selectedReceipt.idempotencyKey} />
                 <ReceiptLine label="Data" value={formatDate(selectedReceipt.createdAt)} />
-                <ReceiptLine label="Descrição" value={selectedReceipt.description || 'Transferência Bravus'} />
+                <ReceiptLine label="Descrição" value={selectedReceipt.description || 'Transferência Vantyx'} />
               </div>
               </div>
             </motion.div>
@@ -1945,7 +1964,7 @@ function UserProfilePanel({ user, profile, me }) {
           </span>
           <div>
             <h2 className="title-md">Dados do perfil</h2>
-            <p className="mt-1 text-sm text-ink-400">Informações vinculadas à sua conta Bravus.</p>
+            <p className="mt-1 text-sm text-ink-400">Informações vinculadas à sua conta Vantyx.</p>
           </div>
         </div>
       </div>
@@ -2093,7 +2112,7 @@ function BankingAccessPanel({
   user, me, profile, modules, view, setView, activeModule, onModuleClick,
 }) {
   const account = me?.dadosBancarios || {};
-  const companyName = profile?.fullName || user?.fullName || user?.username || 'Cliente Bravus';
+  const companyName = profile?.fullName || user?.fullName || user?.username || 'Cliente Vantyx';
   const document = profile?.cpf || user?.cpf || me?.cpf;
 
   return (
@@ -2241,7 +2260,7 @@ function PortalModuleDetail({
       { label: 'Página', value: 'Money Services Business' },
     ],
     transfers: [
-      { label: 'Destino', value: 'Bravus' },
+      { label: 'Destino', value: 'Vantyx' },
       { label: 'Liquidação', value: 'Interna' },
       { label: 'Pagina', value: 'Transferencias' },
     ],
@@ -2252,7 +2271,7 @@ function PortalModuleDetail({
     ],
     cards: [
       { label: 'Conta', value: module?.badge || 'Ativa' },
-      { label: 'Bandeira', value: 'Bravus' },
+      { label: 'Bandeira', value: 'Vantyx' },
       { label: 'Pagina', value: 'Cartoes' },
     ],
     'deposit-check': [
@@ -2272,7 +2291,7 @@ function PortalModuleDetail({
     ],
     investments: [
       { label: 'Carteira', value: module?.badge || 'Ativa' },
-      { label: 'Moeda', value: 'KYD' },
+      { label: 'Moeda', value: 'BRL' },
       { label: 'Pagina', value: 'Investimentos' },
     ],
     pending: [
@@ -2286,7 +2305,7 @@ function PortalModuleDetail({
       { label: 'Pagina', value: 'Favorecidos' },
     ],
     limits: [
-      { label: 'Transferência diária', value: showBalance ? formatCurrency(me?.saldos?.limiteTransferenciaDiarioCentavos ?? me?.saldos?.limitePixDiarioCentavos ?? 0) : 'KYD ******' },
+      { label: 'Transferência diária', value: showBalance ? formatCurrency(me?.saldos?.limiteTransferenciaDiarioCentavos ?? me?.saldos?.limitePixDiarioCentavos ?? 0) : 'R$ ******' },
       { label: 'Conta', value: me?.dadosBancarios?.contaFormatada || me?.accountNumber || '-' },
       { label: 'Pagina', value: 'Limites' },
     ],
@@ -2333,7 +2352,7 @@ function PortalModuleDetail({
           )}
           {activeModule === 'transfers' && (
             <>
-              <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => openTransferMode('internal', 'INTERNAL_BRAVUS', '/dashboard/transferencias')}>Bravus</button>
+              <button type="button" className="btn-secondary !py-2 !px-3" onClick={() => openTransferMode('internal', 'INTERNAL_BRAVUS', '/dashboard/transferencias')}>Vantyx</button>
               <button type="button" className="btn-primary !py-2 !px-3" onClick={() => openTransferMode('external', 'ACH', '/dashboard/transferencia-cayman')}>Cayman</button>
             </>
           )}
@@ -2366,7 +2385,7 @@ function PortalModuleDetail({
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
             <div className="text-xs text-ink-400">Conta</div>
             <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-              <ReceiptLine label="Banco" value={me?.dadosBancarios?.nomeBanco || 'Bravus Premium Bank'} />
+              <ReceiptLine label="Banco" value={me?.dadosBancarios?.nomeBanco || 'Vantyx Bank'} />
               <ReceiptLine label="Agencia" value={me?.dadosBancarios?.agencia} />
               <ReceiptLine label="Conta" value={me?.dadosBancarios?.contaFormatada || me?.accountNumber} />
               <ReceiptLine label="Tipo" value={me?.dadosBancarios?.tipoConta || me?.accountType} />
@@ -2377,8 +2396,8 @@ function PortalModuleDetail({
 
       {activeModule === 'credit' && (
         <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <Metric label="Credito disponivel" value={showBalance ? formatCurrency(creditSummary?.creditoDisponivelCentavos ?? 0) : 'KYD ******'} />
-          <Metric label="Divida total" value={showBalance ? formatCurrency(creditSummary?.dividaTotalCentavos ?? 0) : 'KYD ******'} />
+          <Metric label="Credito disponivel" value={showBalance ? formatCurrency(creditSummary?.creditoDisponivelCentavos ?? 0) : 'R$ ******'} />
+          <Metric label="Divida total" value={showBalance ? formatCurrency(creditSummary?.dividaTotalCentavos ?? 0) : 'R$ ******'} />
           <Metric label="Taxa anual" value={`${Number(creditSummary?.taxaJurosAnualMedia ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`} />
         </div>
       )}
@@ -2464,7 +2483,7 @@ function StatementExportPanel({ transactions, me, profile, user, onSuccess, onEr
     if (selectedMonths.length === 0) return onError('Selecione pelo menos um mes para baixar o extrato.');
     const document = buildDocument();
     downloadHtmlDocument(document);
-    onSuccess('Extrato baixado com a logo completa do Bravus Bank.');
+    onSuccess('Extrato baixado com a logo completa do Vantyx Bank.');
   };
 
   const shareStatement = async () => {
@@ -2473,7 +2492,7 @@ function StatementExportPanel({ transactions, me, profile, user, onSuccess, onEr
     try {
       const message = await shareHtmlDocument({
         ...document,
-        title: 'Extrato Bravus Bank',
+        title: 'Extrato Vantyx Bank',
       });
       onSuccess(message);
     } catch (err) {
@@ -2486,9 +2505,9 @@ function StatementExportPanel({ transactions, me, profile, user, onSuccess, onEr
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <img src={BRAVUS_FULL_LOGO_SRC} alt="Bravus Bank" className="h-14 w-auto object-contain" />
+            <img src={VANTYX_FULL_LOGO_SRC} alt="Vantyx Bank" className="h-14 w-auto object-contain" />
             <div>
-              <h3 className="title-md">Extratos Bravus Bank</h3>
+              <h3 className="title-md">Extratos Vantyx Bank</h3>
               <p className="mt-1 text-sm text-ink-300">Selecione um ou mais meses para baixar ou compartilhar.</p>
             </div>
           </div>
@@ -2609,7 +2628,7 @@ function TransactionCompactLine({ tx, showBalance, openReceipt, receiptLoading }
           )}
         </div>
         <span className={cn('shrink-0 font-mono', txSignClass(tx.type))}>
-          {txSign(tx.type)} {showBalance ? formatCurrency(tx.amount) : 'KYD ******'}
+          {txSign(tx.type)} {showBalance ? formatCurrency(tx.amount) : 'R$ ******'}
         </span>
       </div>
       {receiptOrderId && (
@@ -2637,7 +2656,7 @@ function TransferRecipientPreview({ form, resolvedRecipient, resolveLoading }) {
       ? [
           resolvedRecipient.document && `Doc ${resolvedRecipient.document}`,
           resolvedRecipient.accountNumber && `Conta ${resolvedRecipient.accountNumber}`,
-          resolvedRecipient.bankName || 'Bravus Premium Bank',
+          resolvedRecipient.bankName || 'Vantyx Bank',
         ].filter(Boolean).join(' | ')
       : `Conta ou identificador informado: ${destination}`;
 
@@ -2645,7 +2664,7 @@ function TransferRecipientPreview({ form, resolvedRecipient, resolveLoading }) {
       <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.06] p-4 text-sm">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="font-semibold text-white">Recebedor Bravus</div>
+            <div className="font-semibold text-white">Recebedor Vantyx</div>
             <div className="mt-1 text-ink-200">
               {resolveLoading ? 'Consultando destinatario...' : name || 'Destinatario ainda nao localizado'}
             </div>
@@ -2708,7 +2727,7 @@ function ReceiptLine({ label, value }) {
   return (
     <div className="receipt-line flex items-start justify-between gap-3 border-b border-white/5 py-1.5 last:border-0">
       <span className="receipt-line-label text-ink-400">{label}</span>
-      <span className="receipt-line-value max-w-[65%] break-words text-right font-mono text-ink-100">{value || '-'}</span>
+      <span className="receipt-line-value max-w-[65%] break-words text-right font-mono text-ink-100">{displayVantyxBrand(value) || '-'}</span>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-# 🎯 START AQUI - GUIA RÁPIDO BRAVUS BANK
+# 🎯 START AQUI - GUIA RÁPIDO VANTYX BANK
 
 ## ⚡ INÍCIO RÁPIDO (3 Minutos)
 
@@ -64,7 +64,7 @@ npm run dev
 
 - **Frontend**: http://localhost:5173
 - **Backend**: http://localhost:9000
-- **API Docs**: Ver endpoints no README-BRAVUS-BANK.md
+- **API Docs**: Ver endpoints no README-VANTYX-BANK.md
 
 ## 🧪 TESTAR
 
@@ -81,7 +81,7 @@ npm run dev
 
 ## 📚 DOCUMENTAÇÃO
 
-- **README-BRAVUS-BANK.md** - Documentação completa
+- **README-VANTYX-BANK.md** - Documentação completa
 - **INSTRUCOES-DEPLOY.md** - Guia de deploy detalhado
 - **RESUMO-EXECUTIVO.md** - Visão geral do projeto
 

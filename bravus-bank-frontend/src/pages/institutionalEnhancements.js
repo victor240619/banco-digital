@@ -27,7 +27,7 @@ export const institutionalEnhancements = {
         },
         {
           title: 'Moeda, limites e disponibilidade',
-          text: 'A interface utiliza KYD. Limites e funções disponíveis variam conforme o perfil, o status da conta, a análise interna e a disponibilidade operacional de cada serviço.',
+          text: 'A interface utiliza reais (BRL). Limites e funções disponíveis variam conforme o perfil, o status da conta, a análise interna e a disponibilidade operacional de cada serviço.',
         },
       ],
       faqs: [
@@ -95,7 +95,7 @@ export const institutionalEnhancements = {
         },
       ],
       faqs: [
-        ['Qual a diferença entre transferência interna, ACH/EFT e Wire?', 'A interna ocorre entre contas Bravus elegíveis; ACH/EFT é um trilho local; Wire é uma instrução internacional que pode envolver bancos correspondentes.'],
+        ['Qual a diferença entre transferência interna, ACH/EFT e Wire?', 'A interna ocorre entre contas Vantyx elegíveis; ACH/EFT é um trilho local; Wire é uma instrução internacional que pode envolver bancos correspondentes.'],
         ['Uma transferência pode ser duplicada?', 'O sistema deve usar controles de idempotência para impedir que a mesma solicitação confirmada seja debitada duas vezes.'],
         ['Quando o comprovante fica disponível?', 'Depois que a operação alcança o status confirmado aplicável e o lançamento está persistido.'],
         ['Uma conta nova pode transferir?', 'A permissão depende do status e da análise da conta. Contas em análise podem estar limitadas a receber valores.'],
@@ -144,7 +144,7 @@ export const institutionalEnhancements = {
         ['Operação segura', 'Especialista acompanhando sistemas e operações digitais'],
         ['Foco em Cayman', 'Vista do litoral e distrito empresarial das Ilhas Cayman'],
       ]),
-      galleryTitle: 'Como a Bravus é construída',
+      galleryTitle: 'Como a Vantyx é construída',
       galleryDescription: 'Produto, engenharia, segurança, operações e atendimento trabalham juntos para manter uma experiência clara e rastreável.',
       moreSections: [
         {
@@ -161,8 +161,8 @@ export const institutionalEnhancements = {
         },
       ],
       faqs: [
-        ['Qual é a proposta da Bravus?', 'Oferecer uma experiência financeira digital organizada, com foco em segurança, rastreabilidade e atendimento responsável.'],
-        ['Onde a plataforma é acessada?', 'Pelo domínio oficial e pelo aplicativo distribuído nos canais oficiais da Bravus.'],
+        ['Qual é a proposta da Vantyx?', 'Oferecer uma experiência financeira digital organizada, com foco em segurança, rastreabilidade e atendimento responsável.'],
+        ['Onde a plataforma é acessada?', 'Pelo domínio oficial e pelo aplicativo distribuído nos canais oficiais da Vantyx.'],
         ['Como as atualizações preservam os dados?', 'Mudanças devem usar persistência, migrações compatíveis e validação para evitar perda de contas, saldos ou históricos.'],
         ['Como saber se um serviço está disponível?', 'Consulte a área autenticada e as condições exibidas para o produto. Recursos futuros não devem ser tratados como ativos antes da liberação.'],
       ],
@@ -177,7 +177,7 @@ export const institutionalEnhancements = {
         ['Aprendizado contínuo', 'Equipe em uma sessão interna de desenvolvimento profissional'],
       ]),
       galleryTitle: 'Áreas que constroem o produto',
-      galleryDescription: 'A Bravus depende de diferentes especialidades trabalhando em conjunto, com responsabilidade técnica e respeito ao cliente.',
+      galleryDescription: 'A Vantyx depende de diferentes especialidades trabalhando em conjunto, com responsabilidade técnica e respeito ao cliente.',
       moreSections: [
         {
           title: 'Processo seletivo',
@@ -189,13 +189,13 @@ export const institutionalEnhancements = {
         },
         {
           title: 'Prevenção a fraudes',
-          text: 'A Bravus não cobra taxa de inscrição, curso obrigatório ou pagamento para participar de seleção. Mensagens suspeitas devem ser ignoradas e reportadas pelos canais oficiais.',
+          text: 'A Vantyx não cobra taxa de inscrição, curso obrigatório ou pagamento para participar de seleção. Mensagens suspeitas devem ser ignoradas e reportadas pelos canais oficiais.',
         },
       ],
       faqs: [
         ['Há vagas abertas agora?', 'As oportunidades ativas serão apresentadas nesta página. A ausência de uma vaga publicada significa que não há processo público anunciado.'],
         ['Como enviar candidatura?', 'Siga exclusivamente o canal indicado na vaga publicada e não envie documentos sensíveis por contatos não verificados.'],
-        ['A Bravus cobra para contratar?', 'Não. Nenhuma etapa legítima exige pagamento do candidato.'],
+        ['A Vantyx cobra para contratar?', 'Não. Nenhuma etapa legítima exige pagamento do candidato.'],
         ['Quais áreas podem ter oportunidades?', 'Engenharia, produto, operações, risco, atendimento, segurança da informação e conformidade estão entre as áreas essenciais.'],
       ],
     },
@@ -221,14 +221,14 @@ export const institutionalEnhancements = {
         },
         {
           title: 'Uso de marca e imagens',
-          text: 'O brasão e os materiais da Bravus não podem ser alterados de forma que prejudique a identificação da marca ou sugira endosso, licença ou parceria não confirmada.',
+          text: 'O brasão e os materiais da Vantyx não podem ser alterados de forma que prejudique a identificação da marca ou sugira endosso, licença ou parceria não confirmada.',
         },
       ],
       faqs: [
         ['Onde estão os comunicados oficiais?', 'Quando publicados, ficarão nesta página e nos canais vinculados ao domínio oficial.'],
         ['Como solicitar entrevista?', 'Use a página de contato e informe veículo, pauta, prazo e dados profissionais para retorno.'],
-        ['Posso usar o brasão da Bravus?', 'O uso depende de autorização e deve preservar proporção, cores e integridade visual da marca.'],
-        ['Como confirmar uma notícia?', 'Compare a informação com os canais oficiais e solicite confirmação quando o conteúdo não estiver publicado pela Bravus.'],
+        ['Posso usar o brasão da Vantyx?', 'O uso depende de autorização e deve preservar proporção, cores e integridade visual da marca.'],
+        ['Como confirmar uma notícia?', 'Compare a informação com os canais oficiais e solicite confirmação quando o conteúdo não estiver publicado pela Vantyx.'],
       ],
     },
     contato: {
@@ -258,7 +258,7 @@ export const institutionalEnhancements = {
       ],
       faqs: [
         ['Qual é o melhor canal para assuntos da conta?', 'Entre na área autenticada para que a solicitação seja associada ao titular com mais segurança.'],
-        ['A Bravus pede senha pelo atendimento?', 'Não. Senha completa e códigos temporários não devem ser informados a atendentes.'],
+        ['A Vantyx pede senha pelo atendimento?', 'Não. Senha completa e códigos temporários não devem ser informados a atendentes.'],
         ['Como reportar uma transação desconhecida?', 'Reúna os dados visíveis no extrato, proteja o acesso à conta e abra uma solicitação pelos canais oficiais.'],
         ['Onde encontro atendimento geral?', 'A página Canais de atendimento organiza acesso online, suporte assistido e informações sobre terminais compatíveis.'],
       ],

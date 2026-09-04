@@ -2,10 +2,13 @@ package com.bravus.bank.external;
 
 import com.bravus.bank.db.entity.UserEntity;
 import com.bravus.bank.db.repo.UserRepository;
+import com.bravus.bank.identity.InstitutionRoutingProfile;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -53,7 +56,7 @@ public class UserExternalTransferController {
     public ResponseEntity<List<ExternalTransferEntity>> recent(Authentication auth,
                                                                @RequestParam(defaultValue = "20") int limit) {
         UserEntity user = authenticatedUser(auth);
-        return ResponseEntity.ok(transferService.recentForUser(user.getId(), limit));
+        return privateResponse(transferService.recentForUser(user.getId(), limit));
     }
 
     @GetMapping("/{orderId}/receipt")
@@ -61,7 +64,7 @@ public class UserExternalTransferController {
                                                                    Authentication auth) {
         UserEntity user = authenticatedUser(auth);
         ExternalTransferEntity order = transferService.findForUser(orderId, user.getId());
-        return ResponseEntity.ok(toReceipt(order, user));
+        return privateResponse(toReceipt(order, user));
     }
 
     private UserEntity authenticatedUser(Authentication auth) {
@@ -72,7 +75,7 @@ public class UserExternalTransferController {
     private ExternalTransferReceiptResponse toReceipt(ExternalTransferEntity order, UserEntity user) {
         UserEntity payer = order.getUser() != null ? order.getUser() : user;
         return new ExternalTransferReceiptResponse(
-                "BRAVUS-" + order.getIdempotencyKey(),
+                "VANTYX-" + order.getIdempotencyKey(),
                 order.getId(),
                 order.getTransactionId(),
                 order.getProvider(),
@@ -94,7 +97,7 @@ public class UserExternalTransferController {
                 new ReceiptParty(
                         payer.getFullName(),
                         payer.getCpf(),
-                        payer.getNomeBanco(),
+                        InstitutionRoutingProfile.INSTITUTION_NAME,
                         payer.getCodigoBanco(),
                         payer.getIspb(),
                         payer.getAgencia(),
@@ -175,4 +178,11 @@ public class UserExternalTransferController {
             ReceiptParty payer,
             ReceiptParty beneficiary
     ) {}
+
+    private <T> ResponseEntity<T> privateResponse(T body) {
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore().cachePrivate())
+                .header(HttpHeaders.VARY, HttpHeaders.AUTHORIZATION)
+                .body(body);
+    }
 }

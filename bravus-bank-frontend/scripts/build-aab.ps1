@@ -49,9 +49,4 @@ if (-not (Test-Path $aab)) {
   throw "AAB nao encontrado em $aab"
 }
 
-$outputDir = "C:\Users\ALMENAG2406\Documents\Codex\2026-07-13\n\outputs"
-New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-$outputAab = Join-Path $outputDir "bravus-bank-playstore-release.aab"
-Copy-Item -LiteralPath $aab -Destination $outputAab -Force
-
-Write-Host "AAB Play Store gerado em $outputAab"
+Write-Host "AAB Play Store gerado em $aab"

@@ -44,8 +44,8 @@ public class GlobalRailService {
         String endpointUrl = clean(cmd.endpointUrl);
         String status = upperOrDefault(cmd.status, "DRAFT");
 
-        if ("SELF_LEDGER".equals(connectionMode) && !isBravusOwned(code, cmd.bankCode, network)) {
-            throw new IllegalArgumentException("SELF_LEDGER so pode ser usado em participante controlado pelo Bravus.");
+        if ("SELF_LEDGER".equals(connectionMode) && !isVantyxOwned(code, cmd.bankCode, network)) {
+            throw new IllegalArgumentException("SELF_LEDGER so pode ser usado em participante controlado pelo Vantyx.");
         }
         if ("ACTIVE".equals(status) && "HTTP_CONNECTOR".equals(connectionMode) && blank(endpointUrl)) {
             throw new IllegalArgumentException("Conector HTTP ativo exige endpoint_url.");
@@ -54,7 +54,7 @@ public class GlobalRailService {
         participant.setParticipantCode(code);
         participant.setLegalName(cmd.legalName.trim());
         String country = upperOrDefault(cmd.country, "KY");
-        boolean bravusOwned = isBravusOwned(code, cmd.bankCode, network);
+        boolean bravusOwned = isVantyxOwned(code, cmd.bankCode, network);
         participant.setCountry(country);
         participant.setNetwork(network);
         participant.setBankCode(clean(cmd.bankCode));
@@ -83,21 +83,21 @@ public class GlobalRailService {
 
         if (!providerConfigured || providerResult == null || !"COMPLETED".equals(providerResult.status)) {
             decision.settlementStatus = "AGUARDANDO_PROVEDOR_BRAVUS";
-            decision.settlementMessage = "Ordem registrada. Saida ainda nao foi concluida pelo provedor Bravus.";
+            decision.settlementMessage = "Ordem registrada. Saida ainda nao foi concluida pelo provedor Vantyx.";
             return decision;
         }
 
         GlobalRailParticipantEntity participant = resolveParticipant(cmd, destinationNetwork);
         if (participant == null) {
             decision.settlementStatus = "DEBITADA_NO_BRAVUS_AGUARDANDO_CONEXAO_DESTINO";
-            decision.settlementMessage = "Saida concluida no ledger Bravus. Destino aguarda participante/conector ativo para confirmar liquidacao.";
+            decision.settlementMessage = "Saida concluida no ledger Vantyx. Destino aguarda participante/conector ativo para confirmar liquidacao.";
             return decision;
         }
 
         decision.destinationParticipantCode = participant.getParticipantCode();
         if (!"ACTIVE".equals(participant.getStatus())) {
             decision.settlementStatus = "DEBITADA_NO_BRAVUS_PARTICIPANTE_INATIVO";
-            decision.settlementMessage = "Saida concluida no ledger Bravus. Participante destino nao esta ativo.";
+            decision.settlementMessage = "Saida concluida no ledger Vantyx. Participante destino nao esta ativo.";
             return decision;
         }
 
@@ -107,17 +107,17 @@ public class GlobalRailService {
             decision.receiptKind = RECEIPT_DESTINATION_CONFIRMED;
             decision.destinationConfirmationId = "global-self-" + idempotencyKey;
             decision.destinationConfirmedAt = OffsetDateTime.now();
-            decision.settlementMessage = "Liquidacao confirmada em participante controlado pelo Bravus.";
+            decision.settlementMessage = "Liquidacao confirmada em participante controlado pelo Vantyx.";
             return decision;
         }
         if ("HTTP_CONNECTOR".equals(mode) || "FILE_EXPORT".equals(mode)) {
             decision.settlementStatus = "ENVIADA_A_CONECTOR";
-            decision.settlementMessage = "Saida concluida no ledger Bravus e enviada ao conector. Aguardando confirmacao do destino.";
+            decision.settlementMessage = "Saida concluida no ledger Vantyx e enviada ao conector. Aguardando confirmacao do destino.";
             return decision;
         }
 
         decision.settlementStatus = "AGUARDANDO_CONFIRMACAO_MANUAL";
-        decision.settlementMessage = "Saida concluida no ledger Bravus. Aguardando comprovacao/confirmacao do participante destino.";
+        decision.settlementMessage = "Saida concluida no ledger Vantyx. Aguardando comprovacao/confirmacao do participante destino.";
         return decision;
     }
 
@@ -126,7 +126,7 @@ public class GlobalRailService {
         ExternalTransferEntity order = transferRepo.findById(orderId)
                 .orElseThrow(() -> new IllegalArgumentException("Transferencia nao encontrada."));
         if (!"COMPLETED".equals(order.getStatus())) {
-            throw new IllegalStateException("A transferencia precisa estar COMPLETED no Bravus antes de confirmar liquidacao externa.");
+            throw new IllegalStateException("A transferencia precisa estar COMPLETED no Vantyx antes de confirmar liquidacao externa.");
         }
 
         String confirmationId = clean(cmd.confirmationId);
@@ -175,7 +175,7 @@ public class GlobalRailService {
         return c;
     }
 
-    private boolean isBravusOwned(String participantCode, String bankCode, String network) {
+    private boolean isVantyxOwned(String participantCode, String bankCode, String network) {
         String code = upperOrDefault(participantCode, "");
         String bank = clean(bankCode);
         String net = upperOrDefault(network, "");

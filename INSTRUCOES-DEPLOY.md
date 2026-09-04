@@ -1,4 +1,4 @@
-# 🚀 INSTRUÇÕES DE DEPLOY - BRAVUS BANK
+# 🚀 INSTRUÇÕES DE DEPLOY - VANTYX BANK
 
 ## ⚡ Deploy Rápido (Docker Compose)
 
@@ -93,7 +93,7 @@ Copie este código para um arquivo `deploy.sh`:
 #!/bin/bash
 set -e
 
-echo "🚀 Iniciando deploy do Bravus Bank..."
+echo "🚀 Iniciando deploy do Vantyx Bank..."
 
 # Backend
 cd ~/banco-digital/bravus-bank
@@ -318,4 +318,4 @@ npm run build
 
 ---
 
-**Sistema completo e funcional! Qualquer dúvida, consulte README-BRAVUS-BANK.md** 🎯
+**Sistema completo e funcional! Qualquer dúvida, consulte README-VANTYX-BANK.md** 🎯

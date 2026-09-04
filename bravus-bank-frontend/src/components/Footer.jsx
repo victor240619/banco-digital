@@ -72,7 +72,7 @@ export default function Footer() {
           </div>
         </div>
         <div className="mt-10 pt-6 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-ink-400">
-          <div>© {new Date().getFullYear()} Bravus Bank. Todos os direitos reservados.</div>
+          <div>© {new Date().getFullYear()} Vantyx Bank. Todos os direitos reservados.</div>
           <div className="flex gap-4">
             <span>Termos</span>
             <span>Privacidade</span>

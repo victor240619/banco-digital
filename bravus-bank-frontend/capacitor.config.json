@@ -1,6 +1,6 @@
 {
   "appId": "com.bravus.bank",
-  "appName": "Bravus Bank",
+  "appName": "Vantyx Bank",
   "webDir": "dist",
   "server": {
     "url": "https://bravusbank.com",

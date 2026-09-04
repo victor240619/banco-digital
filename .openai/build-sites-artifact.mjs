@@ -47,52 +47,6 @@ function tar(args) {
   });
 }
 
-function command(file, args) {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(file, args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.on("exit", (code) => {
-      if (code === 0) resolvePromise(stdout.trim());
-      else reject(new Error(`${file} ${args.join(" ")} exited with ${code}: ${stderr}`));
-    });
-  });
-}
-
-const snapshotUrl = process.env.BRAVUS_SITES_SNAPSHOT_URL || "https://bravusbank.com";
-
-async function fetchLiveJson(path, token = "sites-admin-token") {
-  const url = new URL(path, snapshotUrl).toString();
-  try {
-    const response = await fetch(url, {
-      headers: { authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!response.ok) {
-      throw new Error(`snapshot ${path} returned ${response.status}`);
-    }
-    return response.json();
-  } catch (error) {
-    const curl = process.platform === "win32" ? "curl.exe" : "curl";
-    const tlsArgs = process.platform === "win32" ? ["--ssl-no-revoke"] : [];
-    const timeoutArgs = ["--connect-timeout", "4", "--max-time", "8"];
-    const body = await command(curl, ["-fsSL", ...tlsArgs, ...timeoutArgs, "-H", `authorization: Bearer ${token}`, url]);
-    return JSON.parse(body);
-  }
-}
-
-function rolesForSnapshotUser(user) {
-  return String(user.username || "").includes("admin")
-    ? ["ROLE_ADMIN"]
-    : ["ROLE_USER"];
-}
-
 async function loadLiveSeed() {
   if (process.env.BRAVUS_SITES_TEST_BUILD === "1") {
     const createdAt = "2026-01-01T00:00:00.000Z";
@@ -126,69 +80,16 @@ async function loadLiveSeed() {
       ],
     };
   }
-  try {
-    const [users, transactions, externalTransfers, globalRailParticipants, ledgerEntries] = await Promise.all([
-      fetchLiveJson("/api/admin/users"),
-      fetchLiveJson("/api/admin/transactions"),
-      fetchLiveJson("/api/admin/ledger/external-transfers"),
-      fetchLiveJson("/api/admin/global-rail/participants"),
-      fetchLiveJson("/api/admin/ledger/entries").catch(() => ({ content: [] })),
-    ]);
-    const ledgerList = Array.isArray(ledgerEntries)
-      ? ledgerEntries
-      : Array.isArray(ledgerEntries?.content)
-        ? ledgerEntries.content
-        : [];
-    const usersByUsername = {};
-    for (const user of Array.isArray(users) ? users : []) {
-      if (!user?.username) continue;
-      usersByUsername[user.username] = {
-        ...user,
-        active: typeof user.active === "boolean" ? user.active : user.isActive !== false,
-        roles: Array.isArray(user.roles) ? user.roles : rolesForSnapshotUser(user),
-      };
-    }
-    const requiredUsers = ["admin@bravusbank.com", "joao.victor", "francisca.reis"];
-    const missingUsers = requiredUsers.filter((username) => !usersByUsername[username]);
-    const ledgerNet = ledgerList.reduce(
-      (sum, entry) => sum + Number(entry?.signedAmountCentavos || 0),
-      0,
-    );
-    if (missingUsers.length) {
-      throw new Error(`snapshot missing required users: ${missingUsers.join(", ")}`);
-    }
-    if (!Array.isArray(transactions) || transactions.length === 0) {
-      throw new Error("snapshot has no financial transactions");
-    }
-    if (!Array.isArray(externalTransfers) || externalTransfers.length === 0) {
-      throw new Error("snapshot has no transfer receipts");
-    }
-    if (ledgerList.length === 0 || ledgerNet !== 0) {
-      throw new Error(`snapshot ledger is unavailable or unbalanced: net=${ledgerNet}`);
-    }
-    return {
-      verified: true,
-      capturedAt: new Date().toISOString(),
-      source: snapshotUrl,
-      users: usersByUsername,
-      transactions: Array.isArray(transactions) ? transactions : [],
-      externalTransfers: Array.isArray(externalTransfers) ? externalTransfers : [],
-      globalRailParticipants: Array.isArray(globalRailParticipants) ? globalRailParticipants : [],
-      ledgerEntries: ledgerList,
-    };
-  } catch (error) {
-    console.warn(`Sites live snapshot unavailable; the worker will require an existing D1 state: ${error.message}`);
-    return {
-      verified: false,
-      capturedAt: null,
-      source: snapshotUrl,
-      users: {},
-      transactions: [],
-      externalTransfers: [],
-      globalRailParticipants: [],
-      ledgerEntries: [],
-    };
-  }
+  return {
+    verified: false,
+    capturedAt: null,
+    source: "existing-d1-only",
+    users: {},
+    transactions: [],
+    externalTransfers: [],
+    globalRailParticipants: [],
+    ledgerEntries: [],
+  };
 }
 
 const liveSeed = await loadLiveSeed();
@@ -213,9 +114,9 @@ const files = ${JSON.stringify(files)};
 const liveSeed = ${JSON.stringify(liveSeed)};
 const now = () => new Date().toISOString();
 const bravusInstitutionProfile = Object.freeze({
-  institutionName: "Bravus Premium Bank",
+  institutionName: "Vantyx Bank",
   countryCode: "KY",
-  currency: "KYD",
+  currency: "BRL",
   internalRoutingCode: "BRAV-KY-INTERNAL",
   swiftBic: "BRAVKYK0XXX",
   swiftBicStatus: "INTERNAL_TEST_ONLY_UNREGISTERED",
@@ -226,7 +127,7 @@ const bravusInstitutionProfile = Object.freeze({
 const registrationCheckDeduplicationMs = 30 * 1000;
 const institutionalReserveSeed = Object.freeze({
   code: "BRAVUS_INSTITUTIONAL_RESERVE",
-  name: "Reserva Institucional Bravus",
+  name: "Reserva Institucional Vantyx",
   amountCentavos: "100000000000000000",
   currency: "BRL",
   classification: "INSTITUTIONAL",
@@ -310,7 +211,7 @@ const admin = {
   id: 1,
   username: "admin@bravusbank.com",
   email: "admin@bravusbank.com",
-  fullName: "Administrador Bravus Local",
+  fullName: "Administrador Vantyx Local",
   cpf: "",
   phone: "",
   accountNumber: "000003",
@@ -350,7 +251,7 @@ const initialStateSeed = {
     : [{
     id: 1,
     participantCode: "BRAVUS-INTERNAL",
-    legalName: "Bravus Premium Bank",
+    legalName: "Vantyx Bank",
     country: "KY",
     network: "INTERNAL_BRAVUS",
     bankCode: "999",
@@ -554,7 +455,7 @@ function normalizeState(candidate) {
     ? next.globalRailParticipants
     : structuredClone(initialStateSeed.globalRailParticipants);
   for (const participant of next.globalRailParticipants) {
-    if (!isBravusOwned(participant)) continue;
+    if (!isVantyxOwned(participant)) continue;
     participant.routingCode = participant.routingCode || bravusInstitutionProfile.internalRoutingCode;
     participant.swiftBic = bravusInstitutionProfile.swiftBic;
     participant.swiftBicStatus = bravusInstitutionProfile.swiftBicStatus;
@@ -590,6 +491,17 @@ function json(data, init = {}) {
     headers: {
       "content-type": "application/json; charset=utf-8",
       ...corsHeaders,
+      ...(init.headers || {}),
+    },
+  });
+}
+function privateJson(data, init = {}) {
+  return json(data, {
+    ...init,
+    headers: {
+      "cache-control": "private, no-store, max-age=0",
+      "pragma": "no-cache",
+      "vary": "Authorization",
       ...(init.headers || {}),
     },
   });
@@ -940,10 +852,7 @@ function accountDetail(user) {
     holds: state.balanceHolds
       .filter((hold) => hold.username === user.username)
       .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
-    recentTransactions: state.transactions
-      .filter((transaction) => transaction.username === user.username)
-      .slice(0, 50)
-      .map((transaction) => hydrateTransaction(transaction, user)),
+    recentTransactions: ownedTransactionsFor(user, 50),
     audit: state.accountControlAudit
       .filter((entry) => entry.username === user.username)
       .slice(0, 100)
@@ -1153,7 +1062,7 @@ function partyForUser(user) {
   return {
     name: user.fullName,
     document: user.cpf,
-    bankName: "Bravus Premium Bank",
+    bankName: "Vantyx Bank",
     bankCode: "999",
     countryCode: bravusInstitutionProfile.countryCode,
     currency: bravusInstitutionProfile.currency,
@@ -1266,9 +1175,9 @@ function hydrateTransaction(tx, viewer) {
   }
   if (next.type === "DEPOSIT" || next.type === "WITHDRAWAL") {
     const bank = {
-      name: "Bravus Premium Bank",
+      name: "Vantyx Bank",
       document: "BRAVUS-LEDGER",
-      bankName: "Bravus Premium Bank",
+      bankName: "Vantyx Bank",
       bankCode: "999",
       routingCode: bravusInstitutionProfile.internalRoutingCode,
       swiftBic: bravusInstitutionProfile.swiftBic,
@@ -1286,6 +1195,14 @@ function hydrateTransaction(tx, viewer) {
   return next;
 }
 
+function ownedTransactionsFor(user, limit = null) {
+  if (!user?.username) return [];
+  const owned = state.transactions
+    .filter((transaction) => transaction && transaction.username === user.username)
+    .map((transaction) => hydrateTransaction(transaction, user));
+  return Number.isInteger(limit) ? owned.slice(0, limit) : owned;
+}
+
 function canReadOrderReceipt(order, user) {
   if (!order || !user) return false;
   if (order.username === user.username || order.payerUsername === user.username || order.beneficiaryUsername === user.username) return true;
@@ -1299,7 +1216,7 @@ function canReadOrderReceipt(order, user) {
   return false;
 }
 
-function resolveBravusTransferDestination(body) {
+function resolveVantyxTransferDestination(body) {
   return findTransferDestination(body.pixKey)
     || findTransferDestination(body.accountNumber)
     || findTransferDestination(body.beneficiaryDocument)
@@ -1362,7 +1279,7 @@ function appendInternalLedgerPair(order, payer, beneficiary, amount, reason) {
     accountNumber: payer.accountNumber,
     entryType: "debit",
     signedAmountCentavos: -amount,
-    currency: "KYD",
+    currency: "BRL",
     reason,
     createdAt,
   };
@@ -1374,7 +1291,7 @@ function appendInternalLedgerPair(order, payer, beneficiary, amount, reason) {
     accountNumber: beneficiary.accountNumber,
     entryType: "credit",
     signedAmountCentavos: amount,
-    currency: "KYD",
+    currency: "BRL",
     reason,
     createdAt,
   };
@@ -1400,7 +1317,7 @@ function internalOrderPayload({ order, payer, beneficiary, tx, amount, descripti
     transactionId: tx.id,
     amountCentavos: amount,
     channel: channel || "INTERNAL_BRAVUS",
-    currency: "KYD",
+    currency: "BRL",
     beneficiaryName: beneficiary.fullName,
     beneficiaryDocument: beneficiary.cpf,
     bankCode: "999",
@@ -1423,7 +1340,7 @@ function internalOrderPayload({ order, payer, beneficiary, tx, amount, descripti
     destinationParticipantCode: "BRAVUS-INTERNAL",
     destinationConfirmationId: idempotencyKey,
     destinationConfirmedAt: target.destinationConfirmedAt || now(),
-    settlementMessage: settlementMessage || "Liquidacao interna confirmada no ledger Bravus.",
+    settlementMessage: settlementMessage || "Liquidacao interna confirmada no ledger Vantyx.",
     errorMessage: null,
     rawResponse: "{\\"provider\\":\\"BRAVUS_INTERNAL_LEDGER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
     createdAt: target.createdAt || now(),
@@ -1459,7 +1376,7 @@ function commitInternalTransfer({ payer, beneficiary, amount, description, chann
     username: payer.username,
     type: "TRANSFER_OUT",
     amount: value,
-    description: description || "Transferencia interna Bravus",
+    description: description || "Transferencia interna Vantyx",
     destinationAccount: beneficiary.accountNumber,
     status: "COMPLETED",
     createdAt: now(),
@@ -1469,7 +1386,7 @@ function commitInternalTransfer({ payer, beneficiary, amount, description, chann
     username: beneficiary.username,
     type: "TRANSFER_IN",
     amount: value,
-    description: description || "Transferencia recebida Bravus",
+    description: description || "Transferencia recebida Vantyx",
     destinationAccount: payer.accountNumber,
     status: "COMPLETED",
     createdAt: now(),
@@ -1484,8 +1401,8 @@ function commitInternalTransfer({ payer, beneficiary, amount, description, chann
     channel,
     idempotencyKey: transferKey,
     settlementMessage: source === "ADMIN"
-      ? "Liquidacao interna confirmada no ledger Bravus, sem uso de Celcoin."
-      : "Liquidacao interna confirmada no ledger Bravus.",
+      ? "Liquidacao interna confirmada no ledger Vantyx, sem uso de Celcoin."
+      : "Liquidacao interna confirmada no ledger Vantyx.",
   });
   order.idempotencyFingerprint = fingerprint;
   applyTransferParties(tx, partyForUser(payer), partyForUser(beneficiary), "PAYER", order.id);
@@ -1578,7 +1495,7 @@ function reconcileInternalOrder(order) {
       username: beneficiary.username,
       type: "TRANSFER_IN",
       amount,
-      description: order.description || "Transferencia recebida Bravus",
+      description: order.description || "Transferencia recebida Vantyx",
       destinationAccount: payer.accountNumber,
       status: "COMPLETED",
       createdAt: order.createdAt || now(),
@@ -1767,7 +1684,7 @@ function reconcileOrphanInternalTransactionPairs() {
       description: outTx.description || inTx.description || "Transferencia interna reconciliada",
       channel: "PIX",
       idempotencyKey: transferKey,
-      settlementMessage: "Transferencia concluida encontrada no extrato e reconciliada no ledger Bravus.",
+      settlementMessage: "Transferencia concluida encontrada no extrato e reconciliada no ledger Vantyx.",
     });
     applyTransferParties(outTx, partyForUser(payer), partyForUser(beneficiary), "PAYER", order.id);
     applyTransferParties(inTx, partyForUser(payer), partyForUser(beneficiary), "BENEFICIARY", order.id);
@@ -1895,7 +1812,7 @@ function externalBicValidationError(value, country, bravusOwned) {
   return null;
 }
 
-function isBravusOwned(participant) {
+function isVantyxOwned(participant) {
   if (!participant) return false;
   return String(participant.participantCode || "").startsWith("BRAVUS")
     || participant.bankCode === "999"
@@ -1920,7 +1837,7 @@ function settlementFor(body, idempotencyKey) {
       destinationParticipantCode: null,
       settlementStatus: "DEBITADA_NO_BRAVUS_AGUARDANDO_CONEXAO_DESTINO",
       receiptKind: "COMPROVANTE_SAIDA_BRAVUS",
-      settlementMessage: "Saida concluida no ledger Bravus. Destino aguarda participante/conector ativo para confirmar liquidacao.",
+      settlementMessage: "Saida concluida no ledger Vantyx. Destino aguarda participante/conector ativo para confirmar liquidacao.",
     };
   }
   if (participant.status !== "ACTIVE") {
@@ -1929,10 +1846,10 @@ function settlementFor(body, idempotencyKey) {
       destinationParticipantCode: participant.participantCode,
       settlementStatus: "DEBITADA_NO_BRAVUS_PARTICIPANTE_INATIVO",
       receiptKind: "COMPROVANTE_SAIDA_BRAVUS",
-      settlementMessage: "Saida concluida no ledger Bravus. Participante destino nao esta ativo.",
+      settlementMessage: "Saida concluida no ledger Vantyx. Participante destino nao esta ativo.",
     };
   }
-  if (participant.connectionMode === "SELF_LEDGER" && isBravusOwned(participant)) {
+  if (participant.connectionMode === "SELF_LEDGER" && isVantyxOwned(participant)) {
     return {
       destinationNetwork,
       destinationParticipantCode: participant.participantCode,
@@ -1940,7 +1857,7 @@ function settlementFor(body, idempotencyKey) {
       destinationConfirmedAt: now(),
       settlementStatus: "LIQUIDADA_CONFIRMADA",
       receiptKind: "COMPROVANTE_LIQUIDACAO_CONFIRMADA",
-      settlementMessage: "Liquidacao confirmada em participante controlado pelo Bravus.",
+      settlementMessage: "Liquidacao confirmada em participante controlado pelo Vantyx.",
     };
   }
   return {
@@ -1948,7 +1865,7 @@ function settlementFor(body, idempotencyKey) {
     destinationParticipantCode: participant.participantCode,
     settlementStatus: participant.connectionMode === "MANUAL_CONFIRMATION" ? "AGUARDANDO_CONFIRMACAO_MANUAL" : "ENVIADA_A_CONECTOR",
     receiptKind: "COMPROVANTE_SAIDA_BRAVUS",
-    settlementMessage: "Saida concluida no ledger Bravus. Aguardando confirmacao do participante destino.",
+    settlementMessage: "Saida concluida no ledger Vantyx. Aguardando confirmacao do participante destino.",
   };
 }
 
@@ -1959,7 +1876,7 @@ function bankMe(user) {
     ...userSummary(user),
     phoneFormatted: user.phone || null,
     dadosBancarios: {
-      nomeBanco: "Bravus Premium Bank",
+      nomeBanco: "Vantyx Bank",
       codigoBanco: "999",
       countryCode: bravusInstitutionProfile.countryCode,
       currency: bravusInstitutionProfile.currency,
@@ -2021,7 +1938,7 @@ function receiptForOrder(order, user) {
     pixKeyType: order.pixKeyType,
   };
   return {
-    receiptId: "BRAVUS-" + order.idempotencyKey,
+    receiptId: "VANTYX-" + order.idempotencyKey,
     orderId: order.id,
     transactionId: order.transactionId,
     provider: order.provider,
@@ -2230,7 +2147,7 @@ function registrationAvailability(body) {
   let message = "Dados disponiveis para abertura da conta.";
   if (cpfConflict) {
     code = "ACCOUNT_ALREADY_EXISTS";
-    message = "Este CPF ja possui conta no Bravus. Entre na conta ou redefina a senha.";
+    message = "Este CPF ja possui conta no Vantyx. Entre na conta ou redefina a senha.";
   } else if (usernameConflict) {
     code = "USERNAME_ALREADY_EXISTS";
     message = "Este usuario ja esta em uso. Escolha outro usuario.";
@@ -2842,7 +2759,7 @@ async function releaseMasterCreditGrant(grant, beneficiary, actor, idempotencyKe
     username: beneficiary.username,
     type: "DEPOSIT",
     amount: Number(amount),
-    description: "Credito escritural concedido pela Reserva Mestre Bravus",
+    description: "Credito escritural concedido pela Reserva Mestre Vantyx",
     destinationAccount: beneficiary.accountNumber,
     status: "COMPLETED",
     createdAt,
@@ -3180,13 +3097,13 @@ async function handleApi(request) {
     }
     if (user.active === false) {
       return json({
-        message: "Esta conta esta bloqueada administrativamente. Procure o suporte Bravus.",
+        message: "Esta conta esta bloqueada administrativamente. Procure o suporte Vantyx.",
         code: "ACCOUNT_BLOCKED",
       }, { status: 403, headers: { "cache-control": "no-store" } });
     }
     if (user.statusKyc === "REJEITADO_IDENTIDADE") {
       return json({
-        message: "A abertura desta conta foi rejeitada. Procure o suporte Bravus.",
+        message: "A abertura desta conta foi rejeitada. Procure o suporte Vantyx.",
         code: "ACCOUNT_IDENTITY_REJECTED",
       }, { status: 403 });
     }
@@ -3495,26 +3412,26 @@ async function handleApi(request) {
   enforceFinancialConsistency("AUTHENTICATED_REQUEST");
 
   if (request.method === "GET" && path === "/user/dashboard") {
-    return json({
+    return privateJson({
       profile: userSummary(user),
       me: bankMe(user),
-      transactions: state.transactions.filter((tx) => tx.username === user.username).map((tx) => hydrateTransaction(tx, user)),
+      transactions: ownedTransactionsFor(user),
       creditSummary: creditSummary(user),
       externalOrders: state.externalTransfers.filter((tx) => canReadOrderReceipt(tx, user)).slice(0, 8),
     });
   }
-  if (request.method === "GET" && path === "/user/profile") return json(userSummary(user));
-  if (request.method === "GET" && path === "/user/me") return json(bankMe(user));
-  if (request.method === "GET" && path === "/user/balance") return json(availableBalanceNumber(user));
+  if (request.method === "GET" && path === "/user/profile") return privateJson(userSummary(user));
+  if (request.method === "GET" && path === "/user/me") return privateJson(bankMe(user));
+  if (request.method === "GET" && path === "/user/balance") return privateJson(availableBalanceNumber(user));
   if (request.method === "GET" && path === "/user/transactions") {
-    return json(state.transactions.filter((tx) => tx.username === user.username).map((tx) => hydrateTransaction(tx, user)));
+    return privateJson(ownedTransactionsFor(user));
   }
   if (request.method === "GET" && path === "/user/transfer/resolve") {
     const destination = url.searchParams.get("destination") || "";
     const found = findTransferDestination(destination);
-    if (!found) return json({ found: false, message: "Destinatario Bravus nao localizado." });
-    if (found.username === user.username) return json({ found: false, code: "SELF_TRANSFER", message: "Nao e permitido transferir para a propria conta." });
-    return json(recipientViewForUser(found));
+    if (!found) return privateJson({ found: false, message: "Destinatario Vantyx nao localizado." });
+    if (found.username === user.username) return privateJson({ found: false, code: "SELF_TRANSFER", message: "Nao e permitido transferir para a propria conta." });
+    return privateJson(recipientViewForUser(found));
   }
   if (request.method === "GET" && path === "/credit/summary") return json(creditSummary(user));
   if (request.method === "GET" && path.startsWith("/user/external-transfers")) {
@@ -3522,9 +3439,9 @@ async function handleApi(request) {
     if (receiptMatch) {
       const order = state.externalTransfers.find((tx) => tx.id === Number(receiptMatch[1]) && canReadOrderReceipt(tx, user));
       if (!order) return json("Transferencia nao encontrada para este usuario.", { status: 404 });
-      return json(receiptForOrder(order, user));
+      return privateJson(receiptForOrder(order, user));
     }
-    return json(state.externalTransfers.filter((tx) => canReadOrderReceipt(tx, user)));
+    return privateJson(state.externalTransfers.filter((tx) => canReadOrderReceipt(tx, user)));
   }
   if (request.method === "POST"
       && ["/user/withdraw", "/user/transfer", "/user/external-transfers"].includes(path)
@@ -3552,17 +3469,17 @@ async function handleApi(request) {
       }
       return json(previousOrder);
     }
-    const bravusDestination = resolveBravusTransferDestination(body);
+    const bravusDestination = resolveVantyxTransferDestination(body);
     if (bravusDestination) {
       if (bravusDestination.username === user.username) {
-        return json("Nao e permitido transferir para a propria conta Bravus.", { status: 400 });
+        return json("Nao e permitido transferir para a propria conta Vantyx.", { status: 400 });
       }
       try {
         const result = commitInternalTransfer({
           payer: user,
           beneficiary: bravusDestination,
           amount,
-          description: body.description || "Transferencia interna Bravus",
+          description: body.description || "Transferencia interna Vantyx",
           channel: "INTERNAL_BRAVUS",
           idempotencyKey,
           source: "USER_EXTERNAL_TRANSFER",
@@ -3590,7 +3507,7 @@ async function handleApi(request) {
       username: user.username,
       type: "TRANSFER_EXTERNAL",
       amount,
-      description: body.description || "Transferencia via provedor Bravus",
+      description: body.description || "Transferencia via provedor Vantyx",
       destinationAccount: body.pixKey || [body.bankCode, body.agency, body.accountNumber].filter(Boolean).join(" "),
       status: "COMPLETED",
       createdAt: now(),
@@ -3606,7 +3523,7 @@ async function handleApi(request) {
       transactionId: tx.id,
       amountCentavos: amount,
       channel: body.channel,
-      currency: "KYD",
+      currency: "BRL",
       beneficiaryName: body.beneficiaryName || "Beneficiario externo",
       beneficiaryDocument: String(body.beneficiaryDocument || "").replace(/\\D/g, ""),
       bankCode: body.bankCode || null,
@@ -3658,7 +3575,7 @@ async function handleApi(request) {
       destination = findTransferDestination(destinationRaw);
       if (!destination) {
         return badRequest(
-          "Destino Bravus nao encontrado. Para outros bancos, use ACH/EFT Cayman ou Wire/SWIFT internacional.",
+          "Destino Vantyx nao encontrado. Para outros bancos, use ACH/EFT Cayman ou Wire/SWIFT internacional.",
           "BRAVUS_DESTINATION_NOT_FOUND"
         );
         /* Legacy external fallback intentionally remains unreachable so historical snapshots can still be parsed. */
@@ -3673,7 +3590,7 @@ async function handleApi(request) {
           pixKeyType,
           beneficiaryName: body.beneficiaryName || "Beneficiario informado",
           beneficiaryDocument: body.beneficiaryDocument || rawDigits || "00000000000",
-          description: body.description || "Pagamento via Bravus",
+          description: body.description || "Pagamento via Vantyx",
         };
         if (!externalBody.pixKey && !externalBody.accountNumber) {
           return badRequest(
@@ -3736,7 +3653,7 @@ async function handleApi(request) {
           destinationParticipantCode: settlement.destinationParticipantCode || null,
           destinationConfirmationId: settlement.destinationConfirmationId || null,
           destinationConfirmedAt: settlement.destinationConfirmedAt || null,
-          settlementMessage: "Endpoint legado /user/transfer processado como pagamento Pix pelo provedor Bravus. " + settlement.settlementMessage,
+          settlementMessage: "Endpoint legado /user/transfer processado como pagamento Pix pelo provedor Vantyx. " + settlement.settlementMessage,
           errorMessage: null,
           rawResponse: "{\\"provider\\":\\"BRAVUS_SELF_PROVIDER\\",\\"status\\":\\"COMPLETED\\",\\"legacyEndpoint\\":\\"/api/user/transfer\\"}",
           createdAt: now(),
@@ -3748,20 +3665,20 @@ async function handleApi(request) {
         return json(order);
       }
       if (destination.username === user.username) {
-        return badRequest("Nao e permitido transferir para a propria conta Bravus.", "SELF_TRANSFER");
+        return badRequest("Nao e permitido transferir para a propria conta Vantyx.", "SELF_TRANSFER");
       }
       try {
         const result = commitInternalTransfer({
           payer: user,
           beneficiary: destination,
           amount,
-          description: body.description || "Transferencia interna Bravus",
+          description: body.description || "Transferencia interna Vantyx",
           channel: "INTERNAL_BRAVUS",
           idempotencyKey: request.headers.get("idempotency-key") || ("sites-legacy-internal-" + Date.now()),
           source: "LEGACY_USER_TRANSFER",
         });
         return json({
-          message: "Transferencia interna Bravus liquidada.",
+          message: "Transferencia interna Vantyx liquidada.",
           status: "COMPLETED",
           provider: "BRAVUS_INTERNAL_LEDGER",
           settlementStatus: "LIQUIDADA_CONFIRMADA",
@@ -3824,7 +3741,7 @@ async function handleApi(request) {
         transactionId: tx.id,
         amountCentavos: amount,
         channel: "INTERNAL_BRAVUS",
-        currency: "KYD",
+        currency: "BRL",
         beneficiaryName: destination.fullName,
         beneficiaryDocument: destination.cpf,
         bankCode: "999",
@@ -3847,7 +3764,7 @@ async function handleApi(request) {
         destinationParticipantCode: "BRAVUS-INTERNAL",
         destinationConfirmationId: idempotencyKey,
         destinationConfirmedAt: now(),
-        settlementMessage: "Liquidacao interna confirmada no ledger Bravus.",
+        settlementMessage: "Liquidacao interna confirmada no ledger Vantyx.",
         errorMessage: null,
         rawResponse: "{\\"provider\\":\\"BRAVUS_INTERNAL_LEDGER\\",\\"status\\":\\"COMPLETED\\",\\"settlement\\":\\"INTERNAL_LEDGER\\"}",
         createdAt: now(),
@@ -3859,7 +3776,7 @@ async function handleApi(request) {
       state.externalTransfers.unshift(order);
     }
     return json({
-      message: destination ? "Transferencia interna Bravus liquidada." : "Operacao realizada.",
+      message: destination ? "Transferencia interna Vantyx liquidada." : "Operacao realizada.",
       status: "COMPLETED",
       provider: destination ? "BRAVUS_INTERNAL_LEDGER" : "BRAVUS_SITES_LEDGER",
       settlementStatus: destination ? "LIQUIDADA_CONFIRMADA" : "COMPLETED",
@@ -4727,17 +4644,17 @@ async function handleApi(request) {
       }
       return json(previousOrder);
     }
-    const bravusDestination = resolveBravusTransferDestination(body);
+    const bravusDestination = resolveVantyxTransferDestination(body);
     if (bravusDestination) {
       if (bravusDestination.username === origin.username) {
-        return json("Nao e permitido transferir para a propria conta Bravus.", { status: 400 });
+        return json("Nao e permitido transferir para a propria conta Vantyx.", { status: 400 });
       }
       try {
         const result = commitInternalTransfer({
           payer: origin,
           beneficiary: bravusDestination,
           amount,
-          description: body.description || "Transferencia interna admin Bravus",
+          description: body.description || "Transferencia interna admin Vantyx",
           channel: "INTERNAL_BRAVUS",
           idempotencyKey,
           source: "ADMIN",
@@ -4765,7 +4682,7 @@ async function handleApi(request) {
       username: origin.username,
       type: "TRANSFER_EXTERNAL",
       amount,
-      description: body.description || "Transferencia via admin Bravus",
+      description: body.description || "Transferencia via admin Vantyx",
       destinationAccount: body.pixKey || [body.bankCode, body.agency, body.accountNumber].filter(Boolean).join(" "),
       status: "COMPLETED",
       createdAt: now(),
@@ -4781,7 +4698,7 @@ async function handleApi(request) {
       transactionId: tx.id,
       amountCentavos: amount,
       channel: body.channel,
-      currency: "KYD",
+      currency: "BRL",
       beneficiaryName: body.beneficiaryName || "Beneficiario externo",
       beneficiaryDocument: String(body.beneficiaryDocument || "").replace(/\\D/g, ""),
       bankCode: body.bankCode || null,
@@ -4825,14 +4742,14 @@ async function handleApi(request) {
     const connectionMode = String(body.connectionMode || "MANUAL_CONFIRMATION").trim().toUpperCase();
     const country = String(body.country || "KY").toUpperCase().slice(0, 2);
     const swiftBic = normalizeExternalBic(body.swiftBic);
-    const bicError = externalBicValidationError(swiftBic, country, isBravusOwned({
+    const bicError = externalBicValidationError(swiftBic, country, isVantyxOwned({
       participantCode,
       bankCode: body.bankCode,
       network,
     }));
     if (bicError) return json({ message: bicError, code: "SWIFT_BIC_NOT_EXTERNAL" }, { status: 400 });
     if (connectionMode === "SELF_LEDGER" && !participantCode.startsWith("BRAVUS") && body.bankCode !== "999" && network !== "INTERNAL_BRAVUS") {
-      return json("SELF_LEDGER so pode ser usado em participante controlado pelo Bravus.", { status: 400 });
+      return json("SELF_LEDGER so pode ser usado em participante controlado pelo Vantyx.", { status: 400 });
     }
     let participant = state.globalRailParticipants.find((item) => item.participantCode === participantCode);
     if (!participant) {
@@ -4878,7 +4795,7 @@ async function handleApi(request) {
   if (request.method === "GET" && path === "/admin/cayman-rail/config") return json({
     id: 1,
     enabled: true,
-    legalEntityName: "Bravus Premium Bank",
+    legalEntityName: "Vantyx Bank",
     jurisdiction: "Cayman Islands",
     regulatoryStatus: "DRAFT",
     settlementMode: "INTERNAL_ONLY",

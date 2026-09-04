@@ -1,5 +1,5 @@
 ╔═══════════════════════════════════════════════════════════════════╗
-║                  🚀 BRAVUS BANK - PROJETO COMPLETO               ║
+║                  🚀 VANTYX BANK - PROJETO COMPLETO               ║
 ║                      Sistema Bancário Digital                     ║
 ╚═══════════════════════════════════════════════════════════════════╝
 
@@ -87,7 +87,7 @@ FRONTEND:
   • CSS cyberpunk completo
 
 DOCUMENTAÇÃO:
-  • README-BRAVUS-BANK.md (completo)
+  • README-VANTYX-BANK.md (completo)
   • INSTRUCOES-DEPLOY.md (detalhado)
   • RESUMO-EXECUTIVO.md (overview)
   • START-AQUI.md (guia rápido)
@@ -138,7 +138,7 @@ ADMIN:
 
 • START-AQUI.md          → Início rápido (3 min)
 • INSTRUCOES-DEPLOY.md   → Deploy completo
-• README-BRAVUS-BANK.md  → Documentação técnica
+• README-VANTYX-BANK.md  → Documentação técnica
 • RESUMO-EXECUTIVO.md    → Visão executiva
 
 ═══════════════════════════════════════════════════════════════════
@@ -149,6 +149,6 @@ Desenvolvido com excelência profissional
 Seguindo padrões de mercado
 100% funcional e testado
 
-🚀 BOM USO DO BRAVUS BANK! 🚀
+🚀 BOM USO DO VANTYX BANK! 🚀
 
 ═══════════════════════════════════════════════════════════════════

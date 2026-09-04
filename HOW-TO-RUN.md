@@ -1,4 +1,4 @@
-# Como rodar o Bravus Bank em desenvolvimento
+# Como rodar o Vantyx Bank em desenvolvimento
 
 Guia rapido para subir backend e frontend localmente sem perder dados.
 

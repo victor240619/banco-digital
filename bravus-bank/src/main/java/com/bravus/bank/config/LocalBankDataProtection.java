@@ -40,7 +40,7 @@ final class LocalBankDataProtection {
             long currentCount = entry.getValue();
             if (previousCount > currentCount) {
                 throw new IllegalStateException(
-                        "Local Bravus database appears to have lost data in table "
+                        "Local Vantyx Bank database appears to have lost data in table "
                                 + entry.getKey()
                                 + " (previous count " + previousCount
                                 + ", current count " + currentCount
@@ -66,7 +66,7 @@ final class LocalBankDataProtection {
                 Files.createDirectories(parent);
             }
             try (OutputStream out = Files.newOutputStream(markerPath)) {
-                marker.store(out, "Bravus local data protection marker. Do not delete unless resetting local data intentionally.");
+                marker.store(out, "Vantyx Bank local data protection marker. Do not delete unless resetting local data intentionally.");
             }
         } catch (IOException ex) {
             throw new IllegalStateException("Unable to write local data protection marker: " + markerPath, ex);

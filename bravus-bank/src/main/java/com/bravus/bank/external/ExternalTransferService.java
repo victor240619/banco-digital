@@ -73,9 +73,9 @@ public class ExternalTransferService {
         UserEntity requestedBy = userRepo.findByUsername(requestedByUsername).orElse(null);
         documentAnalysisService.assertApprovedForUser(user);
 
-        UserEntity bravusDestination = resolveBravusDestination(cmd).orElse(null);
+        UserEntity bravusDestination = resolveVantyxDestination(cmd).orElse(null);
         if (bravusDestination != null) {
-            return submitInternalBravusTransfer(cmd, requestedByUsername, channel, user, requestedBy, bravusDestination);
+            return submitInternalVantyxTransfer(cmd, requestedByUsername, channel, user, requestedBy, bravusDestination);
         }
 
         DocumentAnalysisService.AnalysisCommand beneficiaryAnalysis =
@@ -136,7 +136,7 @@ public class ExternalTransferService {
         order.setTransactionId(tx.getId());
         order.setAmountCentavos(cmd.amountCentavos);
         order.setChannel(channel);
-        order.setCurrency("KYD");
+        order.setCurrency("BRL");
         order.setBeneficiaryName(cmd.beneficiaryName);
         order.setBeneficiaryDocument(DocumentUtilsBridge.digits(cmd.beneficiaryDocument));
         order.setBankCode(cmd.bankCode);
@@ -160,7 +160,7 @@ public class ExternalTransferService {
         order.setDestinationConfirmedAt(settlement.destinationConfirmedAt);
         order.setSettlementMessage(settlement.settlementMessage);
         if (!providerConfigured) {
-            order.setErrorMessage("Configure BRAVUS_BANKING_PROVIDER_URL/TOKEN ou BRAVUS_BANKING_PROVIDER_MODE=CELCOIN com credenciais Celcoin para liquidar fora do Bravus.");
+            order.setErrorMessage("Configure BRAVUS_BANKING_PROVIDER_URL/TOKEN ou BRAVUS_BANKING_PROVIDER_MODE=CELCOIN com credenciais Celcoin para liquidar fora do Vantyx.");
         }
         order.setRawResponse(providerResult.rawResponse);
         return transferRepo.save(order);
@@ -215,14 +215,14 @@ public class ExternalTransferService {
         return result;
     }
 
-    private ExternalTransferEntity submitInternalBravusTransfer(ExternalTransferCommand cmd,
+    private ExternalTransferEntity submitInternalVantyxTransfer(ExternalTransferCommand cmd,
                                                                String requestedByUsername,
                                                                String channel,
                                                                UserEntity fromUser,
                                                                UserEntity requestedBy,
                                                                UserEntity toUser) {
         if (fromUser.getId().equals(toUser.getId())) {
-            throw new IllegalArgumentException("Nao e permitido transferir para a propria conta Bravus.");
+            throw new IllegalArgumentException("Nao e permitido transferir para a propria conta Vantyx.");
         }
         if (fromUser.getBalance() == null || fromUser.getBalance() < cmd.amountCentavos) {
             throw new IllegalStateException("Saldo contabil do usuario insuficiente.");
@@ -239,7 +239,7 @@ public class ExternalTransferService {
         outTx.setUser(fromUser);
         outTx.setType("TRANSFER_OUT");
         outTx.setAmount(cmd.amountCentavos);
-        outTx.setDescription(cmd.description != null ? cmd.description : "Transferencia interna Bravus");
+        outTx.setDescription(cmd.description != null ? cmd.description : "Transferencia interna Vantyx");
         outTx.setDestinationAccount(toUser.getAccountNumber());
         outTx.setStatus("COMPLETED");
         outTx = transactionRepo.save(outTx);
@@ -249,13 +249,13 @@ public class ExternalTransferService {
                 cmd.amountCentavos,
                 outTx.getId(),
                 requestedByUsername,
-                "Transferencia interna Bravus para " + toUser.getAccountNumber());
+                "Transferencia interna Vantyx para " + toUser.getAccountNumber());
 
         TransactionEntity inTx = new TransactionEntity();
         inTx.setUser(toUser);
         inTx.setType("TRANSFER_IN");
         inTx.setAmount(cmd.amountCentavos);
-        inTx.setDescription(cmd.description != null ? cmd.description : "Transferencia recebida Bravus");
+        inTx.setDescription(cmd.description != null ? cmd.description : "Transferencia recebida Vantyx");
         inTx.setDestinationAccount(fromUser.getAccountNumber());
         inTx.setStatus("COMPLETED");
         transactionRepo.save(inTx);
@@ -266,7 +266,7 @@ public class ExternalTransferService {
         order.setTransactionId(outTx.getId());
         order.setAmountCentavos(cmd.amountCentavos);
         order.setChannel(channel);
-        order.setCurrency("KYD");
+        order.setCurrency("BRL");
         order.setBeneficiaryName(toUser.getFullName() != null ? toUser.getFullName() : cmd.beneficiaryName);
         order.setBeneficiaryDocument(DocumentUtilsBridge.digits(
                 toUser.getCpf() != null ? toUser.getCpf() : cmd.beneficiaryDocument));
@@ -289,19 +289,19 @@ public class ExternalTransferService {
         order.setDestinationParticipantCode("BRAVUS-INTERNAL");
         order.setDestinationConfirmationId(idempotencyKey);
         order.setDestinationConfirmedAt(java.time.OffsetDateTime.now());
-        order.setSettlementMessage("Liquidacao interna confirmada no ledger Bravus, sem uso de Celcoin.");
+        order.setSettlementMessage("Liquidacao interna confirmada no ledger Vantyx, sem uso de Celcoin.");
         order.setErrorMessage(null);
         order.setRawResponse("{\"provider\":\"BRAVUS_INTERNAL_LEDGER\",\"status\":\"COMPLETED\",\"settlement\":\"INTERNAL_LEDGER\"}");
         return transferRepo.save(order);
     }
 
-    private Optional<UserEntity> resolveBravusDestination(ExternalTransferCommand cmd) {
-        return findBravusUser(cmd.pixKey)
-                .or(() -> findBravusUser(cmd.accountNumber))
-                .or(() -> findBravusUser(cmd.beneficiaryDocument));
+    private Optional<UserEntity> resolveVantyxDestination(ExternalTransferCommand cmd) {
+        return findVantyxUser(cmd.pixKey)
+                .or(() -> findVantyxUser(cmd.accountNumber))
+                .or(() -> findVantyxUser(cmd.beneficiaryDocument));
     }
 
-    private Optional<UserEntity> findBravusUser(String destination) {
+    private Optional<UserEntity> findVantyxUser(String destination) {
         if (blank(destination)) {
             return Optional.empty();
         }
@@ -357,7 +357,7 @@ public class ExternalTransferService {
         pc.idempotencyKey = idempotencyKey;
         pc.channel = channel;
         pc.amountCentavos = cmd.amountCentavos;
-        pc.currency = "KYD";
+        pc.currency = "BRL";
         pc.beneficiaryName = cmd.beneficiaryName;
         pc.beneficiaryDocument = DocumentUtilsBridge.digits(cmd.beneficiaryDocument);
         pc.bankCode = cmd.bankCode;

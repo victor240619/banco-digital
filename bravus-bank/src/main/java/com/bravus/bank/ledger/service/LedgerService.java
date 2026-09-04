@@ -20,7 +20,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
- * Núcleo contábil do Bravus Bank.
+ * Núcleo contábil do Vantyx Bank.
  *
  * Responsabilidades:
  *   • Append-only ledger com hash chain SHA-256
