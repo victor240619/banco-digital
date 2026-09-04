@@ -50,8 +50,8 @@ function PublicRoute({ children }) {
 
 function AccountTheme({ children }) {
   useEffect(() => {
-    document.body.classList.add('account-light-page');
-    return () => document.body.classList.remove('account-light-page');
+    document.body.classList.add('account-obsidian-page');
+    return () => document.body.classList.remove('account-obsidian-page');
   }, []);
   return children;
 }

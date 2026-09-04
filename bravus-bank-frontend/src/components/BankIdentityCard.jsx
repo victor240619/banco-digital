@@ -19,6 +19,7 @@ export default function BankIdentityCard({ me }) {
   const banco = me.dadosBancarios || {};
   const conta = me.conta || {};
   const endereco = me.endereco || {};
+  const nomeBanco = String(banco.nomeBanco || 'Vantyx Bank').replace(/Bravus Bank/gi, 'Vantyx Bank');
 
   const copy = async (label, value) => {
     try {
@@ -30,7 +31,7 @@ export default function BankIdentityCard({ me }) {
 
   const copyAllBankData = () => {
     const txt = [
-      `${banco.nomeBanco} (cód. ${banco.codigoBanco})`,
+      `${nomeBanco} (cód. ${banco.codigoBanco})`,
       `Titular: ${me.fullName}`,
       `CPF: ${me.cpf}`,
       `Agência: ${banco.agencia}`,
@@ -42,36 +43,34 @@ export default function BankIdentityCard({ me }) {
   };
 
   const nivelStyle = {
-    PREMIUM:  { label: 'PREMIUM',  cls: 'from-amber-500/30 to-amber-700/10 text-amber-200 border-amber-500/40' },
+    PREMIUM:  { label: 'PREMIUM',  cls: 'from-bravus-500/30 to-bravus-700/10 text-bravus-200 border-bravus-500/40' },
     BLACK:    { label: 'BLACK',    cls: 'from-zinc-700/40 to-black/40 text-zinc-200 border-zinc-500/40' },
     INFINITY: { label: 'INFINITY', cls: 'from-fuchsia-500/30 to-indigo-700/20 text-fuchsia-200 border-fuchsia-500/40' },
-  }[conta.nivel] || { label: conta.nivel || 'PREMIUM', cls: 'from-amber-500/30 to-amber-700/10 text-amber-200 border-amber-500/40' };
+  }[conta.nivel] || { label: conta.nivel || 'PREMIUM', cls: 'from-bravus-500/30 to-bravus-700/10 text-bravus-200 border-bravus-500/40' };
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bank-identity-card relative overflow-hidden rounded-3xl border border-amber-500/20 bg-gradient-to-br from-[#040f2e] via-[#071a4d] to-[#040f2e] p-6 md:p-8 shadow-2xl"
+      className="bank-identity-card relative overflow-hidden rounded-2xl border border-white/10 bg-[#07111f] p-5 shadow-2xl md:p-7"
     >
-      {/* shimmer dourado de fundo */}
-      <div className="pointer-events-none absolute -top-32 -right-32 h-72 w-72 rounded-full bg-amber-500/10 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-32 -left-20 h-72 w-72 rounded-full bg-amber-600/5 blur-3xl" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-bravus-400/70" />
 
       <div className="relative z-10 flex flex-col gap-6">
         {/* Topo: banco + nível */}
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="rounded-2xl bg-amber-500/15 p-3 ring-1 ring-amber-500/30">
-              <Building2 className="h-7 w-7 text-amber-300" />
+            <div className="rounded-xl bg-bravus-500/15 p-3 ring-1 ring-bravus-400/30">
+              <Building2 className="h-7 w-7 text-bravus-300" />
             </div>
             <div>
-              <p className="text-[11px] uppercase tracking-[0.2em] text-amber-300/80">
-                {banco.nomeBanco || 'Vantyx Bank'}
+              <p className="text-[11px] uppercase tracking-[0.2em] text-bravus-300/90">
+                {nomeBanco}
               </p>
               <p className="text-xs text-white/50 mt-0.5">
                 KY · Roteamento {banco.internalRoutingCode || 'BRAV-KY-INTERNAL'}
               </p>
-              <p className="text-xs text-amber-200/70 mt-1 font-mono">
+              <p className="text-xs text-bravus-200/70 mt-1 font-mono">
                 {banco.swiftBic || 'BRAVKYK0XXX'} · interno de homologacao
               </p>
             </div>
@@ -125,9 +124,9 @@ export default function BankIdentityCard({ me }) {
           <DataPill
             label="Banco"
             value={banco.codigoBanco}
-            sub={banco.nomeBanco}
+            sub={nomeBanco}
             icon={CreditCard}
-            onCopy={() => copy('banco', `${banco.codigoBanco} - ${banco.nomeBanco}`)}
+            onCopy={() => copy('banco', `${banco.codigoBanco} - ${nomeBanco}`)}
             copied={copied === 'banco'}
           />
         </div>
@@ -136,7 +135,7 @@ export default function BankIdentityCard({ me }) {
         <div className="flex flex-wrap items-center gap-3 pt-1">
           <button
             onClick={copyAllBankData}
-            className="flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-[#040f2e] shadow-lg shadow-amber-500/30 transition hover:bg-amber-400"
+            className="flex items-center gap-2 rounded-xl bg-bravus-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-bravus-500/30 transition hover:bg-bravus-400"
           >
             {copied === 'all' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
             {copied === 'all' ? 'Copiado!' : 'Copiar dados bancários'}
@@ -181,7 +180,7 @@ function DataPill({ label, value, sub, onCopy, copied, icon: Icon, highlight }) 
     <button
       onClick={onCopy}
       className={`group relative flex flex-col items-start rounded-2xl border bg-white/5 px-4 py-3 text-left transition hover:bg-white/10 ${
-        highlight ? 'border-amber-500/40 bg-amber-500/5' : 'border-white/10'
+        highlight ? 'border-bravus-500/40 bg-bravus-500/10' : 'border-white/10'
       }`}
     >
       <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.15em] text-white/45">
@@ -204,7 +203,7 @@ function DataPill({ label, value, sub, onCopy, copied, icon: Icon, highlight }) 
 function DetailRow({ icon: Icon, label, value }) {
   return (
     <div className="flex items-start gap-3">
-      {Icon && <Icon className="h-4 w-4 text-amber-300/70 mt-0.5 shrink-0" />}
+      {Icon && <Icon className="h-4 w-4 text-bravus-300/80 mt-0.5 shrink-0" />}
       <div className="min-w-0">
         <p className="text-[11px] uppercase tracking-wider text-white/40">{label}</p>
         <p className="text-sm text-white/90 truncate">{value || '—'}</p>

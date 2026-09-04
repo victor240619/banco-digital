@@ -32,7 +32,7 @@ const FooterLinks = ({ links }) => (
 
 export default function Footer() {
   return (
-    <footer className="mt-24 border-t border-white/5 bg-ink-950/60">
+    <footer className="site-footer mt-24 border-t border-white/5 bg-ink-950/60">
       <div className="container-app py-10">
         <div className="grid gap-8 md:grid-cols-4">
           <div>

@@ -2,288 +2,184 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ShieldCheck, Zap, Globe2, Banknote, LineChart, Lock,
-  ArrowRight, Download, Sparkles, Smartphone, Award, PhoneCall, ShieldAlert
+  ArrowRight, Banknote, CreditCard, Globe2, Headphones,
+  LineChart, LockKeyhole, ShieldCheck, Sparkles, Zap,
 } from 'lucide-react';
 import { authService } from '../services/api';
-import { APK_DOWNLOAD_URL } from '../lib/appChannel';
 
-const FeatureCard = ({ icon: Icon, title, desc, accent }) => (
-  <motion.div
-    initial={{ opacity: 0, y: 14 }}
-    whileInView={{ opacity: 1, y: 0 }}
-    viewport={{ once: true, margin: '-40px' }}
-    transition={{ duration: 0.45 }}
-    className="card-premium p-6 hover:border-white/20 transition-colors"
-  >
-    <div className={`inline-flex h-11 w-11 items-center justify-center rounded-xl ${accent}`}>
-      <Icon className="h-5 w-5" />
+const reveal = {
+  initial: { opacity: 0, y: 18 },
+  whileInView: { opacity: 1, y: 0 },
+  viewport: { once: true, margin: '-60px' },
+  transition: { duration: 0.5 },
+};
+
+function CapabilityCard({ icon: Icon, title, children }) {
+  return (
+    <motion.article {...reveal} className="obsidian-feature-card">
+      <span className="obsidian-icon"><Icon className="h-5 w-5" aria-hidden="true" /></span>
+      <h3>{title}</h3>
+      <p>{children}</p>
+    </motion.article>
+  );
+}
+
+function Metric({ value, label }) {
+  return (
+    <div className="obsidian-metric">
+      <strong>{value}</strong>
+      <span>{label}</span>
     </div>
-    <h3 className="mt-4 font-display text-lg font-semibold text-white">{title}</h3>
-    <p className="mt-1.5 text-sm text-ink-300 leading-relaxed">{desc}</p>
-  </motion.div>
-);
-
-const Stat = ({ value, label }) => (
-  <div className="text-center">
-    <div className="font-display text-3xl sm:text-4xl font-bold gradient-text tabular-nums">{value}</div>
-    <div className="mt-1 text-xs uppercase tracking-widest text-ink-400">{label}</div>
-  </div>
-);
+  );
+}
 
 export default function Home() {
   const isAuthenticated = authService.isAuthenticated();
   const isAdmin = authService.hasRole('ROLE_ADMIN');
 
   return (
-    <main>
-      {/* ============ HERO ============ */}
-      <section className="container-app pt-16 sm:pt-24 pb-16">
-        <div className="grid lg:grid-cols-12 gap-12 items-center">
-          <div className="lg:col-span-7">
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="pill-gold mb-6"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              Premium Digital Banking
-            </motion.div>
-
-            <motion.h1
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.05 }}
-              className="title-xl"
-            >
-              Seu dinheiro,<br />
-              <span className="gradient-text">no padrão Vantyx.</span>
-            </motion.h1>
-
-            <motion.p
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.15 }}
-              className="mt-5 max-w-xl text-lg text-ink-200 leading-relaxed"
-            >
-              Conta digital premium com segurança bancária de verdade, transferências instantâneas
-              e uma experiência feita pra quem exige mais.
-            </motion.p>
-
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.25 }}
-              className="mt-8 flex flex-wrap gap-3"
-            >
-              {!isAuthenticated ? (
-                <>
-                  <a href={APK_DOWNLOAD_URL} download className="btn-primary text-base !py-3 !px-6">
-                    Baixar APK e abrir conta <Download className="h-4 w-4" />
-                  </a>
-                  <Link to="/login" className="btn-secondary text-base !py-3 !px-6">
-                    Já sou cliente
-                  </Link>
-                </>
+    <main className="vantyx-obsidian-home">
+      <section className="obsidian-hero">
+        <div className="container-app obsidian-hero-grid">
+          <motion.div
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55 }}
+            className="obsidian-hero-copy"
+          >
+            <div className="obsidian-kicker"><Sparkles className="h-3.5 w-3.5" /> Vantyx Bank</div>
+            <h1>Intelligent Banking.<br /><span>Possibilidades sem limites.</span></h1>
+            <p>
+              Banco digital premium para uma vida sem fronteiras. Seguro, inteligente e desenvolvido
+              para oferecer performance em cada movimentação.
+            </p>
+            <div className="obsidian-actions">
+              {isAuthenticated ? (
+                <Link to={isAdmin ? '/admin' : '/dashboard'} className="btn-primary">
+                  Acessar minha conta <ArrowRight className="h-4 w-4" />
+                </Link>
               ) : (
                 <>
-                  <Link to="/dashboard" className="btn-primary text-base !py-3 !px-6">
-                    Ir para o Dashboard <ArrowRight className="h-4 w-4" />
+                  <Link to="/register" className="btn-primary">
+                    Abrir minha conta <ArrowRight className="h-4 w-4" />
                   </Link>
-                  {isAdmin && (
-                    <Link to="/admin" className="btn-secondary text-base !py-3 !px-6">
-                      Painel admin
-                    </Link>
-                  )}
+                  <a href="#vantyx-features" className="btn-secondary">Explorar recursos</a>
                 </>
               )}
-            </motion.div>
-
-            <div className="mt-10 flex flex-wrap items-center gap-5 text-sm text-ink-300">
-              <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-gold-400" /> Criptografia TLS 1.3</span>
-              <span className="inline-flex items-center gap-2"><Lock className="h-4 w-4 text-gold-400" /> JWT + 2FA</span>
-              <span className="inline-flex items-center gap-2"><Award className="h-4 w-4 text-gold-400" /> Compliance LGPD</span>
             </div>
-          </div>
-
-          {/* Card visual mock */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.7, delay: 0.2 }}
-            className="lg:col-span-5"
-          >
-            <div className="relative">
-              {/* Glow */}
-              <div className="absolute -inset-6 bg-gradient-to-br from-gold-400/20 via-bravus-500/20 to-transparent blur-3xl rounded-3xl" />
-              {/* Card */}
-              <div className="relative card-premium p-6 rounded-3xl overflow-hidden">
-                <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-gradient-gold opacity-20 blur-2xl" />
-                <div className="flex items-center justify-between">
-                  <div className="text-xs uppercase tracking-widest text-ink-300">Saldo disponível</div>
-                  <div className="pill-gold">Premium</div>
-                </div>
-                <div className="mt-3 font-display tabular-nums text-4xl font-bold">
-                  R$ <span className="gradient-text">128.450,90</span>
-                </div>
-                <div className="mt-1 text-xs text-ink-400">Ag. 0001 · CC 0042-7</div>
-
-                <div className="mt-6 grid grid-cols-3 gap-2">
-                  {['ACH / EFT', 'Wire', 'Transferir'].map((t) => (
-                    <div key={t} className="rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-center text-xs font-medium hover:bg-white/10 transition-colors">
-                      {t}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-6">
-                  <div className="text-xs text-ink-400 mb-2">Últimas movimentações</div>
-                  <ul className="space-y-2">
-                    {[
-                      { t: 'ACH recebido', v: '+ R$ 1.200,00', c: 'text-emerald-300' },
-                      { t: 'Assinatura Vantyx', v: '- R$ 49,90', c: 'text-red-300' },
-                      { t: 'Transferência', v: '- R$ 850,00', c: 'text-red-300' },
-                    ].map((m, i) => (
-                      <li key={i} className="flex items-center justify-between text-sm">
-                        <span className="text-ink-200">{m.t}</span>
-                        <span className={`font-medium tabular-nums ${m.c}`}>{m.v}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
+            <div className="obsidian-assurances">
+              <span><ShieldCheck className="h-4 w-4" /> Proteção multicamada</span>
+              <span><Globe2 className="h-4 w-4" /> Acesso global</span>
+              <span><Headphones className="h-4 w-4" /> Atendimento 24/7</span>
             </div>
           </motion.div>
+
+          <motion.figure
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.7, delay: 0.08 }}
+            className="obsidian-hero-media"
+          >
+            <img
+              src="/images/obsidian/vantyx-mobile-banking.png"
+              alt="Experiência mobile Vantyx Bank em acabamento obsidian"
+              loading="eager"
+            />
+          </motion.figure>
         </div>
       </section>
 
-      {/* ============ STATS ============ */}
-      <section className="container-app">
-        <div className="card-premium grid grid-cols-2 md:grid-cols-4 gap-6 p-8">
-          <Stat value="24/7" label="Canais digitais" />
-          <Stat value="99.99%" label="Uptime SLA" />
-          <Stat value="256-bit" label="Criptografia" />
-          <Stat value="24/7" label="Suporte" />
+      <section className="container-app obsidian-metrics" aria-label="Indicadores Vantyx">
+        <Metric value="24/7" label="Canais digitais" />
+        <Metric value="BRL" label="Conta em reais" />
+        <Metric value="256-bit" label="Criptografia" />
+        <Metric value="99,99%" label="Disponibilidade" />
+      </section>
+
+      <section id="vantyx-features" className="container-app obsidian-section">
+        <div className="obsidian-section-heading">
+          <div className="obsidian-kicker">Vantyx Obsidian</div>
+          <h2>Inteligência, segurança e liberdade em uma única experiência.</h2>
+          <p>O essencial de um banco completo com uma interface precisa, silenciosa e premium.</p>
+        </div>
+
+        <div className="obsidian-feature-grid">
+          <CapabilityCard icon={Zap} title="Operações rápidas">
+            Transferências e movimentações em poucos passos, com confirmação clara em cada etapa.
+          </CapabilityCard>
+          <CapabilityCard icon={Globe2} title="Acesso sem fronteiras">
+            Conta digital disponível em qualquer dispositivo, com rotas locais e internacionais separadas.
+          </CapabilityCard>
+          <CapabilityCard icon={ShieldCheck} title="Segurança bancária">
+            Sessões protegidas, rastreabilidade e dados financeiros isolados por titular.
+          </CapabilityCard>
+          <CapabilityCard icon={LineChart} title="Visão para crescer">
+            Saldos, extratos e indicadores organizados para decisões mais inteligentes.
+          </CapabilityCard>
         </div>
       </section>
 
-      {/* ============ LOST OR STOLEN CARDS ============ */}
-      <section className="container-app mt-20" aria-labelledby="lost-card-support-title">
-        <div className="relative min-h-[520px] overflow-hidden rounded-lg border border-white/10 sm:min-h-[460px]">
-          <img
-            src="/images/lost-card-support.png"
-            alt="Carteira e cartão sobre uma passarela próxima ao mar"
-            className="absolute inset-0 h-full w-full object-cover object-center sm:object-right"
-            loading="lazy"
-          />
-          <div className="absolute inset-0 bg-slate-950/72 sm:bg-gradient-to-r sm:from-slate-950/95 sm:via-slate-950/78 sm:to-slate-950/10" />
-
-          <div className="relative z-10 flex min-h-[520px] max-w-2xl flex-col justify-center px-6 py-10 sm:min-h-[460px] sm:px-10 lg:px-14">
-            <div className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-lg border border-gold-400/30 bg-slate-950/70 text-gold-300">
-              <ShieldAlert className="h-6 w-6" aria-hidden="true" />
-            </div>
-            <h2 id="lost-card-support-title" className="font-display text-3xl font-bold leading-tight text-white sm:text-4xl">
-              Reporte cartões perdidos ou roubados 24 horas por dia, 7 dias por semana.
-            </h2>
-
-            <div className="mt-8 grid gap-5 sm:grid-cols-2">
-              <a
-                href="tel:+16367227111"
-                className="group border-l-2 border-gold-400 pl-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-300"
-              >
-                <span className="block text-sm font-medium text-ink-200">Serviços Globais Mastercard</span>
-                <span className="mt-1 inline-flex items-center gap-2 font-display text-xl font-semibold text-white group-hover:text-gold-300">
-                  <PhoneCall className="h-5 w-5" aria-hidden="true" />
-                  +1 636 722 7111
-                </span>
-              </a>
-              <a
-                href="tel:+13039671090"
-                className="group border-l-2 border-gold-400 pl-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-300"
-              >
-                <span className="block text-sm font-medium text-ink-200">Visa Global Service</span>
-                <span className="mt-1 inline-flex items-center gap-2 font-display text-xl font-semibold text-white group-hover:text-gold-300">
-                  <PhoneCall className="h-5 w-5" aria-hidden="true" />
-                  +1 303 967 1090
-                </span>
-              </a>
-            </div>
-
-            <p className="mt-8 max-w-xl text-xs leading-relaxed text-ink-300">
-              Canais globais de assistência das bandeiras. A disponibilidade e os custos da chamada podem variar. Informe também o emissor do cartão.
-            </p>
-            <Link className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-gold-300 transition-colors hover:text-gold-200" to="/canais-atendimento">
-              Conheça todos os canais <ArrowRight className="h-4 w-4" />
-            </Link>
-          </div>
-        </div>
+      <section className="container-app obsidian-split-section">
+        <motion.div {...reveal} className="obsidian-media-panel">
+          <img src="/images/obsidian/vantyx-cards.png" alt="Cartões Vantyx Obsidian em preto e prata" loading="lazy" />
+        </motion.div>
+        <motion.div {...reveal} className="obsidian-copy-panel">
+          <div className="obsidian-kicker">Cartão premium</div>
+          <h2>O cartão Vantyx.</h2>
+          <p>
+            Identidade obsidian, detalhes em prata fria e controles digitais para acompanhar o ritmo da sua conta.
+          </p>
+          <ul>
+            <li><CreditCard className="h-4 w-4" /> Gestão integrada à conta</li>
+            <li><LockKeyhole className="h-4 w-4" /> Controles de segurança</li>
+            <li><Globe2 className="h-4 w-4" /> Uso nacional e internacional</li>
+          </ul>
+          <Link to="/produto/cartoes" className="btn-secondary">Conhecer os cartões <ArrowRight className="h-4 w-4" /></Link>
+        </motion.div>
       </section>
 
-      {/* ============ FEATURES ============ */}
-      <section className="container-app mt-20">
-        <div className="max-w-2xl">
-          <div className="pill-gold mb-3"><Sparkles className="h-3.5 w-3.5" /> Por que Vantyx</div>
-          <h2 className="title-lg">Uma camada acima do digital banking comum.</h2>
-          <p className="mt-3 text-ink-300">
-            Tudo o que você precisa, construído com a obsessão de quem entende de finanças e tecnologia.
+      <section className="container-app obsidian-split-section obsidian-split-reverse">
+        <motion.div {...reveal} className="obsidian-media-panel obsidian-mobile-panel">
+          <img src="/images/obsidian/vantyx-wealth-mobile.png" alt="Painel de investimentos Vantyx em interface obsidian" loading="lazy" />
+        </motion.div>
+        <motion.div {...reveal} className="obsidian-copy-panel">
+          <div className="obsidian-kicker">Visão financeira</div>
+          <h2>Ferramentas que trabalham por você.</h2>
+          <p>
+            Acompanhe movimentações, crédito e investimentos com hierarquia clara, gráficos objetivos e valores em reais.
+          </p>
+          <ul>
+            <li><LineChart className="h-4 w-4" /> Indicadores em tempo real</li>
+            <li><Banknote className="h-4 w-4" /> Extratos e comprovantes</li>
+            <li><ShieldCheck className="h-4 w-4" /> Dados exclusivos do titular</li>
+          </ul>
+          <Link to="/produto/investimentos" className="btn-secondary">Explorar investimentos <ArrowRight className="h-4 w-4" /></Link>
+        </motion.div>
+      </section>
+
+      <section className="container-app obsidian-security-section">
+        <div className="obsidian-security-copy">
+          <div className="obsidian-kicker">Segurança</div>
+          <h2>Proteção em cada acesso.</h2>
+          <p>
+            Autenticação, criptografia, auditoria e isolamento por conta trabalham juntos para proteger seus dados.
           </p>
         </div>
-
-        <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          <FeatureCard
-            icon={Zap}
-            title="Transferências Cayman e globais"
-            desc="ACH/EFT local, Wire/SWIFT internacional e liquidação interna Vantyx com trilhos separados."
-            accent="bg-gold-400/15 text-gold-300"
-          />
-          <FeatureCard
-            icon={ShieldCheck}
-            title="Segurança bancária"
-            desc="JWT, hashing forte de senhas, auditoria completa e compliance LGPD."
-            accent="bg-emerald-400/15 text-emerald-300"
-          />
-          <FeatureCard
-            icon={LineChart}
-            title="Visão completa"
-            desc="Dashboards com indicadores em tempo real, extratos e relatórios exportáveis."
-            accent="bg-bravus-400/15 text-bravus-200"
-          />
-          <FeatureCard
-            icon={Banknote}
-            title="Pagamentos Stripe"
-            desc="Integração nativa com Stripe para assinaturas e cobranças seguras."
-            accent="bg-fuchsia-400/15 text-fuchsia-300"
-          />
-          <FeatureCard
-            icon={Globe2}
-            title="Disponível 24/7"
-            desc="Infraestrutura altamente disponível com observabilidade de classe mundial."
-            accent="bg-sky-400/15 text-sky-300"
-          />
-          <FeatureCard
-            icon={Smartphone}
-            title="Experiência impecável"
-            desc="UI moderna, responsiva e acessível em qualquer dispositivo."
-            accent="bg-amber-400/15 text-amber-300"
-          />
+        <div className="obsidian-security-grid">
+          <span><LockKeyhole className="h-5 w-5" /> Criptografia ponta a ponta</span>
+          <span><ShieldCheck className="h-5 w-5" /> Proteção em tempo real</span>
+          <span><Globe2 className="h-5 w-5" /> Infraestrutura segura</span>
+          <span><Zap className="h-5 w-5" /> Alertas imediatos</span>
         </div>
       </section>
 
-      {/* ============ CTA ============ */}
-      <section className="container-app mt-20">
-        <div className="relative card-premium overflow-hidden p-10 sm:p-14 text-center">
-          <div className="absolute -top-24 -left-24 w-72 h-72 rounded-full bg-gradient-gold opacity-10 blur-3xl" />
-          <div className="absolute -bottom-24 -right-24 w-72 h-72 rounded-full bg-bravus-500 opacity-20 blur-3xl" />
-          <h2 className="title-lg gradient-text">Pronto pra subir de padrão?</h2>
-          <p className="mt-3 text-ink-200 max-w-xl mx-auto">
-            Abra sua conta em menos de 2 minutos. 100% digital, com a confiança que você espera de um banco premium.
-          </p>
-          {!isAuthenticated && (
-            <a href={APK_DOWNLOAD_URL} download className="btn-primary mt-7 text-base !py-3 !px-8">
-              Baixar APK <Download className="h-4 w-4" />
-            </a>
-          )}
+      <section className="container-app obsidian-closing">
+        <img src="/images/obsidian/vantyx-private-banking.png" alt="Ambiente premium Vantyx Bank" loading="lazy" />
+        <div className="obsidian-closing-copy">
+          <img src="/brand/vantyx-bank-logo.png" alt="Vantyx Bank" />
+          <h2>O futuro do banking já começou.</h2>
+          <p>Uma experiência premium, segura e construída para acompanhar cada fase da sua vida financeira.</p>
+          {!isAuthenticated && <Link to="/register" className="btn-primary">Abrir minha conta <ArrowRight className="h-4 w-4" /></Link>}
         </div>
       </section>
     </main>

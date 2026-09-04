@@ -13,17 +13,14 @@
   }
   body {
     @apply bg-ink-950 text-ink-100 font-sans;
-    background-image:
-      radial-gradient(1100px 600px at -10% -20%, rgba(12, 50, 142, 0.25), transparent 60%),
-      radial-gradient(900px 500px at 110% 110%, rgba(212, 155, 28, 0.10), transparent 60%),
-      linear-gradient(180deg, #050b1c 0%, #0b0f1c 100%);
+    background: #020711;
     min-height: 100vh;
     width: 100%;
     min-width: 0;
     overflow-x: hidden;
   }
   #root { width: 100%; min-width: 0; min-height: 100vh; }
-  ::selection { @apply bg-gold-400/30 text-white; }
+  ::selection { @apply bg-bravus-500/40 text-white; }
   h1, h2, h3, h4 { @apply font-display tracking-tight; }
   /* number rendering */
   .tabular-nums { font-variant-numeric: tabular-nums; }
@@ -33,7 +30,7 @@ html.native-app,
 html.native-app body,
 body.native-app {
   min-height: 100dvh;
-  background: #050b1c;
+  background: #020711;
   overscroll-behavior-y: none;
 }
 
@@ -64,8 +61,8 @@ html.native-app #root {
 }
 
 .native-app .card-premium {
-  background: #101727;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  background: #07111f;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.44);
 }
 
 .native-app .blur-3xl {
@@ -103,7 +100,7 @@ html.native-app #root {
   }
 
   .glass {
-    @apply bg-white/[0.04] backdrop-blur-xl border border-white/10;
+    @apply border border-white/10 bg-[#07111f]/90 backdrop-blur-xl;
   }
 
   .card-premium {
@@ -118,9 +115,9 @@ html.native-app #root {
            focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-ink-950;
   }
   .btn-primary {
-    @apply btn bg-gradient-gold text-bravus-950 shadow-gold
-           hover:brightness-110 hover:shadow-[0_10px_40px_-8px_rgba(238,203,84,0.55)]
-           focus:ring-gold-400;
+    @apply btn bg-bravus-500 text-white shadow-gold
+           hover:bg-bravus-400 hover:shadow-[0_12px_42px_-12px_rgba(0,102,255,0.8)]
+           focus:ring-bravus-300;
   }
   .btn-secondary {
     @apply btn bg-white/5 text-white border border-white/15
@@ -141,15 +138,15 @@ html.native-app #root {
   .form-input {
     @apply w-full px-4 py-3 rounded-xl bg-white/[0.04] border border-white/10
            text-white placeholder-ink-400
-           focus:outline-none focus:border-gold-400/60 focus:bg-white/[0.07]
-           focus:ring-2 focus:ring-gold-400/20
+           focus:outline-none focus:border-bravus-400/70 focus:bg-white/[0.07]
+           focus:ring-2 focus:ring-bravus-400/20
            transition-all duration-200;
   }
   .input-premium {
     @apply w-full px-4 py-3 rounded-xl bg-white/[0.04] border border-white/10
            text-white placeholder-ink-400
-           focus:outline-none focus:border-gold-400/60 focus:bg-white/[0.07]
-           focus:ring-2 focus:ring-gold-400/20
+           focus:outline-none focus:border-bravus-400/70 focus:bg-white/[0.07]
+           focus:ring-2 focus:ring-bravus-400/20
            transition-all duration-200;
   }
   select.input-premium option {
@@ -168,7 +165,7 @@ html.native-app #root {
   .pill {
     @apply inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full;
   }
-  .pill-gold { @apply pill bg-gold-400/15 text-gold-200 border border-gold-400/25; }
+  .pill-gold { @apply pill border border-bravus-400/30 bg-bravus-500/15 text-bravus-200; }
   .pill-green { @apply pill bg-emerald-400/15 text-emerald-200 border border-emerald-400/25; }
   .pill-red { @apply pill bg-red-400/15 text-red-200 border border-red-400/25; }
 
@@ -188,10 +185,7 @@ html.native-app #root {
 
   /* Hero gradient text */
   .gradient-text {
-    background: linear-gradient(135deg, #ffffff 0%, #eecb54 60%, #d49b1c 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    color: #f3f6fa;
   }
 }
 
@@ -208,101 +202,370 @@ html.native-app #root {
 
 /* ====== Scrollbar ====== */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: #0b0f1c; }
-::-webkit-scrollbar-thumb { background: #2b3247; border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: #3f475c; }
+::-webkit-scrollbar-track { background: #020711; }
+::-webkit-scrollbar-thumb { background: #1b2b45; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #28518a; }
 
-/* Authenticated accounts use a white canvas while retaining the blue action language. */
-body.account-light-page {
-  color: #0b1739;
-  background: #f7faff;
-  background-image: none;
+/* Authenticated surfaces use the same Vantyx Obsidian language as the app references. */
+body.account-obsidian-page {
+  color: #f3f6fa;
+  background: #020711;
 }
 
-body.account-light-page main {
-  min-height: calc(100dvh - 4rem);
+body.account-obsidian-page main {
+  min-height: calc(100dvh - 5rem);
 }
 
-body.account-light-page header {
-  background-color: #07152f !important;
+body.account-obsidian-page header {
+  background-color: rgba(2, 7, 17, 0.97) !important;
 }
 
-body.account-light-page main .bank-identity-card {
-  color: #0b1739;
-  background-color: #ffffff !important;
-  background-image: none !important;
-  border-color: #dbe7f7 !important;
-  box-shadow: 0 18px 44px rgba(15, 49, 105, 0.1);
+body.account-obsidian-page main .bank-identity-card,
+body.account-obsidian-page main .glass,
+body.account-obsidian-page main .card-premium,
+body.account-obsidian-page main [class*="bg-surface-"] {
+  color: #f3f6fa;
+  background-color: #07111f !important;
+  border-color: rgba(149, 166, 193, 0.2) !important;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.38);
 }
 
-body.account-light-page main .glass,
-body.account-light-page main .card-premium,
-body.account-light-page main [class*="bg-surface-"],
-body.account-light-page main [class*="bg-white/"] {
-  color: #0b1739;
-  background-color: #ffffff !important;
-  border-color: #dbe7f7 !important;
-  box-shadow: 0 12px 32px rgba(15, 49, 105, 0.08);
+body.account-obsidian-page main input,
+body.account-obsidian-page main select,
+body.account-obsidian-page main textarea,
+body.account-obsidian-page main .form-input,
+body.account-obsidian-page main .input-premium {
+  color: #f7f9fc !important;
+  background-color: #050d19 !important;
+  border-color: rgba(149, 166, 193, 0.25) !important;
 }
 
-body.account-light-page main [class*="text-white"],
-body.account-light-page main [class*="text-ink-100"],
-body.account-light-page main [class*="text-ink-200"] {
-  color: #0b1739 !important;
+body.account-obsidian-page main input:focus,
+body.account-obsidian-page main select:focus,
+body.account-obsidian-page main textarea:focus {
+  border-color: #2f8cff !important;
+  box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.16);
 }
 
-body.account-light-page main [class*="text-ink-300"],
-body.account-light-page main [class*="text-ink-400"] {
-  color: #52627a !important;
+body.account-obsidian-page main select option {
+  color: #f7f9fc;
+  background: #07111f;
 }
 
-body.account-light-page main [class*="border-white/"] {
-  border-color: #dbe7f7 !important;
-}
-
-body.account-light-page main input,
-body.account-light-page main select,
-body.account-light-page main textarea,
-body.account-light-page main .form-input,
-body.account-light-page main .input-premium {
-  color: #0b1739 !important;
-  background-color: #ffffff !important;
-  border-color: #b9cce7 !important;
-}
-
-body.account-light-page main input::placeholder,
-body.account-light-page main textarea::placeholder {
-  color: #7a899d !important;
-}
-
-body.account-light-page main select option {
-  color: #0b1739;
-  background: #ffffff;
-}
-
-body.account-light-page main button:not([class*="bg-red"]):not([class*="text-red"]),
-body.account-light-page main .btn-primary,
-body.account-light-page main .btn-secondary,
-body.account-light-page main .btn-ghost {
+body.account-obsidian-page main .btn-primary {
   color: #ffffff !important;
-  background-color: #0b4fc4 !important;
+  background-color: #0066ff !important;
   background-image: none !important;
-  border-color: #0b4fc4 !important;
-  box-shadow: 0 8px 20px rgba(11, 79, 196, 0.18);
+  border-color: #1775ff !important;
+  box-shadow: 0 12px 30px rgba(0, 102, 255, 0.28);
 }
 
-body.account-light-page main button:not([class*="bg-red"]):not([class*="text-red"]):hover,
-body.account-light-page main .btn-primary:hover,
-body.account-light-page main .btn-secondary:hover,
-body.account-light-page main .btn-ghost:hover {
-  background-color: #083b94 !important;
+body.account-obsidian-page main .btn-primary:hover {
+  background-color: #2f8cff !important;
 }
 
-body.account-light-page main .bank-identity-card button [class*="text-white"] {
-  color: #ffffff !important;
+body.account-obsidian-page main .btn-secondary,
+body.account-obsidian-page main .btn-ghost {
+  color: #f3f6fa !important;
+  background-color: #0a1526 !important;
+  background-image: none !important;
+  border-color: rgba(149, 166, 193, 0.24) !important;
+  box-shadow: none;
 }
 
-body.account-light-page main [class*="text-gold-"],
-body.account-light-page main [class*="text-amber-"] {
-  color: #0b4fc4 !important;
+body.account-obsidian-page main [class*="text-gold-"],
+body.account-obsidian-page main [class*="text-amber-"] {
+  color: #70b2ff !important;
+}
+
+body.account-obsidian-page main [class*="border-gold-"],
+body.account-obsidian-page main [class*="border-amber-"] {
+  border-color: rgba(47, 140, 255, 0.38) !important;
+}
+
+body.account-obsidian-page main [class*="bg-gold-"],
+body.account-obsidian-page main [class*="bg-amber-"] {
+  background-color: rgba(0, 102, 255, 0.16) !important;
+}
+
+/* Vantyx Obsidian public experience */
+.vantyx-obsidian-home {
+  overflow: hidden;
+  background: #020711;
+}
+
+.obsidian-hero {
+  position: relative;
+  border-bottom: 1px solid rgba(149, 166, 193, 0.12);
+}
+
+.obsidian-hero-grid {
+  display: grid;
+  min-height: min(820px, calc(100dvh - 5rem));
+  align-items: center;
+  gap: 3rem;
+  padding-top: 4.5rem;
+  padding-bottom: 4.5rem;
+}
+
+.obsidian-hero-copy {
+  position: relative;
+  z-index: 2;
+}
+
+.obsidian-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #70b2ff;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+}
+
+.obsidian-hero-copy h1 {
+  max-width: 760px;
+  margin-top: 1.4rem;
+  color: #f7f9fc;
+  font-size: clamp(2.75rem, 6vw, 5.6rem);
+  font-weight: 600;
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+}
+
+.obsidian-hero-copy h1 span {
+  color: #b9c3d2;
+}
+
+.obsidian-hero-copy > p {
+  max-width: 620px;
+  margin-top: 1.8rem;
+  color: #adb8c8;
+  font-size: clamp(1rem, 1.5vw, 1.18rem);
+  line-height: 1.75;
+}
+
+.obsidian-actions,
+.obsidian-assurances {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+}
+
+.obsidian-actions { margin-top: 2rem; }
+
+.obsidian-assurances {
+  margin-top: 2.4rem;
+  color: #7f8ca2;
+  font-size: 0.78rem;
+}
+
+.obsidian-assurances span,
+.obsidian-copy-panel li,
+.obsidian-security-grid span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.obsidian-assurances svg,
+.obsidian-copy-panel li svg,
+.obsidian-security-grid svg { color: #2f8cff; }
+
+.obsidian-hero-media {
+  position: relative;
+  overflow: hidden;
+  max-height: 700px;
+  border: 1px solid rgba(149, 166, 193, 0.18);
+  border-radius: 1.5rem;
+  background: #050d19;
+  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.52), 0 0 44px rgba(0, 102, 255, 0.12);
+}
+
+.obsidian-hero-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: 700px;
+  object-fit: cover;
+  object-position: 60% center;
+}
+
+.obsidian-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid rgba(149, 166, 193, 0.14);
+  border-radius: 1rem;
+  background: #07111f;
+  transform: translateY(-1px);
+}
+
+.obsidian-metric {
+  display: flex;
+  min-height: 110px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid rgba(149, 166, 193, 0.12);
+  text-align: center;
+}
+
+.obsidian-metric:nth-child(2n) { border-right: 0; }
+.obsidian-metric:nth-child(-n+2) { border-bottom: 1px solid rgba(149, 166, 193, 0.12); }
+.obsidian-metric strong { color: #2f8cff; font-family: "Space Grotesk", sans-serif; font-size: 1.75rem; font-weight: 500; }
+.obsidian-metric span { margin-top: 0.25rem; color: #7f8ca2; font-size: 0.68rem; letter-spacing: 0.2em; text-transform: uppercase; }
+
+.obsidian-section { padding-top: 7.5rem; padding-bottom: 2rem; }
+.obsidian-section-heading { max-width: 760px; }
+.obsidian-section-heading h2,
+.obsidian-copy-panel h2,
+.obsidian-security-copy h2,
+.obsidian-closing-copy h2 {
+  margin-top: 1rem;
+  color: #f7f9fc;
+  font-size: clamp(2rem, 4vw, 3.6rem);
+  font-weight: 500;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+}
+.obsidian-section-heading p,
+.obsidian-copy-panel > p,
+.obsidian-security-copy > p,
+.obsidian-closing-copy > p {
+  margin-top: 1rem;
+  color: #8f9db0;
+  line-height: 1.75;
+}
+
+.obsidian-feature-grid {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 3rem;
+}
+
+.obsidian-feature-card {
+  min-height: 240px;
+  padding: 1.6rem;
+  border: 1px solid rgba(149, 166, 193, 0.14);
+  border-radius: 1rem;
+  background: #07111f;
+  transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+.obsidian-feature-card:hover { transform: translateY(-3px); border-color: rgba(47, 140, 255, 0.45); box-shadow: 0 22px 55px rgba(0, 0, 0, 0.35); }
+.obsidian-icon { display: inline-flex; height: 2.8rem; width: 2.8rem; align-items: center; justify-content: center; border: 1px solid rgba(47, 140, 255, 0.35); border-radius: 999px; background: rgba(0, 102, 255, 0.1); color: #70b2ff; }
+.obsidian-feature-card h3 { margin-top: 1.4rem; color: #f3f6fa; font-size: 1.1rem; font-weight: 600; }
+.obsidian-feature-card p { margin-top: 0.75rem; color: #7f8ca2; font-size: 0.9rem; line-height: 1.7; }
+
+.obsidian-split-section {
+  display: grid;
+  align-items: center;
+  gap: 2.5rem;
+  padding-top: 7rem;
+}
+
+.obsidian-media-panel {
+  overflow: hidden;
+  border: 1px solid rgba(149, 166, 193, 0.16);
+  border-radius: 1.25rem;
+  background: #050d19;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.45);
+}
+.obsidian-media-panel img { display: block; width: 100%; height: 100%; max-height: 680px; object-fit: cover; }
+.obsidian-mobile-panel img { object-position: center 45%; }
+.obsidian-copy-panel { padding: 1rem 0; }
+.obsidian-copy-panel ul { display: grid; gap: 0.85rem; margin: 1.8rem 0 2rem; color: #b9c3d2; font-size: 0.9rem; }
+
+.obsidian-security-section {
+  display: grid;
+  gap: 2.5rem;
+  margin-top: 7rem;
+  padding-top: 3.25rem;
+  padding-bottom: 3.25rem;
+  border-top: 1px solid rgba(149, 166, 193, 0.14);
+  border-bottom: 1px solid rgba(149, 166, 193, 0.14);
+}
+.obsidian-security-grid { display: grid; gap: 0.8rem; }
+.obsidian-security-grid span { min-height: 72px; padding: 1rem; border: 1px solid rgba(149, 166, 193, 0.14); border-radius: 0.85rem; background: #07111f; color: #b9c3d2; font-size: 0.86rem; }
+
+.obsidian-closing {
+  position: relative;
+  min-height: 560px;
+  overflow: hidden;
+  margin-top: 7rem;
+  border: 1px solid rgba(149, 166, 193, 0.16);
+  border-radius: 1.25rem;
+  background: #020711;
+}
+.obsidian-closing > img { position: absolute; inset: 0; height: 100%; width: 100%; object-fit: cover; opacity: 0.52; }
+.obsidian-closing::after { content: ""; position: absolute; inset: 0; background: rgba(2, 7, 17, 0.68); }
+.obsidian-closing-copy { position: relative; z-index: 1; display: flex; min-height: 560px; max-width: 600px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 2rem; }
+.obsidian-closing-copy > img { width: min(260px, 70vw); height: auto; margin-bottom: 0.5rem; }
+.obsidian-closing-copy .btn-primary { margin-top: 2rem; }
+
+@media (min-width: 768px) {
+  .obsidian-feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .obsidian-security-section { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); align-items: center; }
+  .obsidian-security-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .obsidian-closing-copy { padding: 4rem; }
+}
+
+@media (min-width: 1024px) {
+  .obsidian-hero-grid { grid-template-columns: minmax(0, 1.02fr) minmax(420px, 0.98fr); }
+  .obsidian-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .obsidian-metric:nth-child(n) { border-bottom: 0; border-right: 1px solid rgba(149, 166, 193, 0.12); }
+  .obsidian-metric:last-child { border-right: 0; }
+  .obsidian-feature-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .obsidian-split-section { grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr); gap: 5rem; }
+  .obsidian-split-reverse .obsidian-media-panel { order: 2; }
+  .obsidian-split-reverse .obsidian-copy-panel { order: 1; }
+}
+
+@media (max-width: 640px) {
+  .obsidian-hero-grid { min-height: auto; padding-top: 3.25rem; padding-bottom: 3.25rem; }
+  .obsidian-hero-copy h1 { font-size: clamp(2.65rem, 13vw, 4rem); }
+  .obsidian-actions { flex-direction: column; }
+  .obsidian-actions .btn-primary,
+  .obsidian-actions .btn-secondary { width: 100%; }
+  .obsidian-assurances { display: grid; }
+  .obsidian-hero-media { max-height: 520px; border-radius: 1rem; }
+  .obsidian-hero-media img { min-height: 500px; object-position: 65% center; }
+  .obsidian-section { padding-top: 5rem; }
+  .obsidian-split-section { padding-top: 5rem; }
+  .obsidian-media-panel img { max-height: 520px; }
+  .obsidian-closing { min-height: 500px; margin-top: 5rem; border-radius: 1rem; }
+  .obsidian-closing-copy { min-height: 500px; }
+  body.vantyx-user-dashboard-page .vantyx-nav,
+  body.vantyx-user-dashboard-page .site-footer { display: none; }
+  body.account-obsidian-page main.vantyx-account-shell { padding-top: 0.8rem; padding-bottom: 7rem; }
+  .vantyx-account-header { min-height: 3.5rem; }
+  .vantyx-account-header .vantyx-account-logo img { height: 2.25rem; max-width: 9.5rem; }
+  .vantyx-account-shell > .bank-identity-card { display: none; }
+  .vantyx-credit-metrics { display: none; }
+  .vantyx-account-shell > .grid.lg\:grid-cols-3 { gap: 0.75rem; }
+  .vantyx-account-shell > .grid.lg\:grid-cols-3 > .card-premium { border-radius: 1rem; }
+  .vantyx-quick-actions { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem !important; }
+  .vantyx-quick-actions button { min-height: 3.75rem; min-width: 0; flex-direction: column; gap: 0.25rem; padding: 0.55rem 0.25rem !important; font-size: 0.72rem; }
+  .vantyx-dashboard-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem !important; }
+  .vantyx-dashboard-stats > .card-premium { min-width: 0; flex-direction: column; align-items: flex-start; gap: 0.45rem; padding: 0.75rem; border-radius: 1rem; }
+  .vantyx-dashboard-stats > .card-premium > div:first-child { width: 2rem; height: 2rem; border-radius: 0.65rem; }
+  .vantyx-dashboard-stats .font-display { font-size: 0.8rem; line-height: 1.1; }
+  .vantyx-bottom-nav {
+    position: fixed;
+    right: 0.75rem;
+    bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+    left: 0.75rem;
+    z-index: 45;
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.25rem !important;
+    margin: 0 !important;
+    padding: 0.45rem;
+    border: 1px solid rgba(149, 166, 193, 0.2);
+    border-radius: 1rem;
+    background: rgba(5, 13, 25, 0.96);
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(18px);
+  }
+  .vantyx-bottom-nav button { min-width: 0; flex-direction: column; gap: 0.2rem; padding: 0.5rem 0.2rem; font-size: 0.64rem; line-height: 1; }
 }

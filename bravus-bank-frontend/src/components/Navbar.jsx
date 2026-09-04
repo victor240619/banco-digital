@@ -13,6 +13,13 @@ export default function Navbar({ nativeApp = false }) {
   const user = authService.getCurrentUser();
   const isAdmin = authService.hasRole('ROLE_ADMIN');
   const isAuthenticated = authService.isAuthenticated();
+  const publicLinks = [
+    ['Conta pessoal', '/produto/conta-digital'],
+    ['Empresas', '/produto/transferencias'],
+    ['Investimentos', '/produto/investimentos'],
+    ['Empresa', '/empresa/sobre'],
+    ['Ajuda', '/canais-atendimento'],
+  ];
 
   const handleLogout = async () => {
     let logoutStatus = { serverRevoked: true };
@@ -34,8 +41,8 @@ export default function Navbar({ nativeApp = false }) {
       className={cn(
         'px-3 py-2 rounded-lg text-sm font-medium transition-colors',
         location.pathname === to
-          ? 'text-white bg-white/10'
-          : 'text-ink-200 hover:text-white hover:bg-white/5'
+          ? 'bg-white/[0.08] text-white'
+          : 'text-ink-300 hover:bg-white/[0.05] hover:text-white'
       )}
     >
       {children}
@@ -50,7 +57,7 @@ export default function Navbar({ nativeApp = false }) {
       <header className="native-app-header sticky top-0 z-40 border-b border-white/10 bg-ink-950">
         <div className="native-safe-top flex min-h-16 items-center justify-between gap-3 px-3">
           <Link to={home} className="min-w-0 shrink">
-            <Logo className="[&>span]:h-10 [&>span]:w-10" />
+            <Logo />
           </Link>
           <button
             type="button"
@@ -67,15 +74,15 @@ export default function Navbar({ nativeApp = false }) {
   }
 
   return (
-    <header className="sticky top-0 z-40 backdrop-blur-xl bg-ink-950/70 border-b border-white/5">
+    <header className="vantyx-nav sticky top-0 z-40 border-b border-white/[0.08] bg-ink-950/95 backdrop-blur-xl">
       <div className="container-app">
-        <div className="flex h-16 items-center justify-between">
+        <div className="flex h-20 items-center justify-between gap-6">
           <Link to="/" className="shrink-0">
             <Logo />
           </Link>
 
           {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden flex-1 items-center justify-end gap-1 md:flex">
             {isAuthenticated ? (
               <>
                 {isAdmin ? (
@@ -104,8 +111,11 @@ export default function Navbar({ nativeApp = false }) {
               </>
             ) : (
               <>
+                <div className="mr-auto flex items-center gap-0.5 lg:mx-auto">
+                  {publicLinks.map(([label, to]) => <NavLink key={to} to={to}>{label}</NavLink>)}
+                </div>
                 <NavLink to="/login">Entrar</NavLink>
-                <Link to="/register" className="btn-primary !py-2 !px-4 ml-2">
+                <Link to="/register" className="btn-primary ml-2 !rounded-lg !px-5 !py-2.5">
                   Abrir conta
                 </Link>
               </>
@@ -136,6 +146,7 @@ export default function Navbar({ nativeApp = false }) {
               </>
             ) : (
               <>
+                {publicLinks.map(([label, to]) => <NavLink key={to} to={to}>{label}</NavLink>)}
                 <NavLink to="/login">Entrar</NavLink>
                 <Link to="/register" className="btn-primary mt-2">Abrir conta</Link>
               </>

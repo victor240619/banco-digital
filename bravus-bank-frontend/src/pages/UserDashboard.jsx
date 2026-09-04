@@ -6,7 +6,7 @@ import {
   Send, Landmark, CreditCard, Percent, Globe2,
   FileText, Barcode, CalendarDays, LineChart, UserCheck, UsersRound,
   ClipboardCheck, ShieldCheck, Smartphone, Building2, List, Grid3X3,
-  Download, Share2, ArrowLeft, Menu, X, Home, User, KeyRound, LogOut,
+  Download, Share2, ArrowLeft, Menu, X, Home, User, KeyRound, LogOut, Bell,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -14,6 +14,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import { userService, authService } from '../services/api';
 import BankIdentityCard from '../components/BankIdentityCard';
+import Logo from '../components/Logo';
 import {
   formatCurrency, formatDate, getTransactionTypeLabel,
 } from '../utils/helpers';
@@ -251,7 +252,7 @@ const transactionCounterparty = (tx) => {
   return { label, name, document, account, bank, detail };
 };
 
-const VANTYX_FULL_LOGO_SRC = '/brand/vantyx-bank-logo.png';
+const VANTYX_FULL_LOGO_SRC = '/brand/vantyx-bank-logo-document.png';
 
 const escapeHtml = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -727,6 +728,10 @@ export default function UserDashboard() {
   const navigate = useNavigate();
 
   useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    document.body.classList.add('vantyx-user-dashboard-page');
+    return () => document.body.classList.remove('vantyx-user-dashboard-page');
+  }, []);
   useEffect(() => {
     const route = routeStateForPath(location.pathname);
     setTab(route.tab);
@@ -1224,7 +1229,9 @@ export default function UserDashboard() {
       onClick={() => navigateToTab(id)}
       className={cn(
         'inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition',
-        tab === id ? 'bg-white/10 text-white shadow-card' : 'text-ink-300 hover:text-white hover:bg-white/5'
+        tab === id
+          ? 'bg-bravus-500/20 text-bravus-200 ring-1 ring-bravus-400/35 shadow-card'
+          : 'text-ink-300 hover:text-white hover:bg-white/5'
       )}
     >
       <Icon className="h-4 w-4" /> {label}
@@ -1232,8 +1239,19 @@ export default function UserDashboard() {
   );
 
   return (
-    <main className="container-app native-safe-bottom min-w-0 space-y-4 py-4 sm:space-y-6 sm:py-8 lg:py-10">
-      <div className="relative z-30 flex justify-end" ref={accountMenuRef}>
+    <main className="vantyx-account-shell container-app native-safe-bottom min-w-0 space-y-4 py-4 sm:space-y-6 sm:py-8 lg:py-10">
+      <div className="vantyx-account-header relative z-30 flex items-center justify-between" ref={accountMenuRef}>
+        <Logo className="vantyx-account-logo" />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-ink-200"
+            onClick={() => setSuccess('Você não tem novas notificações.')}
+            aria-label="Notificações"
+            title="Notificações"
+          >
+            <Bell className="h-5 w-5" />
+          </button>
         <button
           type="button"
           className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] text-ink-100 transition hover:bg-white/[0.12]"
@@ -1245,6 +1263,7 @@ export default function UserDashboard() {
         >
           {accountMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
+        </div>
 
         <AnimatePresence>
           {accountMenuOpen && (
@@ -1273,7 +1292,7 @@ export default function UserDashboard() {
                       }}
                       className={cn(
                         'flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm transition',
-                        active ? 'bg-amber-300/15 text-amber-100' : 'text-ink-200 hover:bg-white/[0.07] hover:text-white'
+                        active ? 'bg-bravus-500/15 text-bravus-100' : 'text-ink-200 hover:bg-white/[0.07] hover:text-white'
                       )}
                     >
                       <Icon className="h-4 w-4 shrink-0" />
@@ -1343,7 +1362,7 @@ export default function UserDashboard() {
           </div>
           <div className="mt-2 text-xs text-ink-400 font-mono">Conta {accountNumber}</div>
 
-          <div className="mt-5 grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          <div className="vantyx-credit-metrics mt-5 grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
               <div className="flex items-center gap-2 text-xs text-ink-300">
                 <CreditCard className="h-4 w-4 text-bravus-200" /> Crédito disponível
@@ -1387,7 +1406,7 @@ export default function UserDashboard() {
             </div>
           </div>
 
-          <div className="mt-6 flex flex-wrap gap-2">
+          <div className="vantyx-quick-actions mt-6 flex flex-wrap gap-2">
             <button onClick={() => navigateToTab('deposit')} className="btn-secondary"><ArrowDownToLine className="h-4 w-4" /> Depositar</button>
             <button onClick={() => navigateToTab('withdraw')} className="btn-secondary"><ArrowUpFromLine className="h-4 w-4" /> Sacar</button>
             <button onClick={() => navigateToTab('transfer')} className="btn-primary"><ArrowRightLeft className="h-4 w-4" /> Transferir</button>
@@ -1395,7 +1414,7 @@ export default function UserDashboard() {
         </motion.div>
 
         {/* Stats stack */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-1 gap-4">
+        <div className="vantyx-dashboard-stats grid sm:grid-cols-2 lg:grid-cols-1 gap-4">
           <div className="card-premium p-5 flex items-center gap-4">
             <div className="h-11 w-11 rounded-xl bg-emerald-400/15 text-emerald-300 inline-flex items-center justify-center">
               <TrendingUp className="h-5 w-5" />
@@ -1461,9 +1480,9 @@ export default function UserDashboard() {
 
       {/* Tabs */}
       {isDashboardHome && (
-        <div className="mt-8 flex flex-wrap gap-2">
-        <Tab id="overview" label="Visão geral" icon={Wallet} />
-        <Tab id="deposit" label="Depósito" icon={ArrowDownToLine} />
+        <div className="vantyx-bottom-nav mt-8 flex flex-wrap gap-2">
+        <Tab id="overview" label="Início" icon={Wallet} />
+        <Tab id="deposit" label="Receber" icon={ArrowDownToLine} />
         <Tab id="withdraw" label="Saque" icon={ArrowUpFromLine} />
         <Tab id="transfer" label="Transferência" icon={ArrowRightLeft} />
         <Tab id="statements" label="Extratos" icon={FileText} />
@@ -1488,8 +1507,8 @@ export default function UserDashboard() {
                   <AreaChart data={chartData}>
                     <defs>
                       <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#eecb54" stopOpacity={0.5} />
-                        <stop offset="100%" stopColor="#eecb54" stopOpacity={0} />
+                        <stop offset="0%" stopColor="#0066ff" stopOpacity={0.5} />
+                        <stop offset="100%" stopColor="#0066ff" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid stroke="#ffffff10" vertical={false} />
@@ -1500,7 +1519,7 @@ export default function UserDashboard() {
                       labelStyle={{ color: '#fff' }}
                       formatter={(v) => [`R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'Saldo']}
                     />
-                    <Area type="monotone" dataKey="saldo" stroke="#eecb54" strokeWidth={2} fill="url(#g1)" />
+                    <Area type="monotone" dataKey="saldo" stroke="#2f8cff" strokeWidth={2} fill="url(#g1)" />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -2096,11 +2115,11 @@ function DedicatedPageHeader({ page, accountNumber, onBack }) {
       >
         <ArrowLeft className="h-5 w-5" />
       </button>
-      <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-gold text-[#05122f]">
+      <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-bravus-500 text-white">
         <Icon className="h-6 w-6" />
       </span>
       <div className="min-w-0">
-        <div className="text-xs uppercase tracking-[0.2em] text-amber-300/80">Página bancária</div>
+        <div className="text-xs uppercase tracking-[0.2em] text-bravus-300/90">Página bancária</div>
         <h1 className="mt-1 truncate font-display text-2xl font-semibold text-white">{page?.label || 'Minha Conta'}</h1>
         <div className="mt-1 truncate text-xs font-mono text-ink-400">Conta {accountNumber || '-'}</div>
       </div>
@@ -2119,12 +2138,12 @@ function BankingAccessPanel({
     <section className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
       <div className="grid lg:grid-cols-[1fr_auto] gap-4 border-b border-white/10 bg-white/[0.06] px-5 py-5">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.24em] text-amber-300/80">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.24em] text-bravus-300/90">
             <Building2 className="h-4 w-4" />
             Acesso bancario
           </div>
           <div className="mt-3 text-2xl font-display font-semibold">
-            Ola, <span className="text-amber-200">{companyName}</span>
+            Ola, <span className="text-bravus-200">{companyName}</span>
           </div>
           <div className="mt-3 grid gap-1 text-sm text-ink-300 sm:grid-cols-2 lg:grid-cols-4">
             <span>Banco {account.codigoBanco || profile?.codigoBanco || '999'}</span>
@@ -2147,7 +2166,7 @@ function BankingAccessPanel({
           <button
             type="button"
             className={cn('inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm transition',
-              view === 'icons' ? 'bg-gradient-gold text-[#05122f]' : 'text-ink-300 hover:text-white')}
+            view === 'icons' ? 'bg-bravus-500 text-white' : 'text-ink-300 hover:text-white')}
             onClick={() => setView('icons')}
           >
             <Grid3X3 className="h-4 w-4" />
@@ -2197,8 +2216,8 @@ function ModuleIconButton({ module, active, onClick }) {
       <span className={cn(
         'inline-flex h-16 w-16 items-center justify-center rounded-full border shadow-lg transition',
         active || module.accent
-          ? 'border-amber-300/40 bg-gradient-gold text-[#05122f] shadow-amber-500/20'
-          : 'border-white/10 bg-white/[0.07] text-amber-200 group-hover:bg-white/[0.12]'
+          ? 'border-bravus-300/45 bg-bravus-500 text-white shadow-bravus-500/25'
+          : 'border-white/10 bg-white/[0.07] text-bravus-200 group-hover:bg-white/[0.12]'
       )}>
         <Icon className="h-7 w-7" />
       </span>
@@ -2219,13 +2238,13 @@ function ModuleListButton({ module, active, onClick }) {
       className={cn(
         'flex min-h-[68px] items-center gap-3 rounded-xl border px-3 text-left transition',
         active
-          ? 'border-amber-300/40 bg-amber-300/12'
+          ? 'border-bravus-300/45 bg-bravus-500/15'
           : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07]'
       )}
     >
       <span className={cn(
         'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full',
-        active || module.accent ? 'bg-gradient-gold text-[#05122f]' : 'bg-white/[0.08] text-amber-200'
+        active || module.accent ? 'bg-bravus-500 text-white' : 'bg-white/[0.08] text-bravus-200'
       )}>
         <Icon className="h-5 w-5" />
       </span>
