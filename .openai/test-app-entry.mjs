@@ -25,20 +25,29 @@ assert.equal(createAccountAppDetector()(browser({ navigator: { userAgent: 'Mozil
 assert.equal(createAccountAppDetector()(browser(), true), true);
 assert.equal(createAccountAppDetector()(browser({ navigator: { standalone: true } })), true, 'iOS home-screen install');
 assert.equal(createAccountAppDetector()(browser({ matchMedia: (query) => ({ matches: query === '(display-mode: standalone)' }) })), true);
-assert.equal(createAccountAppDetector()(browser({ navigator: { userAgent: 'Mozilla/5.0 (Linux; Android 14; Phone Build/123; wv) Chrome/140 Mobile' } })), true, 'legacy APK fallback');
+assert.equal(createAccountAppDetector()(browser({ navigator: { userAgent: 'Mozilla/5.0 (Linux; Android 14; Phone Build/123; wv) Chrome/140 Mobile' } })), false, 'search/social embedded browsers must retain the website');
+assert.equal(createAccountAppDetector()(browser({ matchMedia: (query) => ({ matches: query === '(display-mode: fullscreen)' }) })), false, 'fullscreen is not proof of an installed app');
 assert.equal(createAccountAppDetector()(browser({ navigator: { userAgent: 'Mozilla/5.0 VantyxBankApp' } })), true);
 const appBrowser = browser({ location: { pathname: '/app' } });
 const detector = createAccountAppDetector();
-assert.equal(detector(appBrowser), true);
-appBrowser.location.pathname = '/empresa/sobre';
-assert.equal(detector(appBrowser), true, 'SPA navigation must not leave account-only mode');
-assert.equal(createAccountAppDetector()(appBrowser), true, 'reload in same tab preserves account-only mode');
+appBrowser.sessionStorage.setItem('vantyx.account-app', '1');
+for (const path of ['/app', '/login', '/register', '/', '/empresa/sobre']) {
+  appBrowser.location.pathname = path;
+  assert.equal(detector(appBrowser), false, 'neither a link nor the obsolete stored flag can activate app mode');
+  assert.equal(createAccountAppDetector()(appBrowser), false, 'reload must still be a normal website');
+}
+const installedBrowser = browser({ navigator: { standalone: true } });
+for (const path of ['/app', '/login', '/register', '/', '/empresa/sobre']) {
+  installedBrowser.location.pathname = path;
+  assert.equal(createAccountAppDetector()(installedBrowser), true, 'installed app remains isolated on every route');
+}
 const unavailableStorage = browser({ location: { pathname: '/app' } });
 Object.defineProperty(unavailableStorage, 'sessionStorage', { get() { throw Error('disabled'); } });
 const noStorageDetector = createAccountAppDetector();
-assert.equal(noStorageDetector(unavailableStorage), true);
+assert.equal(noStorageDetector(unavailableStorage), false);
 unavailableStorage.location.pathname = '/';
-assert.equal(noStorageDetector(unavailableStorage), true);
+assert.equal(noStorageDetector(unavailableStorage), false);
+assert.equal(noStorageDetector(unavailableStorage, true), true, 'native app needs no storage flag');
 
 const states = [
   { authenticated: false, admin: false, identityEvidenceRequired: false, destination: '/login' },
@@ -138,6 +147,9 @@ assert.match(render('/login', true, states[2]), /data-redirect="\/dashboard"/);
 assert.match(render('/admin', true, states[2]), /data-redirect="\/dashboard"/);
 assert.match(render('/', false, anonymous), /data-page="\.\/pages\/Home"/);
 assert.match(render('/empresa/sobre', false, anonymous), /data-page="\.\/pages\/InstitutionalPage"/);
+for (const state of states) {
+  assert.match(render('/', detector(appBrowser), state), /data-page="\.\/pages\/Home"/, 'domain root remains institutional even after login');
+}
 
 const manifest = JSON.parse(await readFile(resolve(frontend, 'public/site.webmanifest'), 'utf8'));
 const config = JSON.parse(await readFile(resolve(frontend, 'capacitor.config.json'), 'utf8'));

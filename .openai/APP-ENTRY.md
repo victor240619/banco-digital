@@ -2,10 +2,12 @@
 
 - Native Android/iOS entry: `/app` on the existing production origin.
 - Installed web app entry: `/app`, retaining the original manifest identity `/`.
-- Native bridge initialization happens before rendering. Standalone iOS/PWA,
-  the app user-agent, and older Android WebViews also select account-only UI.
-- `/app` remembers presentation mode only within the current tab. It is not an
-  authentication flag and cannot grant a native API channel, role or account access.
+- Native bridge initialization happens before rendering (including legacy APKs).
+  Standalone iOS/PWA and the branded app user-agent also select account-only UI.
+- The domain root remains institutional in ordinary browsers, even after visiting
+  `/app`, login or registration. URLs, fullscreen, generic embedded browsers and
+  obsolete storage flags cannot activate app mode. No presentation flag is stored.
+- Presentation mode cannot grant a native API channel, role or account access.
 - App routes include login, account creation, password reset, identity completion
   and existing protected dashboards. Institutional routes are not registered in
   app mode; unknown routes return to login or the authenticated account.
@@ -33,6 +35,6 @@ that binary. A newly distributed native package must be rebuilt and signed with
 the original release key; do not substitute a debug key or new application ID.
 
 The preceding production source is
-`3a23f4de006abcc4edcfa22cdf5e674b108f5ffa`, Sites version 82. Restore that saved
+`87b991466226b2ea71b08930d82c7bf13618991b`, Sites version 83. Restore that saved
 version to roll back the web presentation. No schema, balances, credentials,
 account records, biometric evidence or server authorization is migrated here.
