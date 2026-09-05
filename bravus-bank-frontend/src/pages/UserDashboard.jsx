@@ -898,6 +898,9 @@ export default function UserDashboard() {
   const cents = (v) => Math.round(parseFloat(v) * 100);
 
   const submit = async (kind) => {
+    if (kind === 'deposit') {
+      return setError('Depósitos externos aguardam a integração de um provedor verificado. Informar um valor não gera crédito. Para receber agora, use uma transferência de outra conta Vantyx.');
+    }
     if ((kind === 'transfer' || kind === 'withdraw') && profile?.outboundOperationsEnabled === false) {
       if (kind === 'transfer') {
         setError('');
@@ -943,11 +946,8 @@ export default function UserDashboard() {
     }
     setSubmitting(true);
     try {
-      let message =
-        kind === 'deposit' ? 'Depósito realizado.' :
-        kind === 'withdraw' ? 'Saque realizado.' : 'Transferência enviada.';
+      let message = kind === 'withdraw' ? 'Saque realizado.' : 'Transferência enviada.';
 
-      if (kind === 'deposit') await userService.deposit(amountCentavos, form.description);
       if (kind === 'withdraw') await userService.withdraw(amountCentavos, form.description);
       if (kind === 'transfer' && form.transferMode === 'internal') {
         const { data } = await userService.transfer(
@@ -1598,7 +1598,9 @@ export default function UserDashboard() {
                     : activeModule === 'remittance'
                       ? 'Solicite remessa ou câmbio pelo fluxo de Money Services Business sujeito à licença CIMA.'
                       : 'Transfira entre contas Vantyx com liquidação interna no mesmo ledger.'
-                : 'Operação em conta corrente.'}
+                : tab === 'deposit'
+                  ? 'Depósitos externos aguardam um provedor de recebimento verificado. Nenhum valor digitado é creditado automaticamente. Você pode receber transferências de outras contas Vantyx.'
+                  : 'Operação em conta corrente.'}
             </p>
 
             <div className="space-y-4">
@@ -1829,12 +1831,12 @@ export default function UserDashboard() {
               </AnimatePresence>
 
               <button
-                disabled={submitting || (tab === 'transfer' && resolveLoading)}
+                disabled={tab === 'deposit' || submitting || (tab === 'transfer' && resolveLoading)}
                 onClick={() => submit(tab)}
                 className="btn-primary w-full"
               >
                 {submitting ? 'Processando...' : (
-                  tab === 'deposit' ? 'Confirmar depósito' :
+                  tab === 'deposit' ? 'Depósito externo indisponível' :
                   tab === 'withdraw' ? 'Confirmar saque' : `Confirmar ${transferOperationLabel}`
                 )}
               </button>

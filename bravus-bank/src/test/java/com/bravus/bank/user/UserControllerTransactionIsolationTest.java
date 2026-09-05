@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -35,6 +36,20 @@ class UserControllerTransactionIsolationTest {
     @AfterEach
     void clearSecurityContext() {
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void unverifiedDepositsNeverAccessRepositoriesOrCreditBalances() {
+        UserController controller = new UserController(userRepository, transactionRepository,
+                externalTransferRepository, persistentInternalTransferService, outboundOperationPolicy);
+        for (long amount : new long[] { 1L, 100000000000L, Long.MAX_VALUE }) {
+            ResponseEntity<?> response = controller.deposit(
+                    new UserController.TransactionRequest("DEPOSIT", amount, "unverified request", null));
+            assertEquals(409, response.getStatusCode().value());
+            assertEquals("DEPOSIT_PAYMENT_REQUIRED", ((java.util.Map<?, ?>) response.getBody()).get("code"));
+        }
+        verifyNoInteractions(userRepository, transactionRepository, externalTransferRepository,
+                persistentInternalTransferService, outboundOperationPolicy);
     }
 
     @Test

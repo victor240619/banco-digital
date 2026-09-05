@@ -1431,6 +1431,31 @@ assert.equal(persistence.data.immutableAccountControlEventCount, 7);
 assert.equal(persistence.data.accountControlAuditReconciled, true);
 assert.ok(database.audits.size >= 10, "persistent state changes must be audited");
 
+// An authenticated customer (or admin) cannot manufacture a deposit, including
+// forged provider fields, replayed requests, concurrent requests and large sums.
+const depositStateBefore = JSON.parse(database.stateRow.payload);
+const depositBodies = [
+  { amount: 100 }, { amount: 100000000000 }, { amountCentavos: 9007199254740991 },
+  { amount: -100 }, { amount: 0.1 }, { amount: "1e100" }, {},
+  { amount: 100, type: "DEPOSIT", provider: "stripe", status: "paid", verified: true, paymentId: "test-only-forged-id" },
+];
+for (const token of [changedPasswordLogin.data.token, finalAdminToken]) {
+  const attempts = await Promise.all(depositBodies.map(body => call(worker, "POST", "/user/deposit", {
+    token, body, headers: { "Idempotency-Key": "repeated-forged-deposit-test" },
+  })));
+  for (const attempt of attempts) {
+    assert.equal(attempt.response.status, 409);
+    assert.equal(attempt.data.code, "DEPOSIT_PAYMENT_REQUIRED");
+  }
+}
+assert.equal((await call(worker, "POST", "/user/deposit", { body: { amount: 100 } })).response.status, 401);
+const depositStateAfter = JSON.parse(database.stateRow.payload);
+for (const key of ["users", "transactions", "ledgerEntries", "externalTransfers", "masterCreditGrants"]) {
+  assert.deepEqual(depositStateAfter[key], depositStateBefore[key], `deposit attempts must not change ${key}`);
+}
+worker = await loadWorker("restart-after-rejected-deposits");
+assert.equal((await call(worker, "POST", "/user/deposit", { token: changedPasswordLogin.data.token, body: { amount: 100 } })).response.status, 409);
+
 const validStateRow = structuredClone(database.stateRow);
 const corruptedState = JSON.parse(validStateRow.payload);
 corruptedState.ledgerEntries.push({
@@ -1518,6 +1543,7 @@ assert.equal(healthyAfterCorruptionTests.data.accounting.ledgerReconciled, true)
 
 console.log(JSON.stringify({
   result: "ok",
+  unverifiedDepositsRejectedWithoutCredit: true,
   revision: database.stateRow.revision,
   audits: database.audits.size,
   ledgerEntries: database.ledgerEntries.size,

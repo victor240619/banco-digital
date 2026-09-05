@@ -3559,10 +3559,18 @@ async function handleApi(request) {
     return json(order);
   }
 
-  if (request.method === "POST" && ["/user/deposit", "/user/withdraw", "/user/transfer"].includes(path)) {
+  if (request.method === "POST" && path === "/user/deposit") {
+    return json({
+      code: "DEPOSIT_PAYMENT_REQUIRED",
+      status: "UNAVAILABLE",
+      message: "Deposito indisponivel: nenhum provedor de recebimento verificado esta ativo. Informar um valor nao gera credito. Voce pode receber uma transferencia de outra conta Vantyx.",
+    }, { status: 409, headers: { "cache-control": "no-store" } });
+  }
+
+  if (request.method === "POST" && ["/user/withdraw", "/user/transfer"].includes(path)) {
     const body = await request.json().catch(() => ({}));
     const amount = Number(body.amount || body.amountCentavos || 0);
-    if (!amount || amount <= 0) return badRequest("Digite um valor valido.", "INVALID_AMOUNT");
+    if (!Number.isSafeInteger(amount) || amount <= 0) return badRequest("Digite um valor valido em centavos inteiros.", "INVALID_AMOUNT");
     if (path === "/user/withdraw" && availableBalanceCentavos(user) < exactCentavos(amount, "withdraw_amount")) {
       return badRequest("Saldo disponivel insuficiente para concluir a operacao.", "INSUFFICIENT_AVAILABLE_BALANCE", {
         balanceCentavos: user.balance,
@@ -3699,17 +3707,13 @@ async function handleApi(request) {
         return badRequest(error.message, error.message);
       }
     }
-    if (path === "/user/deposit") {
-      user.balance += amount;
-    } else {
-      user.balance -= amount;
-      consumeCreditIfAvailable(user, amount);
-    }
+    user.balance -= amount;
+    consumeCreditIfAvailable(user, amount);
     if (destination) destination.balance += amount;
     const tx = {
       id: state.transactions.length + 1,
       username: user.username,
-      type: path === "/user/deposit" ? "DEPOSIT" : path === "/user/withdraw" ? "WITHDRAWAL" : "TRANSFER_OUT",
+      type: path === "/user/withdraw" ? "WITHDRAWAL" : "TRANSFER_OUT",
       amount,
       description: body.description || "Operacao ChatGPT Sites",
       destinationAccount: destination?.accountNumber || body.destinationAccount || null,

@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:password-reset-api-test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
@@ -25,6 +26,28 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class PasswordResetApiSecurityTest {
     @Autowired MockMvc mockMvc;
+
+    @Test
+    void unsafeProviderEndpointsAreClosedEvenForAuthenticatedUsersAndAdmins() throws Exception {
+        for (String path : new String[] { "/api/payments", "/api/payments/mp/pix", "/api/payments/mp/webhook", "/api/transfers", "/api/stripe/webhook" }) {
+            mockMvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                    .andExpect(status().isForbidden());
+            for (String role : new String[] { "USER", "ADMIN" }) {
+                mockMvc.perform(post(path).with(user("audit-fixture").roles(role))
+                                .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                        .andExpect(status().isForbidden());
+            }
+        }
+    }
+
+    @Test
+    void authenticatedDepositCannotCreateUnfundedCredit() throws Exception {
+        mockMvc.perform(post("/api/user/deposit").with(user("audit-fixture").roles("USER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"DEPOSIT\",\"amount\":100000000000}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DEPOSIT_PAYMENT_REQUIRED"));
+    }
 
     @Test
     void adminReviewIsForbiddenWithoutAuthentication() throws Exception {

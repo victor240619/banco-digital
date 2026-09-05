@@ -190,30 +190,12 @@ public class UserController {
     }
     
     @PostMapping("/deposit")
-    @Transactional
     public ResponseEntity<?> deposit(@RequestBody @Valid TransactionRequest request) {
-        if (!"DEPOSIT".equals(request.type())) {
-            return ResponseEntity.badRequest().body("Invalid transaction type");
-        }
-        
-        String username = SecurityContextHolder.getContext().getAuthentication().getName();
-        UserEntity user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("User not found"));
-        
-        // Update balance
-        user.setBalance(user.getBalance() + request.amount());
-        userRepository.save(user);
-        
-        // Create transaction record
-        TransactionEntity transaction = new TransactionEntity();
-        transaction.setUser(user);
-        transaction.setType("DEPOSIT");
-        transaction.setAmount(request.amount());
-        transaction.setDescription(request.description() != null ? request.description() : "Deposit");
-        transaction.setStatus("COMPLETED");
-        transactionRepository.save(transaction);
-        
-        return ResponseEntity.ok("Deposit successful. New balance: " + user.getBalance());
+        return ResponseEntity.status(409).body(Map.of(
+                "code", "DEPOSIT_PAYMENT_REQUIRED",
+                "status", "UNAVAILABLE",
+                "message", "Deposito indisponivel: nenhum provedor de recebimento verificado esta ativo. Informar um valor nao gera credito. Voce pode receber uma transferencia de outra conta Vantyx."
+        ));
     }
     
     @PostMapping("/withdraw")
