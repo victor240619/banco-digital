@@ -3,11 +3,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { authService } from '../services/api';
 import Logo from '../components/Logo';
-import { isMobileApp } from '../lib/appChannel';
+import { isAccountApp } from '../lib/appChannel';
 
 export default function Login() {
   const navigate = useNavigate();
-  const nativeApp = isMobileApp();
+  const nativeApp = isAccountApp();
   const [form, setForm] = useState({ username: '', password: '' });
   const [passwordChange, setPasswordChange] = useState(null);
   const [newPassword, setNewPassword] = useState('');

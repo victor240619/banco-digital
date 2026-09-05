@@ -1,12 +1,13 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { MotionConfig } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import ViewportAlert from './components/ViewportAlert';
 import { authService } from './services/api';
-import { isMobileApp } from './lib/appChannel';
+import { isAccountApp, isMobileApp } from './lib/appChannel';
+import { accountDestination } from './lib/accountApp';
 
 const Home = lazy(() => import('./pages/Home'));
 const Login = lazy(() => import('./pages/Login'));
@@ -61,25 +62,26 @@ function NotFoundRedirect() {
   const isAuthenticated = authService.isAuthenticated();
   const isAdmin = authService.hasRole('ROLE_ADMIN');
   const user = authService.getCurrentUser();
-  if (!isAuthenticated) return <Navigate to={isMobileApp() ? '/login' : '/'} replace />;
+  if (!isAuthenticated) return <Navigate to={isAccountApp() ? '/login' : '/'} replace />;
   return <Navigate to={isAdmin ? '/admin' : (user?.identityEvidenceRequired ? '/completar-identidade' : '/dashboard')} replace />;
 }
 
-function RootRoute() {
-  if (!isMobileApp()) return <Home />;
-  const isAuthenticated = authService.isAuthenticated();
-  const isAdmin = authService.hasRole('ROLE_ADMIN');
-  const user = authService.getCurrentUser();
-  const destination = isAuthenticated
-    ? (isAdmin ? '/admin' : (user?.identityEvidenceRequired ? '/completar-identidade' : '/dashboard'))
-    : '/login';
+function AccountEntry() {
+  const destination = accountDestination({
+    authenticated: authService.isAuthenticated(),
+    admin: authService.hasRole('ROLE_ADMIN'),
+    identityEvidenceRequired: authService.getCurrentUser()?.identityEvidenceRequired,
+  });
   return <Navigate to={destination} replace />;
 }
 
-export default function App() {
+function AppContent() {
+  // Re-evaluate when a route changes (including navigation to /app in a web tab).
+  useLocation();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const nativeApp = isMobileApp();
+  const nativeApp = isAccountApp();
+  const nativeSession = isMobileApp();
 
   useEffect(() => {
     window.setGlobalLoading = setIsLoading;
@@ -95,7 +97,7 @@ export default function App() {
   }, [nativeApp]);
 
   useEffect(() => {
-    if (!nativeApp) return undefined;
+    if (!nativeSession) return undefined;
     let loginRequired = false;
     const endNativeSession = () => {
       const hadSession = authService.isAuthenticated();
@@ -118,11 +120,10 @@ export default function App() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('pagehide', endNativeSession);
     };
-  }, [nativeApp]);
+  }, [nativeSession]);
 
   return (
     <MotionConfig reducedMotion={nativeApp ? 'always' : 'user'}>
-      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <div className="flex min-h-screen min-w-0 flex-col">
         <Navbar nativeApp={nativeApp} />
 
@@ -141,10 +142,15 @@ export default function App() {
         <div className="flex-1">
           <Suspense fallback={<PageFallback />}>
             <Routes>
-              <Route path="/" element={<RootRoute />} />
-              <Route path="/produto/:slug" element={<InstitutionalPage section="produto" />} />
-              <Route path="/empresa/:slug" element={<InstitutionalPage section="empresa" />} />
-              <Route path="/canais-atendimento" element={<ServiceChannels />} />
+              <Route path="/app" element={<AccountEntry />} />
+              {nativeApp ? (
+                <Route path="/" element={<AccountEntry />} />
+              ) : <>
+                <Route path="/" element={<Home />} />
+                <Route path="/produto/:slug" element={<InstitutionalPage section="produto" />} />
+                <Route path="/empresa/:slug" element={<InstitutionalPage section="empresa" />} />
+                <Route path="/canais-atendimento" element={<ServiceChannels />} />
+              </>}
               <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
               <Route path="/register/*" element={<PublicRoute><Register /></PublicRoute>} />
               <Route path="/redefinir-senha" element={<PublicRoute><PasswordReset /></PublicRoute>} />
@@ -158,7 +164,14 @@ export default function App() {
 
         {!nativeApp && <Footer />}
       </div>
-      </Router>
     </MotionConfig>
+  );
+}
+
+export default function App() {
+  return (
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <AppContent />
+    </Router>
   );
 }

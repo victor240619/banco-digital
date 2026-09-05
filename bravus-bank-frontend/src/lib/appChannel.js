@@ -1,3 +1,12 @@
+import { Capacitor } from '@capacitor/core';
+import { createAccountAppDetector } from './accountApp';
+
+const detectAccountApp = createAccountAppDetector();
+
+export function isAccountApp() {
+  return detectAccountApp(typeof window === 'undefined' ? null : window, isMobileApp());
+}
+
 export const APK_DOWNLOAD_URL =
   import.meta.env.VITE_APK_DOWNLOAD_URL || '/downloads/bravus-bank-mobile.apk';
 
@@ -12,7 +21,7 @@ export const MOBILE_APP_API_URL =
 
 export function getNativePlatform() {
   if (typeof window === 'undefined') return 'web';
-  const capacitor = window.Capacitor;
+  const capacitor = window.Capacitor || Capacitor;
   if (capacitor?.getPlatform) return capacitor.getPlatform();
   if (window.location.protocol === 'capacitor:') return 'native';
   return 'web';
