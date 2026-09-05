@@ -11,7 +11,7 @@ export const APK_DOWNLOAD_URL =
   import.meta.env.VITE_APK_DOWNLOAD_URL || '/downloads/bravus-bank-mobile.apk';
 
 export const BRAVUS_PRODUCTION_API_URL =
-  'https://bravusbank.com/api';
+  'https://vantyxbank.com/api';
 
 export const APK_DEFAULT_API_URL =
   import.meta.env.VITE_APK_API_URL || BRAVUS_PRODUCTION_API_URL;

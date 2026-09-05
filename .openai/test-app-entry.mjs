@@ -156,7 +156,7 @@ const config = JSON.parse(await readFile(resolve(frontend, 'capacitor.config.jso
 assert.equal(manifest.id, '/', 'preserve installed PWA identity');
 assert.equal(manifest.start_url, '/app');
 assert.equal(config.appId, 'com.bravus.bank', 'preserve installed native app identity');
-assert.equal(config.server.url, 'https://bravusbank.com');
+assert.equal(config.server.url, 'https://vantyxbank.com');
 assert.equal(config.server.appStartPath, manifest.start_url);
 assert.equal(config.appendUserAgent, 'VantyxBankApp');
 console.log(JSON.stringify({ result: 'ok', routeCases, installedAppDetection: true, webPreserved: true, nativeAuthorizationUnchanged: true }));

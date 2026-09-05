@@ -4848,7 +4848,9 @@ export default {
     const requestUrl = new URL(request.url);
     if (requestUrl.pathname.startsWith("/api/")) return handlePersistedApi(request, env);
     if ((request.method === "GET" || request.method === "HEAD") && requestUrl.hostname.endsWith(".chatgpt.site")) {
-      const canonicalUrl = new URL(requestUrl.pathname + requestUrl.search, "https://bravusbank.com");
+      const canonicalUrl = new URL(requestUrl);
+      canonicalUrl.protocol = "https:";
+      canonicalUrl.host = "vantyxbank.com";
       return Response.redirect(canonicalUrl.toString(), 308);
     }
     const requestedPath = routePath(request.url);

@@ -4,7 +4,7 @@
   "webDir": "dist",
   "appendUserAgent": "VantyxBankApp",
   "server": {
-    "url": "https://bravusbank.com",
+    "url": "https://vantyxbank.com",
     "appStartPath": "/app",
     "cleartext": false
   }
