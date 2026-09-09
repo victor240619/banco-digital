@@ -18,7 +18,11 @@ try {
   const logo = new Uint8Array(await readFile(path.join(root, 'public/brand/vantyx-bank-horizontal.png')));
   const icon = new Uint8Array(await sharp(Buffer.from(iconSvg('success'))).png().toBuffer());
   const assets = { logo, icon };
-  const document = await buildReceiptDocument(receiptFixture, assets);
+  const cpfFixture = { ...receiptFixture,
+    payer: { ...receiptFixture.payer, document: '00012345600' },
+    beneficiary: { ...receiptFixture.beneficiary, document: '000.987.654-00' },
+  };
+  const document = await buildReceiptDocument(cpfFixture, assets);
   const bytes = Buffer.from(await document.pdf.arrayBuffer());
   assert.equal(document.pdf.type, 'application/pdf');
   assert.equal(path.extname(document.filename), '.pdf');
@@ -28,7 +32,9 @@ try {
   assert.ok(document.html.includes('DESTINATÁRIO'));
   assert.ok(document.html.includes('REMETENTE'));
   assert.ok(!document.html.includes('00000000000'));
-  const again = await buildReceiptDocument(receiptFixture, assets);
+  for (const masked of ['***.123.456-**', '***.987.654-**']) assert.ok(document.html.includes(masked));
+  for (const full of ['00012345600', '000.123.456-00', '00098765400', '000.987.654-00']) assert.ok(!document.html.includes(full));
+  const again = await buildReceiptDocument(cpfFixture, assets);
   assert.deepEqual(bytes, Buffer.from(await again.pdf.arrayBuffer()), 'download/share generation must be deterministic');
   const malicious = await buildReceiptDocument({ ...receiptFixture, description: '<img src=x onerror=alert(1)>' }, assets);
   assert.ok(malicious.html.includes('&lt;img'));

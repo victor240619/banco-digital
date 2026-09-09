@@ -10,6 +10,32 @@ assert.ok(!JSON.stringify(model).includes('00000000000'));
 assert.ok(model.parties[0].account.includes('4821'));
 assert.ok(model.date.includes('14:32'));
 assert.equal(JSON.stringify(receiptFixture), baseline);
+// Synthetic identifiers only: the six middle digits identify each receipt party.
+for (const [document, label, expected] of [
+  ['00012345600', 'CPF', '***.123.456-**'],
+  ['000.123.456-00', 'CPF', '***.123.456-**'],
+  [' 000.001.002-00 ', 'CPF', '***.001.002-**'],
+  ['00000000000', 'CPF', '***.000.000-**'],
+  ['***.123.456-**', 'CPF', '***.123.456-**'],
+  ['00000000000000', 'CNPJ', '**.***.***/****-**'],
+  ['00.000.000/0000-00', 'CNPJ', '**.***.***/****-**'],
+  ['CPF 00012345600', 'Documento', '***.***.***-**'],
+  ['000.123456-00', 'Documento', '***.***.***-**'],
+  ['123456', 'Documento', '***.***.***-**'],
+  ['***.***.***-**', 'Documento', '***.***.***-**'],
+  ['', 'Documento', 'Não informado'],
+  ['   ', 'Documento', 'Não informado'],
+  [null, 'Documento', 'Não informado'],
+  [undefined, 'Documento', 'Não informado'],
+]) {
+  const input = { ...receiptFixture, payer: { ...receiptFixture.payer, document }, beneficiary: { ...receiptFixture.beneficiary, document } };
+  const before = JSON.stringify(input);
+  for (const party of buildReceiptModel(input).parties) {
+    assert.equal(party.documentLabel, label);
+    assert.equal(party.document, expected);
+  }
+  assert.equal(JSON.stringify(input), before);
+}
 assert.ok(formatReceiptAmount('100000000000000001').includes('1.000.000.000.000.000,01'));
 assert.ok(formatReceiptAmount('15013', 'JPY').includes('15.013'));
 assert.throws(() => formatReceiptAmount(NaN));

@@ -54,13 +54,19 @@ export function receiptState(receipt) {
 }
 
 const partyModel = (party = {}, title) => {
-  const doc = clean(party.document).replace(/\D/g, '');
+  const document = clean(party.document);
+  const doc = document.replace(/\D/g, '');
+  const cpf = /^\d{11}$|^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(document);
+  const maskedCpf = /^\*{3}\.\d{3}\.\d{3}-\*{2}$/.test(document);
+  const cnpj = /^\d{14}$|^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/.test(document);
   const account = clean(party.accountNumber);
   return {
     title,
     name: clean(party.name) || 'Não informado',
-    documentLabel: doc.length === 14 ? 'CNPJ' : doc.length === 11 ? 'CPF' : 'Documento',
-    document: !party.document ? 'Não informado' : doc.length === 14 ? '**.***.***/****-**' : '***.***.***-**',
+    documentLabel: cnpj ? 'CNPJ' : cpf || maskedCpf ? 'CPF' : 'Documento',
+    document: !document ? 'Não informado' : cnpj ? '**.***.***/****-**'
+      : cpf ? `***.${doc.slice(3, 6)}.${doc.slice(6, 9)}-**`
+        : maskedCpf ? document : '***.***.***-**',
     account: [brand(party.bankName) || clean(party.bankCode) || 'Instituição não informada', account ? `Conta •••• ${account.slice(-4)}` : 'Conta não informada'].join(' · '),
   };
 };
