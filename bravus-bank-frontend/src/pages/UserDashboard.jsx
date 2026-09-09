@@ -15,16 +15,15 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { userService, authService } from '../services/api';
 import BankIdentityCard from '../components/BankIdentityCard';
 import Logo from '../components/Logo';
+import ReceiptModal from '../components/ReceiptModal';
+import CurrencyExchangePanel from '../components/CurrencyExchangePanel';
+export const buildReceiptDocument = async (...args) => (await import('../lib/receiptDocument.jsx')).buildReceiptDocument(...args);
 import {
   formatCurrency, formatDate, getTransactionTypeLabel,
 } from '../utils/helpers';
 import { cn } from '../lib/cn';
 import { isMobileApp } from '../lib/appChannel';
 import { sanitizeAccountSnapshot } from '../lib/accountDataIsolation';
-import {
-  saveNativeReceiptPdf,
-  shareNativeReceiptPdf,
-} from '../lib/nativeReceiptDocuments';
 
 // ============ Helpers ============
 const txIcon = (type) => {
@@ -90,6 +89,7 @@ const MODULE_ROUTES = {
   localCayman: '/dashboard/transferencia-cayman',
   internationalWire: '/dashboard/wire-internacional',
   remittance: '/dashboard/remessas-cambio',
+  exchange: '/dashboard/cambio',
   'deposit-check': '/dashboard/deposito-cheque',
   credit: '/dashboard/emprestimos-recebiveis',
   dda: '/dashboard/dda-boletos',
@@ -104,6 +104,7 @@ const MODULE_ROUTES = {
 };
 
 const MODULE_ROUTE_STATE = {
+  '/dashboard/cambio': { tab: 'exchange', activeModule: 'exchange' },
   '/dashboard/extratos': { tab: 'statements', activeModule: 'balances' },
   '/dashboard/pagamentos': { tab: 'transfer', activeModule: 'localCayman', transferMode: 'external', channel: 'ACH', destinationNetwork: 'CAYMAN_ACH' },
   '/dashboard/transferencia-cayman': { tab: 'transfer', activeModule: 'localCayman', transferMode: 'external', channel: 'ACH', destinationNetwork: 'CAYMAN_ACH' },
@@ -140,6 +141,7 @@ const ACCOUNT_MENU_ITEMS = [
   { label: 'Saldos e extratos', route: '/dashboard/extratos', Icon: FileText },
   { label: 'Transferências', route: '/dashboard/transferencias', Icon: ArrowRightLeft },
   { label: 'Wire internacional', route: '/dashboard/wire-internacional', Icon: Send },
+  { label: 'Câmbio', route: '/dashboard/cambio', Icon: Globe2 },
   { label: 'Segurança', route: '/dashboard/seguranca', Icon: ShieldCheck },
   { label: 'Trocar senha', route: '/dashboard/trocar-senha', Icon: KeyRound },
 ];
@@ -312,13 +314,6 @@ const downloadHtmlDocument = ({ filename, html }) => {
   });
 };
 
-const downloadPdfDocument = async ({ filename, pdf }) => {
-  if (isMobileApp()) {
-    return saveNativeReceiptPdf({ filename, pdf });
-  }
-  downloadBlobDocument({ filename, blob: pdf });
-  return { message: 'Comprovante em PDF baixado.' };
-};
 
 const ACCOUNT_REVIEW_MESSAGE =
   'Não foi possível concluir a transferência. Sua conta está passando por uma análise interna de segurança e validação cadastral. Esse processo pode levar até 15 dias corridos. Enquanto isso, a conta permanece habilitada para receber valores normalmente.';
@@ -340,79 +335,6 @@ const shareHtmlDocument = async ({ filename, html, title, text }) => {
   return 'Compartilhamento direto indisponivel. O arquivo foi baixado e o resumo foi copiado.';
 };
 
-const sharePdfDocument = async ({ filename, pdf, title, text }) => {
-  if (isMobileApp()) {
-    return shareNativeReceiptPdf({ filename, pdf, title, text });
-  }
-  const file = new File([pdf], filename, { type: 'application/pdf' });
-  if (navigator.canShare?.({ files: [file] })) {
-    await navigator.share({ files: [file], title, text });
-    return 'PDF compartilhado.';
-  }
-  if (navigator.share) {
-    await navigator.share({ title, text, url: window.location.href });
-    return 'Link compartilhado.';
-  }
-  await navigator.clipboard?.writeText(text);
-  downloadPdfDocument({ filename, pdf });
-  return 'Compartilhamento direto indisponivel. O PDF foi baixado e o resumo foi copiado.';
-};
-
-const pdfByteLength = (value) => new TextEncoder().encode(value).length;
-
-const normalizePdfText = (value, fallback = '-') => {
-  const normalized = String(value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\x20-\x7E]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return normalized || fallback;
-};
-
-const escapePdfText = (value) =>
-  normalizePdfText(value).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
-
-const truncatePdfText = (value, maxLength = 92) => {
-  const text = normalizePdfText(value);
-  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
-};
-
-const pdfTextCommand = ({ text, x, y, size = 10, bold = false }) =>
-  `BT /${bold ? 'F2' : 'F1'} ${size} Tf 1 0 0 1 ${x} ${y} Tm (${escapePdfText(text)}) Tj ET`;
-
-const createSinglePagePdf = (commands) => {
-  const stream = `${commands.join('\n')}\n`;
-  const objects = [
-    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
-    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
-    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>\nendobj\n',
-    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
-    '5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n',
-    `6 0 obj\n<< /Length ${pdfByteLength(stream)} >>\nstream\n${stream}endstream\nendobj\n`,
-  ];
-  const parts = ['%PDF-1.4\n'];
-  const offsets = [];
-  let offset = pdfByteLength(parts[0]);
-  objects.forEach((object) => {
-    offsets.push(offset);
-    parts.push(object);
-    offset += pdfByteLength(object);
-  });
-  const xrefOffset = offset;
-  const xref = [
-    'xref\n',
-    `0 ${objects.length + 1}\n`,
-    '0000000000 65535 f \n',
-    ...offsets.map((item) => `${String(item).padStart(10, '0')} 00000 n \n`),
-    'trailer\n',
-    `<< /Size ${objects.length + 1} /Root 1 0 R >>\n`,
-    'startxref\n',
-    `${xrefOffset}\n`,
-    '%%EOF',
-  ].join('');
-  return new Blob([...parts, xref], { type: 'application/pdf' });
-};
 
 const buildPrintableHtml = ({ title, subtitle, body, footer }) => `
 <!doctype html>
@@ -486,136 +408,6 @@ const accountRowsHtml = ({ me, profile, user }) => {
   return rows.map(([label, value]) => `<div class="line"><span>${escapeHtml(label)}</span><span>${escapeHtml(displayVantyxBrand(value) || '-')}</span></div>`).join('');
 };
 
-const receiptRowsHtml = (rows) =>
-  rows.map(([label, value]) => `<div class="line"><span>${escapeHtml(label)}</span><span>${escapeHtml(displayVantyxBrand(value) || '-')}</span></div>`).join('');
-
-const partyRows = (party) => [
-  ['Nome', party?.name],
-  ['Documento', party?.document],
-  ['Banco', displayVantyxBrand(party?.bankName) || party?.bankCode],
-  ['Codigo', party?.bankCode],
-  ['Roteamento', party?.routingCode || party?.internalRoutingCode],
-  ['SWIFT/BIC', party?.swiftBic],
-  ['Agencia', party?.agency],
-  ['Conta', [party?.accountNumber, party?.accountDigit].filter(Boolean).join('-')],
-  ['Tipo', party?.accountType],
-];
-
-const buildReceiptPdfBlob = (receipt) => {
-  const commands = [
-    '0.035 0.063 0.141 rg 0 800 595 42 re f',
-    '0.918 0.686 0.157 rg 0 796 595 4 re f',
-    '1 1 1 rg',
-    pdfTextCommand({ text: 'VANTYX BANK', x: 48, y: 816, size: 13, bold: true }),
-    '0 0 0 rg',
-    pdfTextCommand({ text: 'Comprovante de transferencia', x: 48, y: 764, size: 22, bold: true }),
-    pdfTextCommand({ text: `Valor: ${formatCurrency(receipt?.amountCentavos)}`, x: 48, y: 732, size: 16, bold: true }),
-    pdfTextCommand({
-      text: `${displayTransferChannel(receipt?.channel)} | ${receipt?.settlementStatus || receipt?.status || 'PROCESSADO'}`,
-      x: 48,
-      y: 711,
-      size: 10,
-    }),
-  ];
-  let y = 680;
-  const addSection = (title, rows) => {
-    commands.push('0.918 0.686 0.157 rg');
-    commands.push(pdfTextCommand({ text: title, x: 48, y, size: 12, bold: true }));
-    commands.push('0 0 0 rg');
-    y -= 20;
-    rows.forEach(([label, value]) => {
-      if (y < 58) return;
-      commands.push(pdfTextCommand({ text: `${label}:`, x: 58, y, size: 8.5, bold: true }));
-      commands.push(pdfTextCommand({ text: truncatePdfText(displayVantyxBrand(value)), x: 190, y, size: 8.5 }));
-      y -= 13;
-    });
-    y -= 8;
-  };
-
-  addSection('Dados da transferencia', [
-    ['Comprovante', receipt?.receiptId],
-    ['Tipo', receipt?.receiptKind],
-    ['Transacao', receipt?.transactionId],
-    ['Valor', formatCurrency(receipt?.amountCentavos)],
-    ['Canal', displayTransferChannel(receipt?.channel)],
-    ['Status', receipt?.status],
-    ['Liquidacao', receipt?.settlementStatus],
-    ['Data', documentDate(receipt?.createdAt)],
-  ]);
-  addSection('Pagador', partyRows(receipt?.payer));
-  addSection('Recebedor', partyRows(receipt?.beneficiary));
-  addSection('Rastreabilidade', [
-    ['Provedor', receipt?.provider],
-    ['ID provedor', receipt?.providerTransferId],
-    ['Rede destino', receipt?.destinationNetwork],
-    ['Participante', receipt?.destinationParticipantCode],
-    ['Confirmacao destino', receipt?.destinationConfirmationId],
-    ['Confirmado em', documentDate(receipt?.destinationConfirmedAt)],
-    ['Mensagem', receipt?.settlementMessage],
-    ['Idempotencia', receipt?.idempotencyKey],
-    ['Descricao', receipt?.description || 'Transferencia Vantyx'],
-  ]);
-
-  commands.push('0.25 0.25 0.25 rg');
-  commands.push(pdfTextCommand({
-    text: `Comprovante emitido em ${formatDate(new Date().toISOString())}. Validacao interna: ${receipt?.receiptId || '-'}`,
-    x: 48,
-    y: 38,
-    size: 8,
-  }));
-  return createSinglePagePdf(commands);
-};
-
-export const buildReceiptDocument = (receipt) => {
-  const title = `Comprovante Vantyx ${formatCurrency(receipt?.amountCentavos)}`;
-  const body = `
-    <section class="section">
-      <h2>Dados da transferencia</h2>
-      ${receiptRowsHtml([
-        ['Comprovante', receipt?.receiptId],
-        ['Tipo', receipt?.receiptKind],
-        ['Transacao', receipt?.transactionId],
-        ['Valor', formatCurrency(receipt?.amountCentavos)],
-        ['Canal', displayTransferChannel(receipt?.channel)],
-        ['Status', receipt?.status],
-        ['Liquidacao', receipt?.settlementStatus],
-        ['Data', documentDate(receipt?.createdAt)],
-      ])}
-    </section>
-    <section class="section">
-      <h2>Pagador</h2>
-      ${receiptRowsHtml(partyRows(receipt?.payer))}
-    </section>
-    <section class="section">
-      <h2>Recebedor</h2>
-      ${receiptRowsHtml(partyRows(receipt?.beneficiary))}
-    </section>
-    <section class="section">
-      <h2>Rastreabilidade</h2>
-      ${receiptRowsHtml([
-        ['Provedor', receipt?.provider],
-        ['ID provedor', receipt?.providerTransferId],
-        ['Rede destino', receipt?.destinationNetwork],
-        ['Participante', receipt?.destinationParticipantCode],
-        ['Confirmacao destino', receipt?.destinationConfirmationId],
-        ['Confirmado em', documentDate(receipt?.destinationConfirmedAt)],
-        ['Mensagem', receipt?.settlementMessage],
-        ['Idempotencia', receipt?.idempotencyKey],
-        ['Descricao', receipt?.description || 'Transferencia Vantyx'],
-      ])}
-    </section>`;
-  return {
-    filename: documentFilename('comprovante-vantyx', receipt?.receiptId || receipt?.transactionId, 'pdf'),
-    html: buildPrintableHtml({
-      title,
-      subtitle: `${displayTransferChannel(receipt?.channel)} | ${receipt?.settlementStatus || receipt?.status || 'PROCESSADO'}`,
-      body,
-      footer: `Comprovante emitido em ${formatDate(new Date().toISOString())}. Validacao interna: ${receipt?.receiptId || '-'}`,
-    }),
-    pdf: buildReceiptPdfBlob(receipt),
-    text: `${title}\nRecebedor: ${receipt?.beneficiary?.name || '-'}\nValor: ${formatCurrency(receipt?.amountCentavos)}\nComprovante: ${receipt?.receiptId || '-'}`,
-  };
-};
 
 const buildStatementDocument = ({ months, transactions, me, profile, user }) => {
   const selected = new Set(months);
@@ -701,7 +493,6 @@ export default function UserDashboard() {
   const [externalOrders, setExternalOrders] = useState([]);
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [receiptLoading, setReceiptLoading] = useState(null);
-  const [receiptAction, setReceiptAction] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -1035,46 +826,6 @@ export default function UserDashboard() {
     }
   };
 
-  const downloadReceipt = async () => {
-    if (!selectedReceipt) return;
-    setReceiptAction('download');
-    setError('');
-    try {
-      const document = buildReceiptDocument(selectedReceipt);
-      const result = await downloadPdfDocument(document);
-      setSuccess(result.message);
-    } catch (err) {
-      const needsUpdate = err?.code === 'NATIVE_RECEIPT_PLUGINS_UNAVAILABLE';
-      setError(needsUpdate
-        ? 'Atualize o aplicativo Vantyx para baixar comprovantes em PDF.'
-        : 'Nao foi possivel salvar o PDF do comprovante.');
-    } finally {
-      setReceiptAction(null);
-    }
-  };
-
-  const shareReceipt = async () => {
-    if (!selectedReceipt) return;
-    setReceiptAction('share');
-    setError('');
-    try {
-      const document = buildReceiptDocument(selectedReceipt);
-      const message = await sharePdfDocument({
-        ...document,
-        title: 'Comprovante Vantyx Bank',
-      });
-      setSuccess(message);
-    } catch (err) {
-      if (err?.name !== 'AbortError') {
-        const needsUpdate = err?.code === 'NATIVE_RECEIPT_PLUGINS_UNAVAILABLE';
-        setError(needsUpdate
-          ? 'Atualize o aplicativo Vantyx para compartilhar o PDF.'
-          : 'Nao foi possivel compartilhar o comprovante.');
-      }
-    } finally {
-      setReceiptAction(null);
-    }
-  };
 
   // ====== Computed ======
   const stats = useMemo(() => {
@@ -1168,7 +919,8 @@ export default function UserDashboard() {
     { id: 'localCayman', label: 'Transferência Cayman', Icon: Landmark, badge: 'ACH e EFT', accent: true },
     { id: 'transfers', label: 'Transferências Vantyx', Icon: ArrowRightLeft, badge: 'Liquidação interna' },
     { id: 'internationalWire', label: 'Wire internacional', Icon: Send, badge: 'SWIFT e correspondente' },
-    { id: 'remittance', label: 'Remessas e câmbio', Icon: Globe2, badge: 'Licença CIMA' },
+    { id: 'exchange', label: 'Câmbio', Icon: Globe2, badge: 'Cotações de referência' },
+    { id: 'remittance', label: 'Remessas', Icon: Globe2, badge: 'Canal externo' },
     { id: 'dda', label: 'DDA Boletos Registrados', Icon: ClipboardCheck, badge: '0 pendentes' },
     { id: 'cards', label: 'Cartoes', Icon: CreditCard, badge: 'Conta ativa' },
     { id: 'credit', label: 'Emprestimos e Recebiveis', Icon: Landmark, badge: showBalance ? formatCurrency(creditAvailable) : 'R$ ******', accent: true },
@@ -1583,6 +1335,8 @@ export default function UserDashboard() {
           <UserPasswordChangePanel onSuccess={setSuccess} onError={setError} />
         )}
 
+        {tab === 'exchange' && <CurrencyExchangePanel />}
+
         {/* Forms */}
         {(tab === 'deposit' || tab === 'withdraw' || tab === 'transfer') && (
           <div className="card-premium p-6 max-w-3xl">
@@ -1870,95 +1624,7 @@ export default function UserDashboard() {
         )}
       </div>
 
-      <AnimatePresence>
-        {selectedReceipt && (
-          <motion.div
-            className="fixed inset-0 z-50 overflow-y-auto bg-black/70 px-3 py-4 sm:px-4 sm:py-6"
-            data-testid="receipt-modal-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              className="mx-auto min-h-full w-full max-w-3xl py-2 sm:flex sm:items-center"
-              initial={{ scale: 0.96, y: 12 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.96, y: 12 }}
-            >
-              <div
-                className="max-h-[calc(100vh-4rem)] w-full overflow-y-auto rounded-xl border border-slate-300 bg-white p-4 text-black shadow-2xl [&_.receipt-block-title]:text-black [&_.receipt-block]:border-slate-200 [&_.receipt-block]:bg-slate-50 [&_.receipt-line-label]:text-black [&_.receipt-line-value]:text-black [&_.receipt-line]:border-slate-200 sm:max-h-[calc(100vh-3rem)] sm:p-6"
-                data-testid="receipt-modal-paper"
-              >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <img
-                    src={VANTYX_FULL_LOGO_SRC}
-                    alt="Vantyx Bank"
-                    className="mb-4 h-16 w-auto object-contain"
-                  />
-                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-slate-300 bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-black">
-                    <Receipt className="h-3.5 w-3.5" />
-                    Comprovante Vantyx
-                  </div>
-                  <h3 className="font-display text-2xl font-semibold text-black">{formatCurrency(selectedReceipt.amountCentavos)}</h3>
-                  <p className="mt-1 text-sm text-black">
-                    {displayTransferChannel(selectedReceipt.channel)} · {selectedReceipt.status} · {selectedReceipt.settlementStatus}
-                  </p>
-                </div>
-                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-60"
-                    onClick={downloadReceipt}
-                    disabled={Boolean(receiptAction)}
-                  >
-                    <Download className="h-4 w-4" />
-                    {receiptAction === 'download' ? 'Salvando...' : 'Baixar'}
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-60"
-                    onClick={shareReceipt}
-                    disabled={Boolean(receiptAction)}
-                  >
-                    <Share2 className="h-4 w-4" />
-                    {receiptAction === 'share' ? 'Abrindo...' : 'Compartilhar'}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black transition hover:bg-slate-100"
-                    onClick={() => setSelectedReceipt(null)}
-                  >
-                    Fechar
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                <ReceiptBlock title="Pagador" party={selectedReceipt.payer} />
-                <ReceiptBlock title="Recebedor" party={selectedReceipt.beneficiary} />
-              </div>
-
-              <div className="receipt-block mt-5 rounded-xl border border-slate-200 bg-white p-4 text-sm">
-                <ReceiptLine label="Comprovante" value={selectedReceipt.receiptId} />
-                <ReceiptLine label="Tipo" value={selectedReceipt.receiptKind} />
-                <ReceiptLine label="Transação" value={selectedReceipt.transactionId} />
-                <ReceiptLine label="Provedor" value={selectedReceipt.provider} />
-                <ReceiptLine label="ID provedor" value={selectedReceipt.providerTransferId} />
-                <ReceiptLine label="Rede destino" value={selectedReceipt.destinationNetwork} />
-                <ReceiptLine label="Participante" value={selectedReceipt.destinationParticipantCode} />
-                <ReceiptLine label="Confirmacao destino" value={selectedReceipt.destinationConfirmationId} />
-                <ReceiptLine label="Confirmado em" value={formatDate(selectedReceipt.destinationConfirmedAt)} />
-                <ReceiptLine label="Liquidacao" value={selectedReceipt.settlementMessage} />
-                <ReceiptLine label="Idempotência" value={selectedReceipt.idempotencyKey} />
-                <ReceiptLine label="Data" value={formatDate(selectedReceipt.createdAt)} />
-                <ReceiptLine label="Descrição" value={selectedReceipt.description || 'Transferência Vantyx'} />
-              </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {selectedReceipt && <ReceiptModal receipt={selectedReceipt} onClose={() => setSelectedReceipt(null)} />}
     </main>
   );
 }
@@ -2727,22 +2393,6 @@ function Metric({ label, value }) {
   );
 }
 
-function ReceiptBlock({ title, party }) {
-  return (
-    <div className="receipt-block rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
-      <div className="receipt-block-title mb-3 font-semibold text-white">{title}</div>
-      <ReceiptLine label="Nome" value={party?.name} />
-      <ReceiptLine label="Documento" value={party?.document} />
-      <ReceiptLine label="Banco" value={party?.bankName || party?.bankCode} />
-      <ReceiptLine label="Código" value={party?.bankCode} />
-      <ReceiptLine label="Roteamento" value={party?.routingCode || party?.internalRoutingCode} />
-      <ReceiptLine label="SWIFT/BIC" value={party?.swiftBic} />
-      <ReceiptLine label="Agência" value={party?.agency} />
-      <ReceiptLine label="Conta" value={[party?.accountNumber, party?.accountDigit].filter(Boolean).join('-')} />
-      <ReceiptLine label="Tipo" value={party?.accountType} />
-    </div>
-  );
-}
 
 function ReceiptLine({ label, value }) {
   return (

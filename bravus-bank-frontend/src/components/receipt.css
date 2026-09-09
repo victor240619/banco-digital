@@ -1,0 +1,35 @@
+.vantyx-receipt { box-sizing: border-box; width: 100%; color: #08132c; background: #fff; font-family: Arial, Helvetica, sans-serif; text-align: left; border-radius: 14px; overflow: hidden; }
+.vantyx-receipt * { box-sizing: border-box; }
+.vantyx-receipt-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 22px; background: #030d25; }
+.vantyx-receipt-header img { width: 170px; height: auto; object-fit: contain; }
+.vantyx-receipt-close { display: grid; place-items: center; min-width: 44px; height: 44px; border: 0; color: #fff; background: transparent; border-radius: 8px; cursor: pointer; }
+.vantyx-receipt-body { padding: 24px 22px 22px; }
+.vantyx-receipt h2 { margin: 0; font: 600 21px/1.35 Arial, Helvetica, sans-serif; color: #08132c; letter-spacing: -.35px; }
+.vantyx-receipt-summary { padding: 28px 0; text-align: center; }
+.vantyx-receipt-summary svg { margin: 0 auto 14px; color: #0066ff; }
+.vantyx-receipt-summary.is-error svg { color: #b42318; }
+.vantyx-receipt-summary.is-pending svg { color: #996200; }
+.vantyx-receipt-status { margin: 0; font-size: 16px; line-height: 1.4; }
+.vantyx-receipt-amount { margin: 10px 0; font-weight: 700; font-size: clamp(26px, 10vw, 42px); line-height: 1.2; letter-spacing: -1px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.vantyx-receipt-date { margin: 0; color: #647087; font-size: 14px; line-height: 1.5; }
+.vantyx-receipt-date span { font-size: 11px; }
+.vantyx-receipt-party { padding: 24px 0; border-top: 1px solid #dce2eb; }
+.vantyx-receipt h3 { margin: 0 0 16px; color: #647087; font: 400 12px/1.4 Arial, Helvetica, sans-serif; letter-spacing: .8px; }
+.vantyx-receipt-name { margin: 0 0 18px; font-size: 18px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.vantyx-receipt-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; font-size: 14px; line-height: 1.6; }
+.vantyx-receipt-row > :last-child { max-width: 66%; text-align: right; overflow-wrap: anywhere; }
+.vantyx-receipt-account { margin: 14px 0 0; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.vantyx-receipt-identifier { display: flex; gap: 14px; justify-content: space-between; border-top: 1px solid #dce2eb; border-bottom: 1px solid #dce2eb; padding: 20px 0; font-size: 13px; }
+.vantyx-receipt-identifier strong { max-width: 66%; font-weight: 400; text-align: right; overflow-wrap: anywhere; }
+.vantyx-receipt-details { padding: 22px 0 8px; }
+.vantyx-receipt-details .vantyx-receipt-row { padding: 5px 0; font-size: 11px; }
+.vantyx-receipt-note { color: #647087; text-align: center; font-size: 12px; line-height: 1.6; margin: 16px 0 20px; }
+.vantyx-receipt-actions { display: grid; gap: 10px; }
+.vantyx-receipt-action { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 12px; min-height: 46px; border: 1px solid #0066ff; border-radius: 8px; background: #0066ff; color: #fff; font-size: 16px; font-weight: 500; cursor: pointer; }
+.vantyx-receipt-action.secondary { background: #fff; color: #0066ff; }
+.vantyx-receipt-action:hover { filter: brightness(.95); }
+.vantyx-receipt-action:disabled { opacity: .65; cursor: wait; }
+.vantyx-receipt button:focus-visible { outline: 3px solid #6da5ff; outline-offset: 3px; }
+.vantyx-receipt-feedback { margin: 12px 0 0; font-size: 13px; color: #647087; }
+.vantyx-receipt-feedback.error { color: #b42318; }
+@media (max-width: 360px) { .vantyx-receipt-body { padding: 20px 16px; } .vantyx-receipt h2 { font-size: 19px; } .vantyx-receipt-row { font-size: 12px; } }

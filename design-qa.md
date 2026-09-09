@@ -45,3 +45,41 @@
 - No P3 refinement is required for this scope.
 
 final result: passed
+
+## Receipt and FX follow-up (2026-09-08)
+
+This section covers only the isolated receipt/FX change, not a new production
+release or a re-certification of earlier work.
+
+Reference: the user-selected white Vantyx transfer receipt mock, with navy logo
+header, centered blue status icon, prominent value, beneficiary before sender,
+masked documents/accounts and blue share/outlined PDF actions.
+The real horizontal logo already in the repository was retained.
+
+Comparison evidence: reference image and component screenshot were inspected in
+the same browser-tool result before and after adjustment. The last focused
+comparison used a 426px viewport; a separate 320px pass verified no horizontal
+overflow. Header height was adjusted to about 70px and amount type to 42px to
+match the reference hierarchy. Status icon, logo proportions, margins, wrapping
+and action targets were checked. Button height is approximately 50px.
+
+Intentional differences: technical traceability remains below the identifier,
+so long receipts scroll farther; the timestamp specifies Brasilia; the mock-only
+banner is replaced by a truthful internal/confirmed/pending/simulation note.
+The PDF omits interactive buttons and paginates long fields. Download and share
+deliver the identical PDF with the same updated identity and transaction model.
+
+The FX panel keeps a white surface and blue controls, fixes origin to USD, and
+offers the supported destination list. Its direction arrow is not a fake swap
+button. Dates, source, daily-reference limits and unavailable balance conversion
+are visible. Live BRL/EUR/JPY changes and zero-value rejection were exercised.
+
+Fixed during QA: PDF label/value spacing, excessive header height, undersized
+amount text, and duplicate React preview-root creation during hot reload.
+The preview-root issue was test-harness-only; production has its existing root.
+
+Passed: reference-informed visual/component checks, normal and long PDF page
+inspection, pending state, keyboard focus/escape/restore, and scoped CSS.
+Release blocked: no production publish approved for this isolated change;
+physical Android/iOS share-sheet checks and uncommon PDF font coverage remain.
+No claim of pixel-for-pixel identity across screen and PDF pagination is made.

@@ -1,0 +1,28 @@
+.vantyx-exchange { max-width: 760px; padding: 26px; border: 1px solid #dce2eb; border-radius: 16px; background: #fff; color: #08132c; }
+.vantyx-exchange-heading { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 26px; }
+.vantyx-exchange-heading > svg { color: #0066ff; flex-shrink: 0; margin-top: 3px; }
+.vantyx-exchange h2 { margin: 0; font-size: 23px; color: #08132c; }
+.vantyx-exchange p { color: #647087; font-size: 13px; line-height: 1.6; margin: 6px 0 0; }
+.vantyx-exchange-pair { display: grid; grid-template-columns: minmax(0,1fr) 42px minmax(0,1fr); align-items: end; gap: 12px; }
+.vantyx-exchange label { display: grid; gap: 8px; font-size: 13px; font-weight: 600; min-width: 0; }
+.vantyx-exchange input, .vantyx-exchange select { width: 100%; min-width: 0; min-height: 48px; padding: 12px; border: 1px solid #c7d0df; border-radius: 8px; background: #fff; color: #08132c; font-size: 14px; }
+.vantyx-exchange-swap { display: grid; place-items: center; min-height: 48px; color: #0066ff; }
+.vantyx-exchange-amount { margin: 22px 0; }
+.vantyx-exchange-amount input { font-size: 22px; }
+.vantyx-exchange-quote { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px; border: 1px solid #dce2eb; border-radius: 10px; background: #f7f9fc; font-size: 14px; }
+.vantyx-exchange-quote strong, .vantyx-exchange-quote span { display: block; }
+.vantyx-exchange-quote span { font-size: 11px; margin-top: 6px; color: #647087; }
+.vantyx-exchange-refresh { display: flex; align-items: center; gap: 6px; color: #0066ff; background: transparent; font-size: 12px; padding: 8px 0; }
+.vantyx-exchange-submit { width: 100%; min-height: 48px; margin-top: 18px; padding: 12px; background: #0066ff; color: #fff; border-radius: 8px; font-weight: 600; }
+.vantyx-exchange button:disabled { opacity: .55; cursor: not-allowed; }
+.vantyx-exchange button:not(:disabled) { cursor: pointer; }
+.vantyx-exchange :is(button,input,select,a):focus-visible { outline: 3px solid #6da5ff; outline-offset: 3px; }
+.vantyx-exchange-result { margin-top: 24px; padding: 22px; border: 1px solid #9fc2ff; border-radius: 10px; background: #f4f8ff; }
+.vantyx-exchange-result > span { display: block; font-size: 11px; letter-spacing: 1px; color: #647087; }
+.vantyx-exchange-result > strong { display: block; margin-top: 8px; font-size: 32px; color: #08132c; overflow-wrap: anywhere; }
+.vantyx-exchange-note { display: flex; align-items: flex-start; gap: 10px; margin-top: 24px; font-size: 13px; }
+.vantyx-exchange-note > svg { flex-shrink: 0; color: #0066ff; }
+.vantyx-exchange-note a { display: inline-block; margin-top: 8px; color: #0054d4; text-decoration: underline; }
+.vantyx-exchange-unavailable { margin-top: 20px; border-top: 1px solid #dce2eb; padding-top: 20px; font-size: 13px; }
+.vantyx-exchange .vantyx-exchange-error { color: #b42318; margin-top: 12px; }
+@media (max-width: 560px) { .vantyx-exchange { padding: 20px 16px; } .vantyx-exchange-pair { grid-template-columns: 1fr; } .vantyx-exchange-swap { width: 48px; justify-self: center; } .vantyx-exchange-swap svg { transform: rotate(90deg); } .vantyx-exchange-quote { align-items: flex-start; flex-direction: column; } }

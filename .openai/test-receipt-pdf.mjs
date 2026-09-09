@@ -1,62 +1,44 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { createServer as createHttpServer } from 'node:http';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-
+import { receiptFixture } from './receipt-fixture.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../bravus-bank-frontend');
 const outputDirectory = path.resolve(root, '../tmp/pdfs');
-const outputPath = path.join(outputDirectory, 'comprovante-vantyx-validacao.pdf');
+process.chdir(root);
 const require = createRequire(path.join(root, 'package.json'));
-const viteModule = await import(pathToFileURL(require.resolve('vite')).href);
-const createServer = viteModule.createServer || viteModule.default?.createServer;
-const server = await createServer({ root, server: { middlewareMode: true }, appType: 'custom' });
-
+const vite = await import(pathToFileURL(require.resolve('vite')).href);
+const sharp = (await import(pathToFileURL(require.resolve('sharp', { paths: [root, process.env.VANTYX_TEST_DEPENDENCIES || root] })).href)).default;
+// An unattached HTTP server keeps this SSR-only test from binding Vite's shared HMR port.
+const server = await (vite.createServer || vite.default.createServer)({ root, server: { middlewareMode: true, hmr: { server: createHttpServer() } }, appType: 'custom' });
 try {
-  const { buildReceiptDocument } = await server.ssrLoadModule('/src/pages/UserDashboard.jsx');
-  const document = buildReceiptDocument({
-    receiptId: 'VANTYX-VALIDACAO-001',
-    receiptKind: 'COMPROVANTE_LIQUIDACAO_CONFIRMADA',
-    transactionId: 'TX-VALIDACAO-001',
-    amountCentavos: 1000,
-    channel: 'ACH',
-    status: 'COMPLETED',
-    settlementStatus: 'SETTLED',
-    createdAt: '2026-07-15T12:00:00-03:00',
-    payer: {
-      name: 'Joao Victor Mendonca Guimaraes',
-      document: '***.***.***-**',
-      bankName: 'Vantyx Bank',
-      bankCode: '999',
-      agency: '0001',
-      accountNumber: '000000001',
-      accountDigit: '1',
-    },
-    beneficiary: {
-      name: 'Jonathan Pereira Torres Roriz',
-      document: '***.***.***-**',
-      bankName: 'Vantyx Bank',
-      bankCode: '999',
-      agency: '0001',
-      accountNumber: '000000002',
-      accountDigit: '2',
-    },
-    provider: 'BRAVUS_INTERNAL',
-    destinationNetwork: 'CAYMAN_ACH',
-    destinationConfirmationId: 'CONF-VALIDACAO-001',
-    description: 'Transferencia Vantyx',
-  });
-
+  const { buildReceiptDocument, iconSvg } = await server.ssrLoadModule('/src/lib/receiptDocument.jsx');
+  const logo = new Uint8Array(await readFile(path.join(root, 'public/brand/vantyx-bank-horizontal.png')));
+  const icon = new Uint8Array(await sharp(Buffer.from(iconSvg('success'))).png().toBuffer());
+  const assets = { logo, icon };
+  const document = await buildReceiptDocument(receiptFixture, assets);
   const bytes = Buffer.from(await document.pdf.arrayBuffer());
   assert.equal(document.pdf.type, 'application/pdf');
   assert.equal(path.extname(document.filename), '.pdf');
   assert.equal(bytes.subarray(0, 5).toString('ascii'), '%PDF-');
-  assert.equal(bytes.subarray(-5).toString('ascii'), '%%EOF');
-  assert.ok(bytes.length > 1500, 'receipt PDF must contain a complete printable document');
-
+  assert.ok(bytes.subarray(-10).toString('ascii').includes('%%EOF'));
+  assert.ok(bytes.length > 5000);
+  assert.ok(document.html.includes('DESTINATÁRIO'));
+  assert.ok(document.html.includes('REMETENTE'));
+  assert.ok(!document.html.includes('00000000000'));
+  const again = await buildReceiptDocument(receiptFixture, assets);
+  assert.deepEqual(bytes, Buffer.from(await again.pdf.arrayBuffer()), 'download/share generation must be deterministic');
+  const malicious = await buildReceiptDocument({ ...receiptFixture, description: '<img src=x onerror=alert(1)>' }, assets);
+  assert.ok(malicious.html.includes('&lt;img'));
+  assert.ok(!malicious.html.includes('<img src=x'));
   await mkdir(outputDirectory, { recursive: true });
-  await writeFile(outputPath, bytes);
-  console.log(`receipt PDF: ok (${bytes.length} bytes) -> ${outputPath}`);
-} finally {
-  await server.close();
-}
+  await writeFile(path.join(outputDirectory, 'comprovante-vantyx-validacao.pdf'), bytes);
+  await writeFile(path.join(outputDirectory, 'comprovante-vantyx-validacao.html'), document.html);
+  const long = await buildReceiptDocument({ ...receiptFixture, payer: { ...receiptFixture.payer, name: 'João Exemplo da Silva '.repeat(10) }, description: 'Descrição longa de teste para validar a paginação e a preservação dos dados. '.repeat(100) }, assets);
+  await writeFile(path.join(outputDirectory, 'comprovante-vantyx-longo.pdf'), Buffer.from(await long.pdf.arrayBuffer()));
+  const pending = await buildReceiptDocument({ ...receiptFixture, status: 'PENDING', settlementStatus: 'AGUARDANDO_CONFIRMACAO_MANUAL', channel: 'SWIFT' }, { logo, icon: new Uint8Array(await sharp(Buffer.from(iconSvg('pending'))).png().toBuffer()) });
+  await writeFile(path.join(outputDirectory, 'comprovante-vantyx-pendente.pdf'), Buffer.from(await pending.pdf.arrayBuffer()));
+  console.log('receipt PDF: valid, deterministic, escaped HTML, masked identity, branded assets; normal/long/pending documents generated');
+} finally { await server.close(); }
