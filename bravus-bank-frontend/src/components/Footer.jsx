@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import Logo from './Logo';
 import { Landmark, Lock, ShieldCheck } from 'lucide-react';
+import { useLocale } from '../contexts/LocaleContext';
 
 const productLinks = [
   ['Conta Digital', '/produto/conta-digital'],
@@ -18,12 +19,12 @@ const companyLinks = [
   ['Contato', '/empresa/contato'],
 ];
 
-const FooterLinks = ({ links }) => (
+const FooterLinks = ({ links, t }) => (
   <ul className="space-y-2 text-sm text-ink-300">
     {links.map(([label, to]) => (
       <li key={to}>
         <Link className="transition-colors hover:text-gold-300" to={to}>
-          {label}
+          {t(label)}
         </Link>
       </li>
     ))}
@@ -31,6 +32,7 @@ const FooterLinks = ({ links }) => (
 );
 
 export default function Footer() {
+  const { t } = useLocale();
   return (
     <footer className="site-footer mt-24 border-t border-white/5 bg-ink-950/60">
       <div className="container-app py-10">
@@ -38,21 +40,24 @@ export default function Footer() {
           <div>
             <Logo />
             <p className="mt-4 text-sm text-ink-300 max-w-xs">
-              Banco digital premium. Construído com segurança bancária, performance moderna e experiência impecável.
+              {t('Banco digital premium. Construído com segurança bancária, performance moderna e experiência impecável.')}
             </p>
+            <a className="mt-3 inline-block text-sm text-gold-300 hover:text-gold-200" href="mailto:Contact@vantyxbank.com">
+              Contact@vantyxbank.com
+            </a>
           </div>
           <div>
-            <h4 className="text-sm font-semibold text-white mb-3">Produto</h4>
-            <FooterLinks links={productLinks} />
+            <h4 className="text-sm font-semibold text-white mb-3">{t('Produto')}</h4>
+            <FooterLinks links={productLinks} t={t} />
           </div>
           <div>
-            <h4 className="text-sm font-semibold text-white mb-3">Empresa</h4>
-            <FooterLinks links={companyLinks} />
+            <h4 className="text-sm font-semibold text-white mb-3">{t('Empresa')}</h4>
+            <FooterLinks links={companyLinks} t={t} />
           </div>
           <div>
-            <h4 className="text-sm font-semibold text-white mb-3">Segurança</h4>
+            <h4 className="text-sm font-semibold text-white mb-3">{t('Segurança')}</h4>
             <div className="space-y-2 text-sm text-ink-300">
-              <div className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-gold-400" /> Criptografia TLS 1.3</div>
+              <div className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-gold-400" /> {t('Criptografia TLS 1.3')}</div>
               <div className="inline-flex items-center gap-2"><Lock className="h-4 w-4 text-gold-400" /> JWT + 2FA</div>
             </div>
           </div>
@@ -63,19 +68,18 @@ export default function Footer() {
               <Landmark className="h-5 w-5" />
             </span>
             <div>
-              <h4 className="text-sm font-semibold text-white">Regulação e transparência</h4>
+              <h4 className="text-sm font-semibold text-white">{t('Regulação e transparência')}</h4>
               <p className="mt-2 text-sm leading-relaxed text-ink-300">
-                A Cayman Islands Monetary Authority (CIMA) é a autoridade responsável pelo licenciamento e pela supervisão
-                de serviços financeiros nas Ilhas Cayman.
+                {t('A Cayman Islands Monetary Authority (CIMA) é a autoridade responsável pelo licenciamento e pela supervisão de serviços financeiros nas Ilhas Cayman.')}
               </p>
             </div>
           </div>
         </div>
         <div className="mt-10 pt-6 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-ink-400">
-          <div>© {new Date().getFullYear()} Vantyx Bank. Todos os direitos reservados.</div>
+          <div>© {new Date().getFullYear()} Vantyx Bank. {t('Todos os direitos reservados.')}</div>
           <div className="flex gap-4">
-            <span>Termos</span>
-            <span>Privacidade</span>
+            <span>{t('Termos')}</span>
+            <span>{t('Privacidade')}</span>
             <span>Compliance</span>
           </div>
         </div>

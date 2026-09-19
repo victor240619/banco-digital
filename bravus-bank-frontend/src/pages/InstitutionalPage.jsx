@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import EditorialGallery from '../components/EditorialGallery';
 import { institutionalEnhancements } from './institutionalEnhancements';
+import { useLocale } from '../contexts/LocaleContext';
 import {
   ArrowLeft,
   ArrowRight,
@@ -182,8 +183,9 @@ const pages = {
           text: 'Nunca informe senha, código de acesso ou documentos fora dos fluxos oficiais do aplicativo e dos canais da Vantyx Bank.',
         },
         {
-          title: 'Solicitações institucionais',
-          text: 'Os canais públicos adicionais serão divulgados nesta página depois de validados. Desconfie de contatos que prometam liberação de valores mediante pagamento antecipado.',
+          title: 'E-mail institucional',
+          text: 'Para consultas institucionais, use o e-mail abaixo. Não envie senhas, códigos temporários ou documentos pessoais por e-mail.',
+          email: 'Contact@vantyxbank.com',
         },
       ],
       action: ['Entrar para atendimento', '/login'],
@@ -208,6 +210,7 @@ const relatedLinks = {
 
 export default function InstitutionalPage({ section }) {
   const { slug } = useParams();
+  const { locale, t } = useLocale();
   const page = pages[section]?.[slug];
   const enhancement = institutionalEnhancements[section]?.[slug];
 
@@ -218,22 +221,23 @@ export default function InstitutionalPage({ section }) {
   if (!page) return <Navigate to="/" replace />;
 
   const Icon = page.icon;
-  const contentSections = [...page.sections, ...(enhancement?.moreSections || [])];
+  const localizedEnhancement = locale === 'pt-BR' ? enhancement : null;
+  const contentSections = [...page.sections, ...(localizedEnhancement?.moreSections || [])];
 
   return (
     <main>
       <section className="container-app pb-14 pt-12 sm:pb-20 sm:pt-16">
         <Link className="inline-flex items-center gap-2 text-sm text-ink-300 transition-colors hover:text-white" to="/">
-          <ArrowLeft className="h-4 w-4" /> Voltar ao início
+          <ArrowLeft className="h-4 w-4" /> {t('Voltar ao início')}
         </Link>
 
         <div className="mt-10 max-w-3xl">
           <div className="inline-flex h-12 w-12 items-center justify-center rounded-lg bg-gold-400/10 text-gold-300">
             <Icon className="h-6 w-6" />
           </div>
-          <p className="mt-6 text-xs font-semibold uppercase text-gold-300">{page.eyebrow}</p>
-          <h1 className="mt-3 font-display text-4xl font-bold text-white sm:text-5xl">{page.title}</h1>
-          <p className="mt-5 text-lg leading-relaxed text-ink-200">{page.lead}</p>
+          <p className="mt-6 text-xs font-semibold uppercase text-gold-300">{t(page.eyebrow)}</p>
+          <h1 className="mt-3 font-display text-4xl font-bold text-white sm:text-5xl">{t(page.title)}</h1>
+          <p className="mt-5 text-lg leading-relaxed text-ink-200">{t(page.lead)}</p>
         </div>
       </section>
 
@@ -245,32 +249,37 @@ export default function InstitutionalPage({ section }) {
                 {String(index + 1).padStart(2, '0')}
               </div>
               <div className="max-w-3xl">
-                <h2 className="font-display text-xl font-semibold text-white">{item.title}</h2>
-                <p className="mt-3 leading-relaxed text-ink-300">{item.text}</p>
+                <h2 className="font-display text-xl font-semibold text-white">{t(item.title)}</h2>
+                <p className="mt-3 leading-relaxed text-ink-300">{t(item.text)}</p>
+                {item.email && (
+                  <a className="mt-4 inline-flex text-sm font-semibold text-gold-300 hover:text-gold-200" href={`mailto:${item.email}`}>
+                    {item.email}
+                  </a>
+                )}
               </div>
             </article>
           ))}
         </div>
       </section>
 
-      {enhancement?.gallery && (
+      {localizedEnhancement?.gallery && (
         <EditorialGallery
-          description={enhancement.galleryDescription}
-          items={enhancement.gallery.items}
-          sheet={enhancement.gallery.sheet}
-          title={enhancement.galleryTitle}
+          description={localizedEnhancement.galleryDescription}
+          items={localizedEnhancement.gallery.items}
+          sheet={localizedEnhancement.gallery.sheet}
+          title={localizedEnhancement.galleryTitle}
         />
       )}
 
-      {enhancement?.faqs?.length > 0 && (
+      {localizedEnhancement?.faqs?.length > 0 && (
         <section className="border-y border-white/10 bg-white/[0.02]">
           <div className="container-app py-14 sm:py-20">
             <div className="max-w-3xl">
-              <p className="text-xs font-semibold uppercase text-gold-300">Perguntas frequentes</p>
-              <h2 className="mt-3 font-display text-3xl font-semibold text-white sm:text-4xl">Informações importantes</h2>
+              <p className="text-xs font-semibold uppercase text-gold-300">{t('Perguntas frequentes')}</p>
+              <h2 className="mt-3 font-display text-3xl font-semibold text-white sm:text-4xl">{t('Informações importantes')}</h2>
             </div>
             <div className="mt-8 divide-y divide-white/10 border-y border-white/10">
-              {enhancement.faqs.map(([question, answer]) => (
+              {localizedEnhancement.faqs.map(([question, answer]) => (
                 <details className="group py-5" key={question}>
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-6 font-medium text-white">
                     {question}
@@ -288,17 +297,17 @@ export default function InstitutionalPage({ section }) {
         <div className="flex flex-col justify-between gap-8 border-b border-white/10 pb-12 md:flex-row md:items-end">
           <div>
             <div className="inline-flex items-center gap-2 text-sm font-medium text-gold-300">
-              <ShieldCheck className="h-4 w-4" /> Informação clara e acesso protegido
+              <ShieldCheck className="h-4 w-4" /> {t('Informação clara e acesso protegido')}
             </div>
-            <h2 className="mt-3 font-display text-2xl font-semibold text-white">Próximo passo</h2>
+            <h2 className="mt-3 font-display text-2xl font-semibold text-white">{t('Próximo passo')}</h2>
           </div>
           <Link className="btn-primary w-full justify-center md:w-auto" to={page.action[1]}>
-            {page.action[0]} <ArrowRight className="h-4 w-4" />
+            {t(page.action[0])} <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
 
-        <nav aria-label={`Outras páginas de ${page.eyebrow}`} className="mt-10">
-          <p className="text-xs font-semibold uppercase text-ink-400">Veja também</p>
+        <nav aria-label={`${t('Outras páginas de')} ${t(page.eyebrow)}`} className="mt-10">
+          <p className="text-xs font-semibold uppercase text-ink-400">{t('Veja também')}</p>
           <div className="mt-4 grid gap-px overflow-hidden rounded-lg border border-white/10 bg-white/10 sm:grid-cols-2 lg:grid-cols-4">
             {relatedLinks[section].map(([label, to]) => (
               <Link
@@ -306,7 +315,7 @@ export default function InstitutionalPage({ section }) {
                 key={to}
                 to={to}
               >
-                {label} <ArrowRight className="h-4 w-4 text-gold-300" />
+                {t(label)} <ArrowRight className="h-4 w-4 text-gold-300" />
               </Link>
             ))}
           </div>

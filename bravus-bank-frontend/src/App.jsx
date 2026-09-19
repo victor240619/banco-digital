@@ -8,6 +8,7 @@ import ViewportAlert from './components/ViewportAlert';
 import { authService } from './services/api';
 import { isAccountApp, isMobileApp } from './lib/appChannel';
 import { accountDestination } from './lib/accountApp';
+import { LocaleProvider, useLocale } from './contexts/LocaleContext';
 
 const Home = lazy(() => import('./pages/Home'));
 const Login = lazy(() => import('./pages/Login'));
@@ -20,11 +21,12 @@ const UserDashboard = lazy(() => import('./pages/UserDashboard'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 
 function PageFallback() {
+  const { t } = useLocale();
   return (
     <div className="container-app py-16">
       <div className="card-premium mx-auto flex max-w-sm items-center justify-center gap-2 p-6 text-sm text-ink-200">
         <Loader2 className="h-4 w-4 animate-spin text-gold-300" />
-        Carregando pagina...
+        {t('Carregando pagina...')}
       </div>
     </div>
   );
@@ -171,7 +173,19 @@ function AppContent() {
 export default function App() {
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <AppContent />
+      <LocalizedApp />
     </Router>
+  );
+}
+
+function LocalizedApp() {
+  const { pathname } = useLocation();
+  const publicInstitutionalPage = pathname === '/'
+    || /^\/(produto|empresa)(\/|$)/.test(pathname)
+    || pathname === '/canais-atendimento';
+  return (
+    <LocaleProvider active={publicInstitutionalPage}>
+      <AppContent />
+    </LocaleProvider>
   );
 }
