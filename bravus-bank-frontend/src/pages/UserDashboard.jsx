@@ -51,7 +51,7 @@ const createIdempotencyKey = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
-  return `bravus-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  return `vantyx-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 };
 
 const EMPTY_FORM = {
@@ -491,6 +491,7 @@ export default function UserDashboard() {
   const [transactions, setTransactions] = useState([]);
   const [creditSummary, setCreditSummary] = useState(null);
   const [externalOrders, setExternalOrders] = useState([]);
+  const [pixDeposit, setPixDeposit] = useState(null);
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [receiptLoading, setReceiptLoading] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -508,6 +509,7 @@ export default function UserDashboard() {
   const [resolveLoading, setResolveLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const internalTransferAttempt = useRef(null);
+  const pixDepositAttempt = useRef(null);
   const accountReviewNoticeRef = useRef(null);
   const accountRefreshInFlight = useRef(null);
   const accountDataSignature = useRef('');
@@ -689,9 +691,6 @@ export default function UserDashboard() {
   const cents = (v) => Math.round(parseFloat(v) * 100);
 
   const submit = async (kind) => {
-    if (kind === 'deposit') {
-      return setError('Depósitos externos aguardam a integração de um provedor verificado. Informar um valor não gera crédito. Para receber agora, use uma transferência de outra conta Vantyx.');
-    }
     if ((kind === 'transfer' || kind === 'withdraw') && profile?.outboundOperationsEnabled === false) {
       if (kind === 'transfer') {
         setError('');
@@ -702,6 +701,14 @@ export default function UserDashboard() {
     }
     const amountCentavos = cents(form.amount);
     if (!form.amount || !Number.isFinite(amountCentavos) || amountCentavos <= 0) return setError('Digite um valor válido.');
+    let depositIdempotencyKey = null;
+    if (kind === 'deposit') {
+      const fingerprint = JSON.stringify([amountCentavos, form.description?.trim() || '']);
+      if (pixDepositAttempt.current?.fingerprint !== fingerprint) {
+        pixDepositAttempt.current = { fingerprint, key: createIdempotencyKey() };
+      }
+      depositIdempotencyKey = pixDepositAttempt.current.key;
+    }
     if ((kind === 'withdraw' || kind === 'transfer') && balance < amountCentavos) {
       return setError('Saldo disponivel insuficiente para concluir a operacao.');
     }
@@ -739,6 +746,16 @@ export default function UserDashboard() {
     try {
       let message = kind === 'withdraw' ? 'Saque realizado.' : 'Transferência enviada.';
 
+      if (kind === 'deposit') {
+        const { data } = await userService.createPixDeposit(
+          amountCentavos,
+          form.description,
+          depositIdempotencyKey,
+        );
+        setPixDeposit(data);
+        setSuccess('QR Pix gerado. O saldo será creditado somente após a confirmação do Mercado Pago.');
+        return;
+      }
       if (kind === 'withdraw') await userService.withdraw(amountCentavos, form.description);
       if (kind === 'transfer' && form.transferMode === 'internal') {
         const { data } = await userService.transfer(
@@ -1353,7 +1370,7 @@ export default function UserDashboard() {
                       ? 'Solicite remessa ou câmbio pelo fluxo de Money Services Business sujeito à licença CIMA.'
                       : 'Transfira entre contas Vantyx com liquidação interna no mesmo ledger.'
                 : tab === 'deposit'
-                  ? 'Depósitos externos aguardam um provedor de recebimento verificado. Nenhum valor digitado é creditado automaticamente. Você pode receber transferências de outras contas Vantyx.'
+                  ? 'Gere um QR Pix do Mercado Pago. Digitar um valor não altera o saldo; o crédito ocorre somente após confirmação assinada e conciliada.'
                   : 'Operação em conta corrente.'}
             </p>
 
@@ -1407,7 +1424,10 @@ export default function UserDashboard() {
                   className="form-input"
                   placeholder="0,00"
                   value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                  onChange={(e) => {
+                    setForm({ ...form, amount: e.target.value });
+                    if (tab === 'deposit') setPixDeposit(null);
+                  }}
                 />
               </div>
 
@@ -1550,9 +1570,61 @@ export default function UserDashboard() {
                   className="form-input"
                   placeholder="Ex: Pagamento aluguel"
                   value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  onChange={(e) => {
+                    setForm({ ...form, description: e.target.value });
+                    if (tab === 'deposit') setPixDeposit(null);
+                  }}
                 />
               </div>
+
+              {tab === 'deposit' && pixDeposit && (
+                <div className="rounded-2xl border border-electric-400/30 bg-electric-500/[0.06] p-5">
+                  <div className="grid gap-5 sm:grid-cols-[180px_1fr] sm:items-center">
+                    {pixDeposit.qrCodeBase64 && (
+                      <img
+                        src={`data:image/png;base64,${pixDeposit.qrCodeBase64}`}
+                        alt="QR Code Pix do Mercado Pago"
+                        className="mx-auto aspect-square w-full max-w-[180px] rounded-xl bg-white p-2"
+                      />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-white">Pix aguardando pagamento</p>
+                      <p className="mt-1 text-sm text-ink-300">
+                        {formatCurrency(pixDeposit.amountCentavos)} · {pixDeposit.statusDetail || pixDeposit.status}
+                      </p>
+                      {pixDeposit.qrCode && (
+                        <button
+                          type="button"
+                          className="btn-secondary mt-4 w-full justify-center"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(pixDeposit.qrCode);
+                              setSuccess('Código Pix copiado.');
+                            } catch {
+                              setError('Não foi possível copiar automaticamente. Use o link de pagamento.');
+                            }
+                          }}
+                        >
+                          Copiar código Pix
+                        </button>
+                      )}
+                      {pixDeposit.ticketUrl && (
+                        <a
+                          className="btn-secondary mt-2 w-full justify-center"
+                          href={pixDeposit.ticketUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Abrir pagamento
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  <p className="mt-4 text-xs leading-5 text-ink-300">
+                    O saldo não é liberado nesta etapa. A Vantyx aguarda o webhook assinado e confirma a order diretamente no Mercado Pago.
+                  </p>
+                </div>
+              )}
 
               {tab === 'transfer' && (
                 <TransferRecipientPreview
@@ -1585,12 +1657,12 @@ export default function UserDashboard() {
               </AnimatePresence>
 
               <button
-                disabled={tab === 'deposit' || submitting || (tab === 'transfer' && resolveLoading)}
+                disabled={submitting || (tab === 'transfer' && resolveLoading)}
                 onClick={() => submit(tab)}
                 className="btn-primary w-full"
               >
                 {submitting ? 'Processando...' : (
-                  tab === 'deposit' ? 'Depósito externo indisponível' :
+                  tab === 'deposit' ? 'Gerar QR Pix' :
                   tab === 'withdraw' ? 'Confirmar saque' : `Confirmar ${transferOperationLabel}`
                 )}
               </button>

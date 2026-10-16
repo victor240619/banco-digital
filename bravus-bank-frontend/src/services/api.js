@@ -183,6 +183,10 @@ export const userService = {
     api.get(`/user/transfer/resolve?destination=${encodeURIComponent(destination)}`),
   deposit: (amount, description) =>
     api.post('/user/deposit', { type: 'DEPOSIT', amount, description }),
+  createPixDeposit: (amountCentavos, description, idempotencyKey) =>
+    api.post('/payments/mp/orders/pix', { amountCentavos, description }, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    }),
   withdraw: (amount, description) =>
     api.post('/user/withdraw', { type: 'WITHDRAWAL', amount, description }),
   transfer: (amount, destinationAccount, description, idempotencyKey) =>

@@ -57,6 +57,8 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/api/payments/mp/webhook").permitAll()
+                        .requestMatchers("/api/payments/mp/orders/**").hasAnyRole("USER", "ADMIN")
                         // Legacy provider handlers are not a verified deposit rail:
                         // MP lacks signed, unique settlement and Stripe accepts
                         // client-selected customers/destinations. Keep them closed

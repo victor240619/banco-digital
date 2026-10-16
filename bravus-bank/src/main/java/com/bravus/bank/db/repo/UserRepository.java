@@ -37,6 +37,10 @@ public interface UserRepository extends JpaRepository<UserEntity, Long> {
     @Query("select u from UserEntity u where u.id in :ids order by u.id")
     List<UserEntity> findAllByIdInOrderByIdForUpdate(@Param("ids") Collection<Long> ids);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from UserEntity u where u.id = :id")
+    Optional<UserEntity> findByIdForUpdate(@Param("id") Long id);
+
     boolean existsByUsername(String username);
     boolean existsByEmail(String email);
     boolean existsByAccountNumber(String accountNumber);

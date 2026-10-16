@@ -61,3 +61,13 @@ stripe:
   cancelUrl: ${STRIPE_CANCEL_URL:http://localhost:5173/payment/cancel}
   connect: ${STRIPE_CONNECT:false}
   defaultCurrency: ${STRIPE_CURRENCY:brl}
+
+mercadopago:
+  enabled: ${MP_ENABLED:false}
+  access-token: ${MP_ACCESS_TOKEN:}
+  webhook-secret: ${MP_WEBHOOK_SECRET:}
+  api-base-url: ${MP_API_BASE_URL:https://api.mercadopago.com}
+  minimum-amount-centavos: ${MP_PIX_MIN_AMOUNT_CENTAVOS:100}
+  maximum-amount-centavos: ${MP_PIX_MAX_AMOUNT_CENTAVOS:1000000}
+  pix-expiration: ${MP_PIX_EXPIRATION:PT30M}
+  webhook-tolerance: ${MP_WEBHOOK_TOLERANCE:PT5M}

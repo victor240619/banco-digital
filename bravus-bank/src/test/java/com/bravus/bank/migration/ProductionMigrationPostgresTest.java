@@ -29,7 +29,7 @@ class ProductionMigrationPostgresTest {
                     .validateOnMigrate(true)
                     .load();
 
-            assertEquals(22, flyway.migrate().migrationsExecuted);
+            assertEquals(23, flyway.migrate().migrationsExecuted);
             assertEquals(0, flyway.migrate().migrationsExecuted);
 
             try (Connection connection = postgres.getPostgresDatabase().getConnection()) {
@@ -115,6 +115,61 @@ class ProductionMigrationPostgresTest {
                         """));
                 assertEquals(1, count(jdbc,
                         "SELECT COUNT(*) FROM production_state_imports WHERE marker = 'SITES_SNAPSHOT_2026_07_14_194827Z'"));
+
+                try (Statement statement = connection.createStatement()) {
+                    statement.executeUpdate("""
+                            INSERT INTO mercado_pago_pix_orders (
+                                id, user_id, client_idempotency_key, provider_idempotency_key,
+                                external_reference, amount_centavos, currency, status
+                            ) VALUES (
+                                '10000000-0000-0000-0000-000000000001', 1,
+                                'client-key-migration-test-0001', 'provider-key-migration-test-0001',
+                                'vantyx:pix:migration-test-0001', 10000, 'BRL', 'CREATING'
+                            )
+                            """);
+                    statement.executeUpdate("""
+                            INSERT INTO mercado_pago_webhook_events (
+                                request_id, provider_order_id, event_type, processing_status
+                            ) VALUES ('request-migration-test-0001', 'ORD01MIGRATION', 'order', 'RECEIVED')
+                            """);
+                }
+                assertThrows(SQLException.class, () -> {
+                    try (Statement statement = connection.createStatement()) {
+                        statement.executeUpdate("""
+                                INSERT INTO mercado_pago_pix_orders (
+                                    id, user_id, client_idempotency_key, provider_idempotency_key,
+                                    external_reference, amount_centavos, currency, status
+                                ) VALUES (
+                                    '10000000-0000-0000-0000-000000000002', 1,
+                                    'client-key-migration-test-0001', 'provider-key-migration-test-0002',
+                                    'vantyx:pix:migration-test-0002', 10000, 'BRL', 'CREATING'
+                                )
+                                """);
+                    }
+                });
+                assertThrows(SQLException.class, () -> {
+                    try (Statement statement = connection.createStatement()) {
+                        statement.executeUpdate("""
+                                INSERT INTO mercado_pago_pix_orders (
+                                    id, user_id, client_idempotency_key, provider_idempotency_key,
+                                    external_reference, amount_centavos, currency, status
+                                ) VALUES (
+                                    '10000000-0000-0000-0000-000000000003', 1,
+                                    'client-key-migration-test-0003', 'provider-key-migration-test-0003',
+                                    'vantyx:pix:migration-test-0003', 10000, 'USD', 'CREATING'
+                                )
+                                """);
+                    }
+                });
+                assertThrows(SQLException.class, () -> {
+                    try (Statement statement = connection.createStatement()) {
+                        statement.executeUpdate("""
+                                INSERT INTO mercado_pago_webhook_events (
+                                    request_id, provider_order_id, event_type, processing_status
+                                ) VALUES ('request-migration-test-0001', 'ORD01MIGRATION', 'order', 'RECEIVED')
+                                """);
+                    }
+                });
 
                 assertThrows(SQLException.class, () -> {
                     try (Statement statement = connection.createStatement()) {
