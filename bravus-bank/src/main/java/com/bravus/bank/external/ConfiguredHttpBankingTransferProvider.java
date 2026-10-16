@@ -17,7 +17,7 @@ import java.util.Map;
 public class ConfiguredHttpBankingTransferProvider implements BankingTransferProvider {
     private static final MediaType JSON_PATCH = MediaType.valueOf("application/json-patch+json");
 
-    private final RestClient restClient = RestClient.create();
+    private volatile RestClient restClient;
     private final ObjectMapper mapper;
 
     @Value("${BRAVUS_BANKING_PROVIDER_URL:}")
@@ -121,7 +121,7 @@ public class ConfiguredHttpBankingTransferProvider implements BankingTransferPro
                 "pixKeyType", safe(command.pixKeyType)
         ));
 
-        RestClient.RequestBodySpec spec = restClient.post()
+        RestClient.RequestBodySpec spec = restClient().post()
                 .uri(providerUrl)
                 .header("Idempotency-Key", command.idempotencyKey);
         if (providerToken != null && !providerToken.isBlank()) {
@@ -173,7 +173,7 @@ public class ConfiguredHttpBankingTransferProvider implements BankingTransferPro
             body.put("remittanceInformation", command.description);
         }
 
-        JsonNode response = restClient.post()
+        JsonNode response = restClient().post()
                 .uri(joinUrl(celcoinBaseUrl, celcoinPixPaymentPath))
                 .contentType(JSON_PATCH)
                 .accept(MediaType.APPLICATION_JSON)
@@ -194,7 +194,7 @@ public class ConfiguredHttpBankingTransferProvider implements BankingTransferPro
         form.add("grant_type", "client_credentials");
         form.add("client_secret", celcoinClientSecret);
 
-        JsonNode response = restClient.post()
+        JsonNode response = restClient().post()
                 .uri(celcoinAuthUrl)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .accept(MediaType.APPLICATION_JSON)
@@ -217,7 +217,7 @@ public class ConfiguredHttpBankingTransferProvider implements BankingTransferPro
             body.put("ownerTaxId", digits(command.beneficiaryDocument));
         }
 
-        return restClient.post()
+        return restClient().post()
                 .uri(joinUrl(celcoinBaseUrl, celcoinDictPath))
                 .contentType(JSON_PATCH)
                 .accept(MediaType.APPLICATION_JSON)
@@ -226,6 +226,15 @@ public class ConfiguredHttpBankingTransferProvider implements BankingTransferPro
                 .body(body)
                 .retrieve()
                 .body(JsonNode.class);
+    }
+
+    private RestClient restClient() {
+        RestClient current = restClient;
+        if (current != null) return current;
+        synchronized (this) {
+            if (restClient == null) restClient = RestClient.create();
+            return restClient;
+        }
     }
 
     private Map<String, Object> celcoinDebitParty() {

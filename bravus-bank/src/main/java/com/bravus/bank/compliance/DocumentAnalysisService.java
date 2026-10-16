@@ -20,7 +20,7 @@ public class DocumentAnalysisService {
     private final DocumentAnalysisRepository analysisRepo;
     private final UserRepository userRepo;
     private final ObjectMapper mapper;
-    private final RestClient restClient = RestClient.create();
+    private volatile RestClient restClient;
 
     @Value("${BRAVUS_DOCUMENT_ANALYSIS_MODE:INTERNAL}")
     private String analysisMode;
@@ -164,7 +164,7 @@ public class DocumentAnalysisService {
                     "Configure BRAVUS_CNPJ_API_URL ou use BRAVUS_DOCUMENT_ANALYSIS_MODE=INTERNAL.");
         }
         String url = cnpjBaseUrl.endsWith("/") ? cnpjBaseUrl + cnpj : cnpjBaseUrl + "/" + cnpj;
-        return restClient.get().uri(url).retrieve().body(JsonNode.class);
+        return restClient().get().uri(url).retrieve().body(JsonNode.class);
     }
 
     private JsonNode queryCpf(String cpf) {
@@ -176,11 +176,20 @@ public class DocumentAnalysisService {
                 ? cpfApiUrl.replace("{document}", cpf)
                 : (cpfApiUrl.endsWith("/") ? cpfApiUrl + cpf : cpfApiUrl + "/" + cpf);
 
-        RestClient.RequestHeadersSpec<?> spec = restClient.get().uri(url);
+        RestClient.RequestHeadersSpec<?> spec = restClient().get().uri(url);
         if (cpfApiToken != null && !cpfApiToken.isBlank()) {
             spec = spec.header(HttpHeaders.AUTHORIZATION, "Bearer " + cpfApiToken);
         }
         return spec.retrieve().body(JsonNode.class);
+    }
+
+    private RestClient restClient() {
+        RestClient current = restClient;
+        if (current != null) return current;
+        synchronized (this) {
+            if (restClient == null) restClient = RestClient.create();
+            return restClient;
+        }
     }
 
     private String extractName(String type, JsonNode payload) {

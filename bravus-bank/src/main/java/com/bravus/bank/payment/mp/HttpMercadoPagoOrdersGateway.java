@@ -2,6 +2,7 @@ package com.bravus.bank.payment.mp;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -19,12 +20,11 @@ import java.util.Map;
 public class HttpMercadoPagoOrdersGateway implements MercadoPagoOrdersGateway {
     private final MercadoPagoProperties properties;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private volatile HttpClient httpClient;
 
+    @Autowired
     public HttpMercadoPagoOrdersGateway(MercadoPagoProperties properties, ObjectMapper objectMapper) {
-        this(properties, objectMapper, HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build());
+        this(properties, objectMapper, null);
     }
 
     HttpMercadoPagoOrdersGateway(
@@ -86,7 +86,7 @@ public class HttpMercadoPagoOrdersGateway implements MercadoPagoOrdersGateway {
                 builder.GET();
             }
 
-            HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new MercadoPagoIntegrationException(
                         "MP_PROVIDER_ERROR",
@@ -172,5 +172,18 @@ public class HttpMercadoPagoOrdersGateway implements MercadoPagoOrdersGateway {
 
     private String centsToDecimal(long cents) {
         return BigDecimal.valueOf(cents, 2).setScale(2, RoundingMode.UNNECESSARY).toPlainString();
+    }
+
+    private HttpClient httpClient() {
+        HttpClient current = httpClient;
+        if (current != null) return current;
+        synchronized (this) {
+            if (httpClient == null) {
+                httpClient = HttpClient.newBuilder()
+                        .connectTimeout(Duration.ofSeconds(10))
+                        .build();
+            }
+            return httpClient;
+        }
     }
 }

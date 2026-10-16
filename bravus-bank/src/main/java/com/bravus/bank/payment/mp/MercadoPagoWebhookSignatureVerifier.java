@@ -1,6 +1,7 @@
 package com.bravus.bank.payment.mp;
 
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -17,6 +18,7 @@ public class MercadoPagoWebhookSignatureVerifier {
     private final MercadoPagoProperties properties;
     private final Clock clock;
 
+    @Autowired
     public MercadoPagoWebhookSignatureVerifier(MercadoPagoProperties properties) {
         this(properties, Clock.systemUTC());
     }
