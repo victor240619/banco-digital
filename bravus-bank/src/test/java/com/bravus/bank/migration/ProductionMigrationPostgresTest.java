@@ -63,7 +63,7 @@ class ProductionMigrationPostgresTest {
                     .validateOnMigrate(true)
                     .load();
 
-            assertEquals(17, latest.migrate().migrationsExecuted);
+            assertEquals(18, latest.migrate().migrationsExecuted);
 
             try (Connection connection = postgres.getPostgresDatabase().getConnection()) {
                 JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource(connection, true));
@@ -95,7 +95,7 @@ class ProductionMigrationPostgresTest {
                     .validateOnMigrate(true)
                     .load();
 
-            assertEquals(25, flyway.migrate().migrationsExecuted);
+            assertEquals(26, flyway.migrate().migrationsExecuted);
             assertEquals(0, flyway.migrate().migrationsExecuted);
 
             try (Connection connection = postgres.getPostgresDatabase().getConnection()) {
@@ -317,6 +317,20 @@ class ProductionMigrationPostgresTest {
                   AND table_name IN ('account_ledger_entries', 'mercado_pago_pix_orders')
                   AND data_type = 'character varying'
                   AND character_maximum_length = 3
+                """));
+        assertEquals(6, count(jdbc, """
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND (
+                    (table_name = 'account_opening_kyc'
+                     AND column_name IN ('front_sha256', 'back_sha256', 'face_sha256'))
+                    OR
+                    (table_name = 'password_reset_requests'
+                     AND column_name IN ('identifier_hash', 'client_secret_hash', 'submitted_face_sha256'))
+                  )
+                  AND data_type = 'character varying'
+                  AND character_maximum_length = 64
                 """));
     }
 }
