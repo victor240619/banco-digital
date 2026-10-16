@@ -63,7 +63,7 @@ class ProductionMigrationPostgresTest {
                     .validateOnMigrate(true)
                     .load();
 
-            assertEquals(16, latest.migrate().migrationsExecuted);
+            assertEquals(17, latest.migrate().migrationsExecuted);
 
             try (Connection connection = postgres.getPostgresDatabase().getConnection()) {
                 JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource(connection, true));
@@ -81,6 +81,7 @@ class ProductionMigrationPostgresTest {
                         SELECT COUNT(*) FROM production_state_imports
                         WHERE marker = 'SITES_SNAPSHOT_2026_07_14_194827Z'
                         """));
+                assertCurrencyColumnsUseVarchar(jdbc);
             }
         }
     }
@@ -94,7 +95,7 @@ class ProductionMigrationPostgresTest {
                     .validateOnMigrate(true)
                     .load();
 
-            assertEquals(24, flyway.migrate().migrationsExecuted);
+            assertEquals(25, flyway.migrate().migrationsExecuted);
             assertEquals(0, flyway.migrate().migrationsExecuted);
 
             try (Connection connection = postgres.getPostgresDatabase().getConnection()) {
@@ -186,6 +187,7 @@ class ProductionMigrationPostgresTest {
                         """));
                 assertEquals(1, count(jdbc,
                         "SELECT COUNT(*) FROM production_state_imports WHERE marker = 'SITES_SNAPSHOT_2026_07_14_194827Z'"));
+                assertCurrencyColumnsUseVarchar(jdbc);
 
                 try (Statement statement = connection.createStatement()) {
                     statement.executeUpdate("""
@@ -304,5 +306,17 @@ class ProductionMigrationPostgresTest {
 
     private long amount(JdbcTemplate jdbc, String sql) {
         return jdbc.queryForObject(sql, Long.class);
+    }
+
+    private void assertCurrencyColumnsUseVarchar(JdbcTemplate jdbc) {
+        assertEquals(2, count(jdbc, """
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND column_name = 'currency'
+                  AND table_name IN ('account_ledger_entries', 'mercado_pago_pix_orders')
+                  AND data_type = 'character varying'
+                  AND character_maximum_length = 3
+                """));
     }
 }
