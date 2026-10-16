@@ -84,7 +84,7 @@ assert.equal(ios.getAppClientChannel(), 'IOS_APP');
 // bodies are markers; Navbar and all route guards remain the production code.
 const reactPath = JSON.stringify(require.resolve('react'));
 const routerPath = JSON.stringify(require.resolve('react-router-dom'));
-const serverRouterPath = JSON.stringify(require.resolve('react-router-dom/server'));
+const serverRouterPath = JSON.stringify(require.resolve('react-router'));
 const appSource = await readFile(resolve(frontend, 'src/App.jsx'), 'utf8');
 const result = await build({
   stdin: {
@@ -97,7 +97,7 @@ const result = await build({
       if (args.path === 'react' || args.path === require.resolve('react')) {
         return { path: require.resolve('react'), external: true };
       }
-      if ([require.resolve('react-router-dom'), require.resolve('react-router-dom/server')].includes(args.path)) {
+      if ([require.resolve('react-router-dom'), require.resolve('react-router')].includes(args.path)) {
         return { path: args.path, external: true };
       }
     });
