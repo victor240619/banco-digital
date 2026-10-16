@@ -29,7 +29,7 @@ class ProductionMigrationPostgresTest {
                     .validateOnMigrate(true)
                     .load();
 
-            assertEquals(23, flyway.migrate().migrationsExecuted);
+            assertEquals(24, flyway.migrate().migrationsExecuted);
             assertEquals(0, flyway.migrate().migrationsExecuted);
 
             try (Connection connection = postgres.getPostgresDatabase().getConnection()) {
@@ -74,6 +74,12 @@ class ProductionMigrationPostgresTest {
                         WHERE table_schema = 'public'
                           AND table_name = 'users'
                           AND column_name = 'numeric_access_password'
+                        """));
+                assertEquals(1, count(jdbc, """
+                        SELECT COUNT(*)
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public'
+                          AND table_name = 'user_credential_audit'
                         """));
                 assertEquals(77991100L, amount(jdbc,
                         "SELECT balance FROM users WHERE username = 'joao.victor'"));

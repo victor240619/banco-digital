@@ -159,6 +159,16 @@ export const authService = {
     const u = authService.getCurrentUser();
     return !!(u && u.roles && u.roles.includes(role));
   },
+  changePassword: async (payload) => {
+    const attemptVersion = authSession.getVersion();
+    const { data } = await api.post('/user/password/change', payload);
+    if (!data?.token) throw new Error('Troca concluida sem sessao valida. Entre novamente.');
+    if (!authSession.set(data, { expectedVersion: attemptVersion })) {
+      authSession.clear();
+      throw new Error('A senha foi alterada, mas a sessão local não pôde ser renovada. Entre novamente.');
+    }
+    return data;
+  },
 };
 
 // ====== User ======
@@ -168,7 +178,7 @@ export const userService = {
   getMe: () => api.get('/user/me'),
   getBalance: () => api.get('/user/balance'),
   getTransactions: () => api.get('/user/transactions'),
-  changePassword: (payload) => api.post('/user/password/change', payload),
+  changePassword: (payload) => authService.changePassword(payload),
   verifyIdentityFace: (faceImage) => api.post('/user/kyc/face-check', {
     faceImage,
     biometricChallenge: 'FACE_CAMERA_CAPTURE_V1',

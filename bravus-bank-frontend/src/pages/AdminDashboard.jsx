@@ -16,6 +16,7 @@ import {
 } from '../services/api';
 import { formatCurrency, formatCurrencyExact, formatDate, getTransactionTypeLabel, reaisToCentavosExact } from '../utils/helpers';
 import { cn } from '../lib/cn';
+import PasswordChangePanel from '../components/PasswordChangePanel';
 
 // ============ Helpers ============
 const brl = (cents) => formatCurrency(cents ?? 0);
@@ -201,6 +202,7 @@ export default function AdminDashboard() {
         <Tab id="unifiedSearch" label="Consulta Geral" icon={Search} />
         <Tab id="analysis" label="Analise automatica" icon={Shield} />
         <Tab id="passwordReset" label="Recuperacao de senha" icon={KeyRound} />
+        <Tab id="accountSecurity" label="Segurança da conta" icon={Lock} />
         <Tab id="credit"  label="Emissão Escritural" icon={Coins} />
         <Tab id="external" label="Envio Bancario" icon={Send} />
         <Tab id="globalRail" label="Trilho Global" icon={Globe2} />
@@ -246,6 +248,10 @@ export default function AdminDashboard() {
           onSuccess={setSuccess}
           onError={setError}
         />
+      )}
+
+      {tab === 'accountSecurity' && (
+        <PasswordChangePanel onSuccess={setSuccess} onError={setError} />
       )}
 
       {/* ===== TAB 3: CRÉDITO ===== */}
