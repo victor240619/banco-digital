@@ -1,8 +1,9 @@
 -- Verified production snapshot captured from the legacy Sites runtime at
--- 2026-07-14T19:48:27.177Z. This migration is intentionally fail-closed: it
--- only imports into a database that still contains the untouched seed users.
+-- 2026-07-14T19:48:27.177Z. The snapshot is imported only into a database
+-- containing the untouched seed users. Any database with customer or financial
+-- activity is preserved in place and receives only the later schema migrations.
 
-CREATE TABLE production_state_imports (
+CREATE TABLE IF NOT EXISTS production_state_imports (
     marker VARCHAR(100) PRIMARY KEY,
     source_url VARCHAR(500) NOT NULL,
     captured_at TIMESTAMPTZ NOT NULL,
@@ -11,24 +12,28 @@ CREATE TABLE production_state_imports (
     notes TEXT NOT NULL
 );
 
-DO $$
+DO $snapshot$
 BEGIN
-    IF EXISTS (SELECT 1 FROM transactions) THEN
-        RAISE EXCEPTION 'Production snapshot import refused: transactions already exist';
-    END IF;
-    IF EXISTS (SELECT 1 FROM external_transfer_orders) THEN
-        RAISE EXCEPTION 'Production snapshot import refused: external orders already exist';
-    END IF;
-    IF EXISTS (SELECT 1 FROM account_ledger_entries) THEN
-        RAISE EXCEPTION 'Production snapshot import refused: account ledger already exists';
-    END IF;
-    IF EXISTS (
-        SELECT 1 FROM users
-        WHERE username NOT IN ('admin', 'user', 'admin_bravus')
-    ) THEN
-        RAISE EXCEPTION 'Production snapshot import refused: non-seed users already exist';
-    END IF;
-END $$;
+    IF EXISTS (SELECT 1 FROM transactions)
+       OR EXISTS (SELECT 1 FROM external_transfer_orders)
+       OR EXISTS (SELECT 1 FROM account_ledger_entries)
+       OR EXISTS (
+           SELECT 1 FROM users
+           WHERE username NOT IN ('admin', 'user', 'admin_bravus')
+       ) THEN
+        INSERT INTO production_state_imports (
+            marker, source_url, captured_at,
+            expected_customer_balance_centavos, notes
+        )
+        SELECT
+            'EXISTING_DATABASE_PRESERVED_V18',
+            'https://vantyxbank.com',
+            NOW(),
+            COALESCE(SUM(balance), 0),
+            'Existing users, transactions, and balances were preserved; the legacy snapshot import was skipped.'
+        FROM users
+        ON CONFLICT (marker) DO NOTHING;
+    ELSE
 
 -- Remove disposable seed identities and convert the original admin into the
 -- live Bravus administrator. Referential tables are empty at this point.
@@ -363,9 +368,12 @@ INSERT INTO production_state_imports (
     'Joao 77991100 + Francisca 10908900; five transactions; six balanced account-ledger entries.'
 );
 
-SELECT setval(pg_get_serial_sequence('users', 'id'), (SELECT MAX(id) FROM users), TRUE);
-SELECT setval(pg_get_serial_sequence('transactions', 'id'), (SELECT MAX(id) FROM transactions), TRUE);
-SELECT setval(pg_get_serial_sequence('external_transfer_orders', 'id'), (SELECT MAX(id) FROM external_transfer_orders), TRUE);
-SELECT setval(pg_get_serial_sequence('account_ledger_entries', 'id'), (SELECT MAX(id) FROM account_ledger_entries), TRUE);
-SELECT setval(pg_get_serial_sequence('credit_grants', 'id'), (SELECT MAX(id) FROM credit_grants), TRUE);
-SELECT setval(pg_get_serial_sequence('ledger_entries', 'id'), (SELECT MAX(id) FROM ledger_entries), TRUE);
+        PERFORM setval(pg_get_serial_sequence('users', 'id'), (SELECT MAX(id) FROM users), TRUE);
+        PERFORM setval(pg_get_serial_sequence('transactions', 'id'), (SELECT MAX(id) FROM transactions), TRUE);
+        PERFORM setval(pg_get_serial_sequence('external_transfer_orders', 'id'), (SELECT MAX(id) FROM external_transfer_orders), TRUE);
+        PERFORM setval(pg_get_serial_sequence('account_ledger_entries', 'id'), (SELECT MAX(id) FROM account_ledger_entries), TRUE);
+        PERFORM setval(pg_get_serial_sequence('credit_grants', 'id'), (SELECT MAX(id) FROM credit_grants), TRUE);
+        PERFORM setval(pg_get_serial_sequence('ledger_entries', 'id'), (SELECT MAX(id) FROM ledger_entries), TRUE);
+    END IF;
+END
+$snapshot$;

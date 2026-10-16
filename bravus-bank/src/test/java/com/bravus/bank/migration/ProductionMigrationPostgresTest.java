@@ -21,6 +21,71 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProductionMigrationPostgresTest {
     @Test
+    void preservesExistingProductionRowsWhenContinuingAfterV8() throws Exception {
+        try (EmbeddedPostgres postgres = EmbeddedPostgres.builder().start()) {
+            Flyway throughV8 = Flyway.configure()
+                    .dataSource(postgres.getPostgresDatabase())
+                    .locations("classpath:db/migration")
+                    .target("8")
+                    .validateOnMigrate(true)
+                    .load();
+
+            assertEquals(8, throughV8.migrate().migrationsExecuted);
+
+            try (Connection connection = postgres.getPostgresDatabase().getConnection()) {
+                JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource(connection, true));
+                jdbc.update("""
+                        INSERT INTO users (
+                            username, email, password, full_name, cpf,
+                            account_number, balance, is_active
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)
+                        """,
+                        "existing.customer",
+                        "existing.customer@example.invalid",
+                        "$2b$10$test-only-not-a-production-credential",
+                        "Existing Customer",
+                        "222.333.444-55",
+                        "1234567890",
+                        7_654_321L);
+                jdbc.update("""
+                        INSERT INTO transactions (
+                            user_id, type, amount, description, status
+                        ) VALUES (
+                            (SELECT id FROM users WHERE username = ?),
+                            'DEPOSIT', ?, 'Pre-existing production row', 'COMPLETED'
+                        )
+                        """, "existing.customer", 12_345L);
+            }
+
+            Flyway latest = Flyway.configure()
+                    .dataSource(postgres.getPostgresDatabase())
+                    .locations("classpath:db/migration")
+                    .validateOnMigrate(true)
+                    .load();
+
+            assertEquals(16, latest.migrate().migrationsExecuted);
+
+            try (Connection connection = postgres.getPostgresDatabase().getConnection()) {
+                JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource(connection, true));
+                assertEquals(4, count(jdbc, "SELECT COUNT(*) FROM users"));
+                assertEquals(1, count(jdbc, "SELECT COUNT(*) FROM transactions"));
+                assertEquals(7_654_321L, amount(jdbc,
+                        "SELECT balance FROM users WHERE username = 'existing.customer'"));
+                assertEquals("567890", jdbc.queryForObject(
+                        "SELECT account_number FROM users WHERE username = 'existing.customer'", String.class));
+                assertEquals(1, count(jdbc, """
+                        SELECT COUNT(*) FROM production_state_imports
+                        WHERE marker = 'EXISTING_DATABASE_PRESERVED_V18'
+                        """));
+                assertEquals(0, count(jdbc, """
+                        SELECT COUNT(*) FROM production_state_imports
+                        WHERE marker = 'SITES_SNAPSHOT_2026_07_14_194827Z'
+                        """));
+            }
+        }
+    }
+
+    @Test
     void importsVerifiedProductionStateOnRealPostgres() throws Exception {
         try (EmbeddedPostgres postgres = EmbeddedPostgres.builder().start()) {
             Flyway flyway = Flyway.configure()
