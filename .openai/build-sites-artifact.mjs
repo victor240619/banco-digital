@@ -3320,10 +3320,13 @@ async function handleApi(request) {
 
     const auth = request.headers.get("authorization") || "";
     const currentToken = auth.replace(/^Bearer\\s+/i, "").trim();
-    for (const [token, session] of Object.entries(state.sessions)) {
-      if (session?.username === user.username && token !== currentToken) delete state.sessions[token];
-    }
-    return json({ status: "PASSWORD_CHANGED" }, { headers: { "cache-control": "no-store" } });
+    const clientChannel = state.sessions[currentToken]?.clientChannel || "WEB";
+    revokeUserSessions(user.username);
+    const token = createSession(user, clientChannel);
+    return json({
+      status: "PASSWORD_CHANGED",
+      ...authResponse(user, token),
+    }, { headers: { "cache-control": "no-store" } });
   }
 
   if (request.method === "POST" && path === "/user/kyc/face-check") {

@@ -1411,7 +1411,10 @@ const changedInAccountPassword = await call(worker, "POST", "/user/password/chan
 });
 assert.equal(changedInAccountPassword.response.status, 200, JSON.stringify(changedInAccountPassword.data));
 assert.equal(changedInAccountPassword.data.status, "PASSWORD_CHANGED");
-assert.equal((await call(worker, "GET", "/user/profile", { token: finalLogin.data.token })).response.status, 200, "current session must survive its own password change");
+assert.ok(changedInAccountPassword.data.token, "password change must rotate and return the current session token");
+assert.notEqual(changedInAccountPassword.data.token, finalLogin.data.token, "the current session token must rotate after a password change");
+assert.equal((await call(worker, "GET", "/user/profile", { token: finalLogin.data.token })).response.status, 401, "the previous current-session token must be revoked after rotation");
+assert.equal((await call(worker, "GET", "/user/profile", { token: changedInAccountPassword.data.token })).response.status, 200, "the rotated session must remain authenticated");
 assert.equal((await call(worker, "GET", "/user/profile", { token: secondFinalLogin.data.token })).response.status, 401, "other sessions must be revoked after a password change");
 const rejectedOldPassword = await call(worker, "POST", "/auth/login", { body: { username: "52998224725", password: "SenhaFinal456" } });
 assert.equal(rejectedOldPassword.response.status, 400, "old password must stop working immediately");
