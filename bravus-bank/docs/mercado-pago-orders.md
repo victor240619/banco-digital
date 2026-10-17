@@ -52,6 +52,26 @@ sem a configuração local necessária para validar sua confirmação.
 - Não habilite credenciais de produção antes da aprovação contratual da conta e
   de um ensaio de rollback em staging.
 
+## Verificação de configuração sem movimentar dinheiro
+
+Com a configuração aplicada, o health check deve continuar respondendo HTTP 200.
+Uma chamada ao webhook com assinatura inválida deve retornar HTTP 401
+`MP_INVALID_SIGNATURE`; HTTP 503 `MP_DISABLED` indica que o recurso continua
+desabilitado. Criar uma order sem autenticação deve ser recusado. Esses checks
+não comprovam a criação do QR Code nem a liquidação e o crédito de um Pix real.
+
+## Saídas Pix são uma integração separada
+
+Ativar credenciais e notificações de Orders não habilita Payouts. O código deste
+módulo implementa recebimentos; não implementa saídas pelo Mercado Pago. Para
+Payouts em produção, a documentação exige assinatura Ed25519 e cadastro da chave
+pública com a equipe de Integrações. Confirme a habilitação e o contrato da conta
+antes de implementar ou ativar essa rota. Não reutilize o webhook de Orders nem
+marque uma saída como concluída apenas porque a criação do payout foi aceita.
+
+Referências oficiais: [produção de Payouts](https://www.mercadopago.com.br/developers/es/docs/payouts/go-to-production)
+e [transferências e consulta de status](https://www.mercadopago.com.br/developers/es/docs/payouts/integration-configuration/money-transfers).
+
 ## Desativação e rollback
 
 Definir `MP_ENABLED=false` bloqueia novas orders e webhooks antes de qualquer
