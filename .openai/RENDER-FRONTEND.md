@@ -37,21 +37,30 @@ Do not put credentials or database connection strings into frontend build variab
 domain setup. Render specifies A `216.24.57.1` for the apex and CNAME
 `vantyx-bank-frontend.onrender.com` for `www`. Render redirects `www` to the apex.
 
-The DNS update requires GoDaddy's identity verification. At the time this record
-was prepared, that verification was pending and the original DNS was still active.
-Do not describe the custom-domain migration as completed until DNS, Render domain
-verification and valid HTTPS have all been checked.
+GoDaddy confirmed the apex A replacement and removal of the remaining old A
+record after hardware-key verification. The apex now has one A record,
+`216.24.57.1`, TTL 600. Google's public DNS returned this target. Render reports
+the apex as Verified / Certificate Issued. An HTTPS request with DNS resolution
+explicitly pinned to the new IP returned HTTP 200, a Render response identifier,
+and the published `index-DFx8TpE4.js` asset reference, with normal TLS validation.
 
-After verification, replace both old apex A records with one A record for
-`216.24.57.1`, and update only the `www` CNAME. Preserve all other DNS records,
+The `www` CNAME update has been submitted but awaits its own GoDaddy hardware-key
+confirmation. Do not describe the whole migration as complete until this change,
+Render verification for `www`, and normal public HTTPS routing are checked.
+
+After verification, update only the `www` CNAME. Preserve all other DNS records,
 nameservers, mail settings and the legacy `bravusbank.com` host.
 
 ## Verification and rollback
 
 The existing API's public `/actuator/health` returned HTTP 200 with `status=UP`.
 Render's build completed successfully. Published `index.html`, its JavaScript
-asset and SPA routes with a fresh query returned HTTP 200. Initial pre-deployment
-404 responses were cached at the CDN, so recheck plain routes after cache expiry.
+asset and SPA routes returned HTTP 200, including the plain root and login paths
+after the initial pre-deployment CDN 404 cache expired. During DNS cutover, this
+machine retained the old apex IP alongside the new IP in its resolver cache;
+connections to that old IP returned Cloudflare 1034. Connections to the new IP
+served the correct Render build. Let DNS caches expire without clearing browser
+sessions or altering security settings, then repeat normal public HTTPS checks.
 An empty JSON POST to `/api/auth/login` returned the same HTTP 403 through the
 proxy and directly from the backend, with `Cache-Control: no-store`. No real
 credentials, bank accounts or financial operations were used for testing.
