@@ -31,7 +31,7 @@ The API rule forwards to the existing service `srv-d89feirbc2fs73f5vqa0`.
 Keep it before the SPA fallback to prevent API errors from becoming HTML pages.
 Do not put credentials or database connection strings into frontend build variables.
 
-## Domain cutover gate
+## Custom domains
 
 `vantyxbank.com` and its `www` alias have been added to the frontend's custom
 domain setup. Render specifies A `216.24.57.1` for the apex and CNAME
@@ -44,12 +44,14 @@ the apex as Verified / Certificate Issued. An HTTPS request with DNS resolution
 explicitly pinned to the new IP returned HTTP 200, a Render response identifier,
 and the published `index-DFx8TpE4.js` asset reference, with normal TLS validation.
 
-The `www` CNAME update has been submitted but awaits its own GoDaddy hardware-key
-confirmation. Do not describe the whole migration as complete until this change,
-Render verification for `www`, and normal public HTTPS routing are checked.
+GoDaddy also confirmed the `www` CNAME update after its separate hardware-key
+verification. The CNAME is `vantyx-bank-frontend.onrender.com.`, TTL 3600, and
+Google's public DNS returned this target. Both custom domains now show Verified /
+Certificate Issued in Render. An HTTPS request for `www` pinned to the assigned
+Render IP returned HTTP 301 to `https://vantyxbank.com/`, with normal TLS validation.
 
-After verification, update only the `www` CNAME. Preserve all other DNS records,
-nameservers, mail settings and the legacy `bravusbank.com` host.
+All other DNS records, nameservers, mail settings and the legacy `bravusbank.com`
+host were preserved. No Sites project, D1 binding or customer record was deleted.
 
 ## Verification and rollback
 
@@ -59,8 +61,13 @@ asset and SPA routes returned HTTP 200, including the plain root and login paths
 after the initial pre-deployment CDN 404 cache expired. During DNS cutover, this
 machine retained the old apex IP alongside the new IP in its resolver cache;
 connections to that old IP returned Cloudflare 1034. Connections to the new IP
-served the correct Render build. Let DNS caches expire without clearing browser
-sessions or altering security settings, then repeat normal public HTTPS checks.
+served the correct Render build. After that system resolver cache expired, normal
+HTTPS requests to the apex, `/login`, `/register`, and `/app` returned HTTP 200,
+and the apex referenced the exact Render build asset. Edge continued to reuse an
+old route in an existing tab; another tab loaded the previous build. DNS/browser
+caches can therefore still affect individual clients during propagation. Preserve
+browser sessions and security settings while those caches expire. The published
+Render deployment and both certificates were verified independently of that cache.
 An empty JSON POST to `/api/auth/login` returned the same HTTP 403 through the
 proxy and directly from the backend, with `Cache-Control: no-store`. No real
 credentials, bank accounts or financial operations were used for testing.
@@ -88,7 +95,9 @@ Original DNS values, recorded before the cutover:
 | CNAME | `www` | `custom-domains.chatgpt.site.` | 3600 |
 
 If the cutover fails, restore these values and verify HTTPS against the previous
-deployment. Do not reset or import customer data as part of a DNS rollback.
+deployment. The preserved `https://bravusbank.com/` rollback host returned HTTP 200.
+Protected DNS changes require the owner's GoDaddy security key. Do not reset or
+import customer data as part of a DNS rollback.
 
 References: [Render rewrites](https://render.com/docs/redirects-rewrites) and
 [custom domains](https://render.com/docs/custom-domains).
