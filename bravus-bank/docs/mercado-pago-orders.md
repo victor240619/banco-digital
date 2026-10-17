@@ -35,6 +35,11 @@ MP_WEBHOOK_TOLERANCE=PT5M
 Credenciais devem ficar somente no gerenciador de segredos do ambiente. Nunca
 devem ser incluídas em `.env`, logs, banco de dados, frontend ou Git.
 
+A criação de cobrança também exige `MP_WEBHOOK_SECRET` preenchido. Sem essa
+chave, o backend retorna `MP_WEBHOOK_NOT_CONFIGURED` (HTTP 503) antes de gravar
+uma solicitação ou chamar o Mercado Pago. Isso impede gerar um QR Code pagável
+sem a configuração local necessária para validar sua confirmação.
+
 ## Ativação segura
 
 - Use primeiro as credenciais de teste da aplicação **Vantyx Bank**.

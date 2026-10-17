@@ -25,7 +25,7 @@ public class MercadoPagoPixOrderService {
             long amountCentavos,
             String description,
             String clientIdempotencyKey) {
-        properties.requireOrdersApi();
+        properties.requireWebhookVerification();
         validateAmount(amountCentavos);
         String key = normalizeIdempotencyKey(clientIdempotencyKey);
         String safeDescription = normalizeDescription(description);

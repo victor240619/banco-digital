@@ -4,6 +4,9 @@ import com.bravus.bank.db.entity.UserEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -17,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -85,6 +89,23 @@ class MercadoPagoPixOrderServiceTest {
 
         assertEquals("AMOUNT_LIMIT_EXCEEDED", exception.getCode());
         verify(gateway, never()).createPixOrder(any());
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "\t"})
+    void rejectsChargeWithoutWebhookSecretBeforePersistingOrCallingProvider(String secret) {
+        MercadoPagoProperties properties = new MercadoPagoProperties(
+                true, "test-token", secret, "https://api.mercadopago.com",
+                100, 1_000_000, Duration.ofMinutes(30), Duration.ofMinutes(5));
+        service = new MercadoPagoPixOrderService(properties, gateway, store);
+
+        MercadoPagoIntegrationException exception = assertThrows(
+                MercadoPagoIntegrationException.class,
+                () -> service.create("user", 5_000L, "Depósito", "client-key-1234567890"));
+
+        assertEquals("MP_WEBHOOK_NOT_CONFIGURED", exception.getCode());
+        verifyNoInteractions(store, gateway);
     }
 
     private MercadoPagoPixOrderEntity localOrder(long amount) {
