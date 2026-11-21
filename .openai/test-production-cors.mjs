@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 
+// Standalone Spring API only. The restored bank frontend uses the original
+// Sites Worker, whose CORS contract is separate and unchanged by this repair.
 // Read-only preflights: never sends credentials, transactions or account data.
 const endpoints = [
-  'https://vantyxbank.com/api/auth/login',
   'https://bravus-bank-api.onrender.com/api/auth/login',
 ];
 const trusted = [
@@ -39,4 +40,4 @@ for (const endpoint of endpoints) {
     console.log(`${response.status} ${new URL(endpoint).host} <- ${origin}`);
   }
 }
-console.log('Production CORS: 10 read-only checks passed. Real account access is not tested.');
+console.log('Standalone Spring CORS: 5 read-only checks passed. Real account access is not tested.');

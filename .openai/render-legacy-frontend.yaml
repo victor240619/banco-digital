@@ -10,7 +10,7 @@
     "staticPublishPath": "dist",
     "autoDeployTrigger": "off",
     "domains": ["bravusbank.com"],
-    "envVars": [{"key": "VITE_API_URL", "value": "https://vantyxbank.com/api"}],
+    "envVars": [{"key": "VITE_API_URL", "value": "/api"}],
     "routes": [
       {"type": "rewrite", "source": "/api/*", "destination": "https://bravus-bank-240619.victor2406.chatgpt.site/api/*"},
       {"type": "rewrite", "source": "/*", "destination": "/index.html"}

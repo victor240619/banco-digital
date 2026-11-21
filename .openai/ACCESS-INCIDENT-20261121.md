@@ -3,6 +3,14 @@
 Production baseline: master `47f612ca5488fa4e6accda7783448eb6cec729fc`.
 Repository: https://github.com/victor240619/banco-digital
 
+## Final outcome
+
+The owner confirmed account access on both vantyxbank.com and the installed
+application. The decisive fix restored the original existing-account API
+source; timeout, CORS and autofill corrections alone did not restore accounts.
+See ACCOUNT-API-RECOVERY.md for final routing and rollback. Earlier observations
+below are chronological evidence and do not describe the final API topology.
+
 ## Confirmed defects
 
 - Mobile APK still loads the legacy `https://bravusbank.com` origin. Its live frontend uses the canonical `https://vantyxbank.com/api`. Render's runtime CORS_ORIGIN still contained only historical DuckDNS/Vercel origins, despite render.yaml specifying both official domain pairs. OPTIONS from the legacy origin to the canonical API reproducibly returned 403 Invalid CORS request before login could run.
@@ -12,7 +20,7 @@ Repository: https://github.com/victor240619/banco-digital
 
 ## Changes
 
-- Restore Render CORS_ORIGIN to the exact four HTTPS origins already specified in render.yaml: vantyxbank.com, www.vantyxbank.com, bravusbank.com and www.bravusbank.com. No wildcard, authentication bypass, APK replacement, domain redirect or database migration. Environment-only deploy reuses backend commit b31e81ab64a0d8a46fe4e248a7fdd6c9cc8125fc. Deployment: dep-dc0i9hp7lnhs738oi3fg. `.openai/test-production-cors.mjs` checks all four origins through both API paths and rejects an unrelated origin using credential-free OPTIONS only.
+- Restore Render CORS_ORIGIN to the exact four HTTPS origins already specified in render.yaml: vantyxbank.com, www.vantyxbank.com, bravusbank.com and www.bravusbank.com. No wildcard, authentication bypass, APK replacement, domain redirect or database migration. Environment-only deploy reuses backend commit b31e81ab64a0d8a46fe4e248a7fdd6c9cc8125fc. Deployment: dep-dc0i9hp7lnhs738oi3fg. At that stage, credential-free OPTIONS verified both Spring paths. After the original-account routing restoration, `.openai/test-production-cors.mjs` intentionally checks only the separate standalone Spring API; the Worker has a separate unchanged CORS contract.
 - Allow 180 seconds for login only. The initial 120-second fix was insufficient: the canonical production route later took 121.11 seconds to return. Preserve the existing 20-second default for other requests. Do not automatically replay login or financial requests.
 - Show a waiting status after 10 seconds and a useful timeout message.
 - Add independent accessible visibility controls to all three password fields in the edited login/first-access screen. Values stay in the native form; toggles do not submit it.
@@ -64,3 +72,28 @@ For local testing only, copy `.openai/fixtures/login-autofill.html` to `bravus-b
 Verified: autofill without change events; native empty-field rejection with zero requests; independent password visibility without submission; one preserved-value login reaching a synthetic admin route; initial-password form remount with empty fields; mismatched confirmation rejected without an API call; corrected autofill completes first access with exactly two total requests (login plus password completion). No production login or password reset is performed by this fixture.
 
 Read-only account checks in the configured Supabase project found six active users, two admin and four user role assignments, main password hash lengths of 60 and zero enrolled numeric-access passwords. The stored hashes themselves were not selected or copied. The owner still needs to confirm the identifier and credential type used in the rejected production attempt; do not infer a successful account recovery from these checks.
+
+
+## Final account-source restoration
+
+The migrated frontend was consulting the independent Spring/Supabase account
+source instead of the original Sites Worker/D1. An owner-controlled check of
+the original API confirmed the existing credential; its new test session was
+logged out, and the loopback support server was stopped. No credential, token,
+account response or balance was copied into these records.
+
+With explicit owner approval, the primary Render /api/* rewrite was changed
+from https://bravus-bank-api.onrender.com/api/* to
+https://bravus-bank-240619.victor2406.chatgpt.site/api/* and saved. A page reload
+confirmed the persisted setting. Both primary and legacy frontends now select
+/api; the current public domain remains vantyxbank.com with unchanged DNS.
+
+The owner then confirmed website account access. Browser network metadata
+showed a successful login and HTTP 200 for protected admin dashboard, users,
+ledger and account-request endpoints at vantyxbank.com/admin. Finally, the
+owner closed/reopened the physical installed application and confirmed that
+its account also opened. No password reset, role grant, balance migration or
+money transfer was performed. Ordinary authentication/session audit writes are
+expected. The separate Spring API, Supabase data, payment secrets and callback
+configuration were preserved. Pix/Payout operations are outside this access
+verification and must not be represented as approved or tested.

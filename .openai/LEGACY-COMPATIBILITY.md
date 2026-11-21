@@ -8,18 +8,18 @@ key or application ID is introduced.
 
 Render static service: srv-dc0oep6k1f9s739pmfb0 / vantyx-legacy-frontend.
 Public technical URL: https://vantyx-legacy-frontend.onrender.com.
-Current frontend source: b71f2367b142238d6a7f535bd0847fc13e205191.
-Deployment: dep-dc0okr59el5s73ep6qtg (Live).
+Current frontend source: 5efec7bf0b7f652af58799ef982637054386d386.
+Deployment: dep-dc0p5hm7bikc73bfl6eg (Live).
 Auto-deploy and PR previews are Off. Configuration is recorded separately in
 render-legacy-frontend.yaml; do not apply the root render.yaml to recreate it,
 because that unrelated blueprint also declares API/database resources.
 
-The updated frontend retains the canonical API already selected by the live
-legacy frontend. Its separate /api/* compatibility route must continue to
-reach the original Sites worker through its existing platform hostname. The
-Sites worker and Spring API are separate implementations with separate
-storage. Never silently replace that legacy endpoint with the Spring API,
-copy tokens between implementations, or migrate account data as a hosting fix.
+Both frontends now use VITE_API_URL=/api and rewrite /api/* to the original
+Sites worker at https://bravus-bank-240619.victor2406.chatgpt.site/api/*.
+This is the original existing-account source verified by the owner, restored
+with explicit authorization. The Sites worker and standalone Spring API have
+separate storage. Never copy tokens or migrate account data between them as
+a hosting fix. The current public domain and its DNS remain unchanged.
 
 Before any DNS change, normal browser access to the prepared static deployment
 rendered the corrected login. Its compatibility proxy returned the original
@@ -45,12 +45,13 @@ www-to-apex redirect affecting another installed origin.
 
 Normal browser access on the unchanged apex origin loaded the corrected app.
 Read-only browser resource inspection confirmed secure origin bravusbank.com,
-entry /assets/index-CCsG2VgQ.js, the 180-second login deadline and canonical API
-selection. No TLS warning was bypassed. The generated www alias is deliberately
-not pointed to Render; its verification error does not describe the migrated
-apex. Successful real customer/admin sign-in remains a separate acceptance gate:
-the owner now reports invalid credentials on the canonical API, so the original
-account source must be checked before any data-route change or password reset.
+entry /assets/index-Duf-LpiK.js, the 180-second login deadline and same-origin
+/api selection. No TLS warning was bypassed. The generated www alias is
+intentionally not pointed to Render; its verification error does not describe
+the migrated apex. After restoration, the owner confirmed successful account
+access on both the canonical website and the physical installed application.
+Protected canonical admin endpoints also returned HTTP 200. This acceptance
+covers access, not Pix transfers or payout-provider approval.
 
 Rollback restores A @ 162.159.143.30 with TTL 1800 and recreates A @
 172.66.3.26 with TTL 600 if removed. The original Sites deployment and its data
