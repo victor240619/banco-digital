@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { authService } from '../services/api';
 import Logo from '../components/Logo';
+import PasswordInput from '../components/PasswordInput';
 import { isAccountApp } from '../lib/appChannel';
 
 export default function Login() {
@@ -14,6 +15,16 @@ export default function Login() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [waitingForConnection, setWaitingForConnection] = useState(false);
+
+  useEffect(() => {
+    if (!loading) {
+      setWaitingForConnection(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setWaitingForConnection(true), 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   const canSubmit = form.username.trim().length > 0 && form.password.length > 0 && !loading;
 
@@ -43,7 +54,7 @@ export default function Login() {
       if (status === 400 || status === 401 || status === 403) {
         setError(message || 'CPF, e-mail/usuario ou senha incorretos.');
       } else if (err?.code === 'ECONNABORTED') {
-        setError('A conexão demorou demais. Tente novamente em instantes.');
+        setError('O serviço de acesso ainda não respondeu. Aguarde um instante e tente novamente; não é necessário alterar sua senha.');
       } else {
         setError(message || 'Não foi possível entrar agora. Verifique a conexão com a API.');
       }
@@ -123,6 +134,12 @@ export default function Login() {
             </div>
           )}
 
+          {loading && waitingForConnection && (
+            <p className="mb-5 text-sm text-ink-300" role="status" aria-live="polite">
+              Estamos conectando ao serviço de acesso. Isso pode levar até dois minutos. Aguarde nesta tela.
+            </p>
+          )}
+
           {passwordChange ? (
             <form onSubmit={completeInitialPassword} className="space-y-5">
               <div className="rounded-xl border border-gold-400/25 bg-gold-400/10 p-4 text-sm text-gold-100">
@@ -135,10 +152,9 @@ export default function Login() {
               </div>
               <div>
                 <label className="form-label" htmlFor="new-password">Nova senha</label>
-                <input
+                <PasswordInput
                   id="new-password"
                   className="form-input"
-                  type="password"
                   value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
                   required
@@ -149,10 +165,9 @@ export default function Login() {
               </div>
               <div>
                 <label className="form-label" htmlFor="confirm-new-password">Confirmar nova senha</label>
-                <input
+                <PasswordInput
                   id="confirm-new-password"
                   className="form-input"
-                  type="password"
                   value={confirmPassword}
                   onChange={(event) => setConfirmPassword(event.target.value)}
                   required
@@ -202,10 +217,9 @@ export default function Login() {
                   Esqueci minha senha
                 </Link>
               </div>
-              <input
+              <PasswordInput
                 id="password"
                 className="form-input"
-                type="password"
                 value={form.password}
                 onChange={updateField('password')}
                 placeholder="Digite uma das suas senhas"
