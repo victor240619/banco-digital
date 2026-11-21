@@ -18,6 +18,8 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.security.SecureRandom;
 import java.util.HashSet;
@@ -27,6 +29,7 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
     
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
@@ -110,9 +113,9 @@ public class AuthController {
                     .or(() -> normalizedLoginDocument != null && normalizedLoginDocument.length() == 11
                             ? userRepository.findByCpf(normalizedLoginDocument)
                             : java.util.Optional.empty())
-                    .orElseThrow(() -> new RuntimeException("User not found"));
-            if (!Boolean.TRUE.equals(user.getIsActive()) || !accessCredentialVerifier.matches(user, request.password())) {
-                throw new RuntimeException("Invalid credentials");
+                    .orElse(null);
+            if (user == null || !Boolean.TRUE.equals(user.getIsActive()) || !accessCredentialVerifier.matches(user, request.password())) {
+                return ResponseEntity.badRequest().body("Invalid username or password");
             }
             UserDetails userDetails = userDetailsService.loadUserByUsername(user.getUsername());
             String token = jwtService.generateToken(userDetails, user.getCredentialsVersion());
@@ -131,7 +134,16 @@ public class AuthController {
                     roles
             ));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Invalid username or password");
+            // Never log the request, credentials, exception message or database connection details.
+            Throwable cause = e;
+            for (int depth = 0; depth < 10 && cause.getCause() != null && cause.getCause() != cause; depth++) {
+                cause = cause.getCause();
+            }
+            log.error("Login service failure: type={}, causeType={}",
+                    e.getClass().getSimpleName(), cause.getClass().getSimpleName());
+            return ResponseEntity.status(503).body(java.util.Map.of(
+                    "code", "AUTH_SERVICE_UNAVAILABLE",
+                    "message", "O serviço de acesso está temporariamente indisponível. Tente novamente em instantes."));
         }
     }
     

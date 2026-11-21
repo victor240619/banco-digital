@@ -1,0 +1,19 @@
+{
+  "services": [{
+    "type": "web",
+    "name": "vantyx-legacy-frontend",
+    "runtime": "static",
+    "repo": "https://github.com/victor240619/banco-digital",
+    "branch": "fix/access-incident-20261121",
+    "rootDir": "bravus-bank-frontend",
+    "buildCommand": "npm ci && npm run build",
+    "staticPublishPath": "dist",
+    "autoDeployTrigger": "off",
+    "domains": ["bravusbank.com"],
+    "envVars": [{"key": "VITE_API_URL", "value": "/api"}],
+    "routes": [
+      {"type": "rewrite", "source": "/api/*", "destination": "https://bravus-bank-240619.victor2406.chatgpt.site/api/*"},
+      {"type": "rewrite", "source": "/*", "destination": "/index.html"}
+    ]
+  }]
+}

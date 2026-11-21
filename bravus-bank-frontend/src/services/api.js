@@ -88,11 +88,13 @@ export const authService = {
   login: async (username, password) => {
     authSession.clear();
     const attemptVersion = authSession.getVersion();
+    // A canonical production login took 121 seconds after inactivity.
+    // Apply the grace period only to login; never replay financial requests.
     const { data } = await api.post('/auth/login', {
       username,
       password,
       clientChannel: getAppClientChannel(),
-    });
+    }, { timeout: 180000 });
     if (data.token && !authSession.set(data, { expectedVersion: attemptVersion })) {
       await revokeServerSession(data.token, { reason: 'APP_BACKGROUND', keepalive: true });
       throw new Error('A tentativa de login foi encerrada porque o aplicativo saiu do primeiro plano. Entre novamente.');

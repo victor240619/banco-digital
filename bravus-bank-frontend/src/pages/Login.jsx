@@ -1,31 +1,45 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { authService } from '../services/api';
 import Logo from '../components/Logo';
+import PasswordInput from '../components/PasswordInput';
 import { isAccountApp } from '../lib/appChannel';
 
 export default function Login() {
   const navigate = useNavigate();
   const nativeApp = isAccountApp();
-  const [form, setForm] = useState({ username: '', password: '' });
   const [passwordChange, setPasswordChange] = useState(null);
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [waitingForConnection, setWaitingForConnection] = useState(false);
 
-  const canSubmit = form.username.trim().length > 0 && form.password.length > 0 && !loading;
+  useEffect(() => {
+    if (!loading) {
+      setWaitingForConnection(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setWaitingForConnection(true), 10000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   const onSubmit = async (event) => {
     event.preventDefault();
-    if (!canSubmit) return;
+    if (loading) return;
+    // Read native form values: password managers can fill without React change events.
+    const submitted = new FormData(event.currentTarget);
+    const username = String(submitted.get('username') || '').trim();
+    const password = String(submitted.get('password') || '');
+    if (!username || !password) {
+      setError('Informe seu usuário e sua senha de acesso.');
+      return;
+    }
 
     setError('');
     setLoading(true);
 
     try {
-      const response = await authService.login(form.username.trim(), form.password);
+      const response = await authService.login(username, password);
       const isAdmin = (response?.roles || []).includes('ROLE_ADMIN');
       navigate(isAdmin ? '/admin' : (response?.identityEvidenceRequired ? '/completar-identidade' : '/dashboard'), { replace: true });
     } catch (err) {
@@ -35,7 +49,6 @@ export default function Login() {
 
       if (payload?.code === 'INITIAL_PASSWORD_CHANGE_REQUIRED' && payload?.initialPasswordChangeToken) {
         setPasswordChange({ token: payload.initialPasswordChangeToken, expiresAt: payload.expiresAt });
-        setForm((current) => ({ ...current, password: '' }));
         setError('A senha inicial foi validada. Defina agora sua senha definitiva.');
         return;
       }
@@ -43,22 +56,21 @@ export default function Login() {
       if (status === 400 || status === 401 || status === 403) {
         setError(message || 'CPF, e-mail/usuario ou senha incorretos.');
       } else if (err?.code === 'ECONNABORTED') {
-        setError('A conexão demorou demais. Tente novamente em instantes.');
+        setError('O serviço de acesso ainda não respondeu. Aguarde um instante e tente novamente; não é necessário alterar sua senha.');
       } else {
-        setError(message || 'Não foi possível entrar agora. Verifique a conexão com a API.');
+        setError(message || 'Não foi possível comunicar com o serviço de acesso. Tente novamente em instantes.');
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const updateField = (field) => (event) => {
-    setForm((current) => ({ ...current, [field]: event.target.value }));
-  };
-
   const completeInitialPassword = async (event) => {
     event.preventDefault();
     if (!passwordChange || loading) return;
+    const submitted = new FormData(event.currentTarget);
+    const newPassword = String(submitted.get('newPassword') || '');
+    const confirmPassword = String(submitted.get('confirmPassword') || '');
     if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(newPassword)) {
       setError('Use no minimo 8 caracteres, com letra maiuscula, minuscula e numero.');
       return;
@@ -77,8 +89,6 @@ export default function Login() {
       setError(payload?.message || 'A troca da senha inicial expirou. Entre novamente.');
       if (payload?.code === 'INITIAL_PASSWORD_CHANGE_INVALID') {
         setPasswordChange(null);
-        setNewPassword('');
-        setConfirmPassword('');
       }
     } finally {
       setLoading(false);
@@ -113,7 +123,7 @@ export default function Login() {
             <p className="mt-1.5 text-sm text-ink-300">
               {passwordChange
                 ? 'A senha inicial nao libera o painel. Defina uma senha forte para concluir o primeiro acesso.'
-                : 'Use sua senha alfanumerica ou sua senha numerica de 8 digitos.'}
+                : 'Use sua senha de acesso cadastrada. A senha numérica precisa ter sido configurada na conta.'}
             </p>
           </div>
 
@@ -123,8 +133,14 @@ export default function Login() {
             </div>
           )}
 
+          {loading && waitingForConnection && (
+            <p className="mb-5 text-sm text-ink-300" role="status" aria-live="polite">
+              Estamos conectando ao serviço de acesso. Isso pode levar até três minutos. Aguarde nesta tela.
+            </p>
+          )}
+
           {passwordChange ? (
-            <form onSubmit={completeInitialPassword} className="space-y-5">
+            <form key="initial-password" onSubmit={completeInitialPassword} className="space-y-5">
               <div className="rounded-xl border border-gold-400/25 bg-gold-400/10 p-4 text-sm text-gold-100">
                 <div className="flex items-center gap-2 font-medium">
                   <KeyRound className="h-4 w-4" /> Primeiro acesso protegido
@@ -135,12 +151,11 @@ export default function Login() {
               </div>
               <div>
                 <label className="form-label" htmlFor="new-password">Nova senha</label>
-                <input
+                <PasswordInput
                   id="new-password"
+                  name="newPassword"
                   className="form-input"
-                  type="password"
-                  value={newPassword}
-                  onChange={(event) => setNewPassword(event.target.value)}
+                  defaultValue=""
                   required
                   minLength={8}
                   autoComplete="new-password"
@@ -149,12 +164,11 @@ export default function Login() {
               </div>
               <div>
                 <label className="form-label" htmlFor="confirm-new-password">Confirmar nova senha</label>
-                <input
+                <PasswordInput
                   id="confirm-new-password"
+                  name="confirmPassword"
                   className="form-input"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  defaultValue=""
                   required
                   minLength={8}
                   autoComplete="new-password"
@@ -170,8 +184,6 @@ export default function Login() {
                 className="btn-ghost w-full"
                 onClick={() => {
                   setPasswordChange(null);
-                  setNewPassword('');
-                  setConfirmPassword('');
                   setError('');
                 }}
               >
@@ -179,15 +191,15 @@ export default function Login() {
               </button>
             </form>
           ) : (
-          <form onSubmit={onSubmit} className="space-y-5">
+          <form key="login" onSubmit={onSubmit} className="space-y-5">
             <div>
               <label className="form-label" htmlFor="username">CPF, e-mail ou usuario</label>
               <input
                 id="username"
+                name="username"
                 className="form-input"
                 type="text"
-                value={form.username}
-                onChange={updateField('username')}
+                defaultValue=""
                 placeholder="Digite seu CPF, e-mail ou usuario"
                 required
                 autoFocus
@@ -202,19 +214,18 @@ export default function Login() {
                   Esqueci minha senha
                 </Link>
               </div>
-              <input
+              <PasswordInput
                 id="password"
+                name="password"
                 className="form-input"
-                type="password"
-                value={form.password}
-                onChange={updateField('password')}
+                defaultValue=""
                 placeholder="Digite uma das suas senhas"
                 required
                 autoComplete="current-password"
               />
             </div>
 
-            <button type="submit" disabled={!canSubmit} className="btn-primary w-full !py-3">
+            <button type="submit" disabled={loading} className="btn-primary w-full !py-3">
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
