@@ -30,23 +30,27 @@ The API remains on Render Free: the owner declined the paid upgrade. The
 workspace showed 1 of 2 included domains before this compatibility binding,
 then 2 of 2. No paid compute instance is created for this static frontend.
 
-## DNS confirmation gate
+## DNS cutover verified
 
-GoDaddy currently requires the owner's security-key confirmation for the
-first apex A record update. Until the saved records are observed, do not claim
-the app cutover is complete. The pre-change 19-record DNS snapshot is retained
-locally outside Git.
+The owner completed both GoDaddy security-key confirmations. The control panel
+now contains only A @ 216.24.57.1; the old apex record was removed. Google's
+public DNS independently returned only 216.24.57.1. Render reports the apex
+Verified and Certificate Issued. The pre-change 19-record DNS snapshot is
+retained locally outside Git.
 
 Authorized apex changes: A @ 162.159.143.30, TTL 1800, becomes 216.24.57.1;
 then remove A @ 172.66.3.26, TTL 600. Leave www, mail, NS, SOA and TXT records
 unchanged. Keeping www on its original hosting avoids Render's generated
 www-to-apex redirect affecting another installed origin.
 
-After confirmation, verify authoritative DNS, valid TLS without bypassing a
-warning, /app and /login on the unchanged apex origin, the 180-second login
-deadline in the served bundle, and the original protected API's unauthenticated
-rejection through /api/*. Successful real customer/admin sign-in is a separate
-acceptance gate.
+Normal browser access on the unchanged apex origin loaded the corrected app.
+Read-only browser resource inspection confirmed secure origin bravusbank.com,
+entry /assets/index-CCsG2VgQ.js, the 180-second login deadline and canonical API
+selection. No TLS warning was bypassed. The generated www alias is deliberately
+not pointed to Render; its verification error does not describe the migrated
+apex. Successful real customer/admin sign-in remains a separate acceptance gate:
+the owner now reports invalid credentials on the canonical API, so the original
+account source must be checked before any data-route change or password reset.
 
 Rollback restores A @ 162.159.143.30 with TTL 1800 and recreates A @
 172.66.3.26 with TTL 600 if removed. The original Sites deployment and its data
