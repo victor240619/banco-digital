@@ -1,0 +1,38 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Teste local de preenchimento automático</title></head><body><div id="root"></div><script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import Login from './src/pages/Login.jsx';
+import api from './src/services/api.js';
+import './src/index.css';
+let requests=0; let initialPassword=false;
+api.defaults.adapter=async config=>{
+  requests++;
+  const data=JSON.parse(config.data);
+  const completing=config.url==='/auth/initial-password/complete';
+  const correct=completing ? data.newPassword==='Synthetic-Only-83' && data.initialPasswordChangeToken==='synthetic-initial-only' : data.username==='fixture.autofill' && data.password==='Synthetic-Only-83';
+  document.getElementById('qa-status').textContent=`Requisições: ${requests}; dados preservados: ${correct}`;
+  if(!correct)throw new Error('Synthetic autofill data lost');
+  if(initialPassword && !completing)throw {response:{status:403,data:{code:'INITIAL_PASSWORD_CHANGE_REQUIRED',initialPasswordChangeToken:'synthetic-initial-only'}}};
+  return {data:{token:'synthetic-session-only',username:'fixture.autofill',roles:['ROLE_ADMIN']},status:200,statusText:'OK',headers:{},config};
+};
+function App(){return React.createElement(React.Fragment,null,
+  React.createElement('button',{type:'button',onClick:()=>{initialPassword=true;}},'Testar primeiro acesso'),
+  React.createElement('button',{type:'button',onClick:()=>{
+    document.getElementById('username').value='fixture.autofill';
+    document.getElementById('password').value='Synthetic-Only-83';
+  }},'Simular preenchimento automático'),
+  React.createElement('button',{type:'button',onClick:()=>{
+    document.getElementById('new-password').value='Synthetic-Only-83';
+    document.getElementById('confirm-new-password').value='Different-Only-72';
+  }},'Simular novas senhas divergentes'),
+  React.createElement('button',{type:'button',onClick:()=>{
+    document.getElementById('confirm-new-password').value='Synthetic-Only-83';
+  }},'Corrigir confirmação sintética'),
+  React.createElement('p',{id:'qa-status'},'Requisições: 0'),
+  React.createElement(MemoryRouter,{initialEntries:['/login']},React.createElement(Routes,null,
+    React.createElement(Route,{path:'/login',element:React.createElement(Login)}),
+    React.createElement(Route,{path:'/admin',element:React.createElement('h1',null,'Acesso administrativo sintético confirmado')}),
+    React.createElement(Route,{path:'/dashboard',element:React.createElement('h1',null,'Primeiro acesso sintético confirmado')}))));
+} createRoot(document.getElementById('root')).render(React.createElement(App));
+</script></body></html>
