@@ -46,13 +46,14 @@ without automatic replay, and unrelated banking requests retain 20 seconds.
 Waiting feedback now says up to three minutes; fallback text does not attribute
 the failure to the customer's internet.
 
-The owner declined a paid API instance. That selection was canceled before
-saving. A prepared legacy static frontend was subsequently suspended, and its
-unverified domain binding removed after the owner clarified that recovery must
-focus on the current domain. No legacy DNS change was confirmed: both original
-apex A records were verified unchanged after canceling the GoDaddy confirmation.
-No database, account, password or balance migration occurred. The original APK
-has not been replaced. Real account sign-in remains a separate acceptance gate.
+The owner declined a paid API instance; that selection was canceled before
+saving. After clarifying that both installed app and current browser were
+affected, the owner explicitly authorized the free compatibility service for
+the installed app's hardcoded legacy origin. Its configuration, API preservation
+contract, DNS confirmation gate and rollback are recorded in
+LEGACY-COMPATIBILITY.md. No database, account, password or balance migration
+occurred. The original APK has not been replaced. Real account sign-in remains
+a separate acceptance gate.
 Rollback for this timeout follow-up alone: redeploy frontend commit
 8e1539661c758acd30c8e98d872f88b4ef9942ba; retain the API and corrected CORS setting.
 
