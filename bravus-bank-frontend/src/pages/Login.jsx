@@ -58,7 +58,7 @@ export default function Login() {
       } else if (err?.code === 'ECONNABORTED') {
         setError('O serviço de acesso ainda não respondeu. Aguarde um instante e tente novamente; não é necessário alterar sua senha.');
       } else {
-        setError(message || 'Não foi possível entrar agora. Verifique a conexão com a API.');
+        setError(message || 'Não foi possível comunicar com o serviço de acesso. Tente novamente em instantes.');
       }
     } finally {
       setLoading(false);
@@ -135,7 +135,7 @@ export default function Login() {
 
           {loading && waitingForConnection && (
             <p className="mb-5 text-sm text-ink-300" role="status" aria-live="polite">
-              Estamos conectando ao serviço de acesso. Isso pode levar até dois minutos. Aguarde nesta tela.
+              Estamos conectando ao serviço de acesso. Isso pode levar até três minutos. Aguarde nesta tela.
             </p>
           )}
 

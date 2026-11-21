@@ -27,8 +27,11 @@ try {
   api.defaults.adapter = async (config) => {
     calls++;
     assert.equal(config.headers.Authorization, undefined, 'old tokens must not reach login');
-    // Render production startup observed at 87 seconds. Simulate its timeout boundary without waiting.
-    assert.ok(config.timeout > 87000, 'login must survive the observed cold start');
+    // Canonical production login took 121.11 seconds on 2026-11-21.
+    // Simulate that observed response boundary without waiting or real credentials.
+    if (config.timeout < 121110) {
+      throw Object.assign(new Error('Observed cold start exceeds client timeout'), { code: 'ECONNABORTED' });
+    }
     return { data: { token: 'synthetic-session', username: 'fixture', roles: ['ROLE_ADMIN'] },
       status: 200, statusText: 'OK', config, headers: {} };
   };

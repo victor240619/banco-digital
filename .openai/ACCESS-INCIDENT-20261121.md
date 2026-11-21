@@ -13,7 +13,7 @@ Repository: https://github.com/victor240619/banco-digital
 ## Changes
 
 - Restore Render CORS_ORIGIN to the exact four HTTPS origins already specified in render.yaml: vantyxbank.com, www.vantyxbank.com, bravusbank.com and www.bravusbank.com. No wildcard, authentication bypass, APK replacement, domain redirect or database migration. Environment-only deploy reuses backend commit b31e81ab64a0d8a46fe4e248a7fdd6c9cc8125fc. Deployment: dep-dc0i9hp7lnhs738oi3fg. `.openai/test-production-cors.mjs` checks all four origins through both API paths and rejects an unrelated origin using credential-free OPTIONS only.
-- Allow 120 seconds for login only. Preserve the existing 20-second default for other requests. Do not automatically replay login or financial requests.
+- Allow 180 seconds for login only. The initial 120-second fix was insufficient: the canonical production route later took 121.11 seconds to return. Preserve the existing 20-second default for other requests. Do not automatically replay login or financial requests.
 - Show a waiting status after 10 seconds and a useful timeout message.
 - Add independent accessible visibility controls to all three password fields in the edited login/first-access screen. Values stay in the native form; toggles do not submit it.
 - Read login and first-access values with native FormData, retaining browser-required validation. Use distinct form keys so a previous password or visibility state cannot carry into first-access fields. Do not retain passwords in React state. Describe numeric access as requiring prior enrollment.
@@ -33,6 +33,28 @@ Mobile follow-up: the environment-only deployment succeeded in 1m46s. `node --us
 The prior runtime CORS list was `https://bravusbnk.duckdns.org,https://bravus-bank.vercel.app,https://bravus-bank-*.vercel.app`. Record it for incident traceability only: restoring it would reintroduce the confirmed mobile outage. An application rollback should retain the corrected four-domain runtime value.
 
 Rollback: redeploy the baseline commit above for both Render services. All database migrations remain byte-for-byte unchanged. The current free instance can still sleep; increasing the client timeout does not remove that infrastructure limitation. No paid upgrade is authorized by this change.
+
+## Canonical domain timeout follow-up
+
+At 09:04:52 BRT on 2026-11-21, a nonexistent synthetic login sent through
+https://vantyxbank.com/api/auth/login took 121.11 seconds to return the expected
+400 response. This is a measured server-path latency exceeding the published
+120-second client deadline. The updated deterministic adapter reproduces that
+boundary without waiting: the prior code fails with ECONNABORTED, while the
+180-second login deadline allows it. Transport errors and timeouts still reject
+without automatic replay, and unrelated banking requests retain 20 seconds.
+Waiting feedback now says up to three minutes; fallback text does not attribute
+the failure to the customer's internet.
+
+The owner declined a paid API instance. That selection was canceled before
+saving. A prepared legacy static frontend was subsequently suspended, and its
+unverified domain binding removed after the owner clarified that recovery must
+focus on the current domain. No legacy DNS change was confirmed: both original
+apex A records were verified unchanged after canceling the GoDaddy confirmation.
+No database, account, password or balance migration occurred. The original APK
+has not been replaced. Real account sign-in remains a separate acceptance gate.
+Rollback for this timeout follow-up alone: redeploy frontend commit
+8e1539661c758acd30c8e98d872f88b4ef9942ba; retain the API and corrected CORS setting.
 
 ## Browser autofill regression fixture
 
